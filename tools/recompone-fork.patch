@@ -73,6 +73,89 @@ index 6027c49..aa6dcf3 100644
  
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
+diff --git a/RecompOne.Runtime/Host/FrameClock.cs b/RecompOne.Runtime/Host/FrameClock.cs
+index edd260b..4dc9fc6 100644
+--- a/RecompOne.Runtime/Host/FrameClock.cs
++++ b/RecompOne.Runtime/Host/FrameClock.cs
+@@ -9,9 +9,28 @@ internal static class FrameClock
+     static readonly Stopwatch _clock = Stopwatch.StartNew();
+     static double _nextFrameMs;
+ 
++    // [jetmoto-fork] Harness runs want to get through a race as fast as the
++    // host allows, not at 60 Hz. RECOMPONE_UNTHROTTLE=1 skips the limiter, and
++    // headless/offscreen runs default to it since those are harness runs.
++    // The vsync counter stays wall-clock based, so anything the game times off
++    // VSync(-1) still takes the same real time -- this only stops the sleep.
++    static readonly bool Unthrottled = Check();
++
++    static bool Check()
++    {
++        static bool On(string k)
++        {
++            var v = Environment.GetEnvironmentVariable(k);
++            return v == "1" || string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
++        }
++        return On("RECOMPONE_UNTHROTTLE") || On("RECOMPONE_HEADLESS") || On("RECOMPONE_OFFSCREEN");
++    }
++
+     //maybe not the best but it seens to work for now
+     public static void Throttle()
+     {
++        if (Unthrottled) return;
++
+         _nextFrameMs += FrameMs;
+         double now = _clock.Elapsed.TotalMilliseconds;
+         double wait = _nextFrameMs - now;
+diff --git a/RecompOne.Runtime/Host/RamDump.cs b/RecompOne.Runtime/Host/RamDump.cs
+new file mode 100644
+index 0000000..86a9225
+--- /dev/null
++++ b/RecompOne.Runtime/Host/RamDump.cs
+@@ -0,0 +1,44 @@
++using RecompOne.Runtime.Memory;
++
++namespace RecompOne.Runtime.Host;
++
++/// <summary>
++/// [jetmoto-fork] Periodic RAM snapshots, so the harness can locate game state
++/// (lap counter, position, timer) by diffing across a race rather than by
++/// reverse engineering the HUD code.
++///
++///   RECOMPONE_RAMDUMP_DIR=&lt;dir&gt;    where to write ram-NNNN.bin
++///   RECOMPONE_RAMDUMP_EVERY=&lt;n&gt;    presented frames between snapshots (default 600)
++///
++/// 2 MB per snapshot, so keep the interval coarse for long runs.
++/// </summary>
++public static class RamDump
++{
++    static string? _dir;
++    static int _every = 600, _frame, _count;
++    static bool _init;
++
++    public static void Tick(IMemory? mem)
++    {
++        if (!_init)
++        {
++            _init = true;
++            _dir = Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_DIR");
++            if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_EVERY"), out var n) && n > 0)
++                _every = n;
++            if (!string.IsNullOrEmpty(_dir)) Directory.CreateDirectory(_dir);
++        }
++        if (string.IsNullOrEmpty(_dir) || mem is not PSMemory ps) return;
++        if (_frame++ % _every != 0) return;
++
++        try
++        {
++            var path = Path.Combine(_dir!, $"ram-{_count:D4}.bin");
++            using var f = File.Create(path);
++            f.Write(ps.Ram);
++            Console.Error.WriteLine($"[RamDump] frame {_frame - 1} -> {path}");
++            _count++;
++        }
++        catch (Exception e) { Console.Error.WriteLine($"[RamDump] failed: {e.Message}"); }
++    }
++}
 diff --git a/RecompOne.Runtime/Host/ScriptedInput.cs b/RecompOne.Runtime/Host/ScriptedInput.cs
 new file mode 100644
 index 0000000..df692ec
@@ -504,7 +587,7 @@ index a46e7eb..348766c 100644
      public Vector4 BackdropColor = new(0.25f, 0.15f, 0.15f, 1f);
      public Vector4 WriteColor = new(1f, 0f, 0f, 0.75f);
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..9772e8f 100644
+index fdf7b6b..5d2f09e 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -49,7 +49,19 @@ public static class Runtime
@@ -528,7 +611,7 @@ index fdf7b6b..9772e8f 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -87,6 +99,10 @@ public static class Runtime
+@@ -87,6 +99,11 @@ public static class Runtime
          Audio.Attach(Spu);
          FrameClock.Throttle();
          Sdk.LibCd.Tick();
@@ -536,6 +619,7 @@ index fdf7b6b..9772e8f 100644
 +        // otherwise clobber the scripted state, and before the pad buffers are
 +        // refreshed from it.
 +        Host.ScriptedInput.Tick();
++        Host.RamDump.Tick(Mem);
          if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
      }
