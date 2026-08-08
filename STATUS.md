@@ -86,10 +86,10 @@ Two things that were masking this:
    unmapped calls in the race code.
 2. Then find the lap counter with `harness/findcounter.py` and assert on it
    with `harness/verify-lap.py`.
-2. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
+3. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
    print nothing and so need shape-based identification.
-3. Check the CueBin warning about reads outside the data track (lba
-   34186-34195) before trusting CD-DA music.
+4. Work out why offscreen rendering costs ~6x headless, since visual
+   verification of a race needs it.
 
 ## Harness
 

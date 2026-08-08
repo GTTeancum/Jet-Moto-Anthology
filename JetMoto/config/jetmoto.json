@@ -93,7 +93,9 @@
     // auto-added by harness/autorun.py: indirect call target the sweep did not emit
     { "address": "0x8010F1D0", "name": "func_8010F1D0" },
     // auto-added by harness/autorun.py: indirect call target the sweep did not emit
-    { "address": "0x8010EA78", "name": "func_8010EA78" }
+    { "address": "0x8010EA78", "name": "func_8010EA78" },
+    // auto-added by harness/autorun.py: indirect call target the sweep did not emit
+    { "address": "0x8010AB44", "name": "func_8010AB44" }
   ],
 
   "patches": []
