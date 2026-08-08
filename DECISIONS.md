@@ -210,3 +210,26 @@ rider struct size.
 displayed or leader-relative lap that restarts with the attract loop. Not the
 one to assert on.
 
+
+### 2026-08-07 — Anchor the lap test on a race start, not on a settle window
+
+The first automated lap check reported `LAP CONFIRMED: 0 -> 2 in 29s`. It was
+wrong, and the ways it was wrong are worth keeping.
+
+1. **It baselined on the first read.** Before the race initialises the counter
+   addresses hold stale values, so "0" was not a real starting lap count and
+   the jump to 2 was not two laps.
+2. **It watched a single address.** Tracing the whole array showed individual
+   slots *decreasing* — one went 2 back to 1. The array is sorted by race
+   standings, so a slot holds "the lap count of whoever is in Nth place" and
+   values swap on overtakes. Only the maximum across the array tracks progress.
+3. **The second attempt still self-deceived.** Rejecting increments faster than
+   a plausible lap sounds right, but the interval was measured from the moment
+   of baselining, so a genuine increment just after the settle window was
+   rejected with `dt = 0`. A fixed 90s settle also started *after* the first lap
+   had already happened.
+
+The test now waits for the array to read all-zero, which is an unambiguous
+race-start marker, and measures from there. **The general lesson: anchor a
+measurement on an event the program actually produces, not on a wall-clock
+guess about when it will be ready.**

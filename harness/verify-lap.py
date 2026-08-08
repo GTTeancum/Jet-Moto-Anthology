@@ -58,12 +58,13 @@ def main():
 
     mask = (1 << args.width) - 1
     latest = {}
-    baseline = None
-    peak, peak_ts, history = None, None, []
+    zero_run, race_start = 0, None
+    peak, history = 0, []
     t0 = time.time()
 
     print(f"watching {len(addrs)} address(es) ({args.width}-bit) for {args.laps} lap(s); "
-          f"ignoring the first {args.settle}s, {args.timeout}s budget")
+          f"{args.timeout}s budget")
+    print("  waiting for the array to read all-zero, which marks a race start")
     p = subprocess.Popen(["dotnet", str(PORT), str(CUE)],
                          cwd=ROOT, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True,
@@ -86,30 +87,34 @@ def main():
             # actually tracks race progress.
             hi = max(latest.values())
 
-            # Settle first: before the race initialises these hold stale values,
-            # which is exactly what made a naive first-read baseline report a
-            # bogus "0 -> 2 in 29s".
-            if now < args.settle:
-                continue
-            if baseline is None:
-                baseline, peak, peak_ts = hi, hi, time.time()
-                print(f"  t+{now:6.1f}s  baseline {baseline} {sorted(latest.values())}")
+            # Anchor on an unambiguous event rather than a settle window: at a
+            # race start every counter reads zero. Baselining on the first read
+            # instead is what produced a bogus "0 -> 2 in 29s" when the array
+            # still held pre-race values.
+            if race_start is None:
+                if hi == 0:
+                    zero_run += 1
+                    if zero_run >= 3:
+                        race_start = time.time()
+                        peak = 0
+                        print(f"  t+{now:6.1f}s  race start detected (all zero)")
+                else:
+                    zero_run = 0
                 continue
 
             if hi > peak:
-                dt = time.time() - peak_ts
-                history.append((round(now, 1), hi, round(dt, 1)))
+                dt = time.time() - race_start
+                history.append((f"lap {hi}", f"t+{dt:.0f}s"))
                 print(f"  t+{now:6.1f}s  max {peak} -> {hi} "
-                      f"(+{dt:.0f}s) {sorted(latest.values())}")
-                if dt < args.min_lap_seconds:
-                    print(f"      rejected: {dt:.0f}s is too fast to be a lap")
-                    baseline = hi   # resync and keep watching
-                peak, peak_ts = hi, time.time()
-
-            if peak - baseline >= args.laps:
-                print(f"\nLAP CONFIRMED: max lap count {baseline} -> {peak}; "
-                      f"increments at {history}")
-                return 0
+                      f"({dt:.0f}s into the race) {sorted(latest.values())}")
+                peak = hi
+                if peak >= args.laps:
+                    if dt < args.min_lap_seconds * peak:
+                        print(f"      rejected: {dt:.0f}s for {peak} lap(s) is implausibly fast")
+                        continue
+                    print(f"\nLAP CONFIRMED: {peak} lap(s) completed, "
+                          f"{dt:.0f}s into the race; {history}")
+                    return 0
     finally:
         p.kill()
 
