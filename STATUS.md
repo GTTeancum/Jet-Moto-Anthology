@@ -18,7 +18,7 @@ of completing laps as a rider.
 | 4 | Game progresses past init | **done** |
 | 5 | Title screen renders | **done** — verified from an offscreen capture |
 | 6 | Menus navigable under scripted input | **done** |
-| 7 | A race loads | **done** — full ISLAND1 track set loaded, race code running |
+| 7 | A race loads | **done** — races render in full 3D, screenshot-verified |
 | 8 | **Lap counter increments** — the goal | in progress |
 
 ## Where things stand
@@ -53,24 +53,41 @@ game was waiting on rather than by inspection. Details in `DECISIONS.md`.
 | libcdstream routed | 211 |
 | unthrottled | **2016** (~100 fps) |
 
-Offscreen rendering costs a lot: ~9 fps against ~55 headless. Lap counting does
-not need rendering, so verification runs headless and visual checks are done
-separately.
+Offscreen rendering *was* ~9 fps against ~55 headless. That was the CueBin log
+flood, not the renderer: with it silenced, offscreen runs at several hundred
+fps and visual verification is cheap.
 
 The apparent "3 fps" was never the recompiled code. It was an unrouted
 `StGetNext` spinning `0x800000` times inside another `0x800000`-iteration
 retry, and after that a deliberate 60 Hz frame limiter. Stack sampling with
 `dotnet-stack` found both; guessing at the memory path found nothing.
 
-## Race status
+## Gameplay confirmed
+
+Screenshots from an offscreen run show real gameplay: AI riders in the DARK
+track underpass, and an alpine start line with the starting gantry lit green,
+the full pack, spray particles and sponsor banners. GTE transforms, texturing
+and the display list all work.
+
+Left alone the game runs its **attract demo**, cycling title -> AI race ->
+title. That is the "let the AI race" outcome with no menu navigation needed at
+all. With 8 scripted confirms it instead enters a real race on DARK and stays
+there, with no input after the race begins.
+
+RAM sampling during a race shows 20-41% of memory changing between snapshots,
+consistent with a live simulation.
+
+## How it got unstuck
 
 The complete ISLAND1 race set loads — `.FLR` collision, `.CAM` camera, `.TPT`,
-`.TMS` textures, `.DMD` models, `VCORE.VAB` sound bank, overview map. Execution
-then enters the race code and faults on `unmapped call: 0x8010AB44`, ten frames
-deep in gameplay functions. That is the ordinary indirect-call gap that
-`autorun.py` fixes on its own, now that it can drive the menus (`--input`).
+`.TMS` textures, `.DMD` models, `VCORE.VAB` sound bank, overview map. Nineteen secondary entry points had to be added to `functions[]`, each found by
+running until it faulted. `RECOMPONE_COLLECT_UNMAPPED=1` turns an unmapped call
+into a logged skip rather than a crash, so a whole run's worth surfaces at once
+instead of one per recompile — discovery only, since behaviour past the first
+skip is not trustworthy. A normal run now survives its full timeout with zero
+exceptions.
 
-Two things that were masking this:
+Three things were masking progress:
 
 - After the intro finished streaming, nothing bounded `LibCdStream`, so it
   walked off the end of the disc forever (observed at lba 1.4 million) and
@@ -79,6 +96,9 @@ Two things that were masking this:
 - RAM snapshots looked static between samples, which suggested nothing was
   happening. That was misleading: the run had crashed, and static menu screens
   legitimately change only ~25 bytes per sample anyway.
+- The scripted press sequence was far too long. 76 confirms started a race and
+  then aborted back to the title repeatedly, visible as `TITLE.BS` reloading
+  between track loads. Eight confirms is right.
 
 ## Next
 
@@ -88,8 +108,8 @@ Two things that were masking this:
    with `harness/verify-lap.py`.
 3. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
    print nothing and so need shape-based identification.
-4. Work out why offscreen rendering costs ~6x headless, since visual
-   verification of a race needs it.
+4. Decide whether "a rider completes laps" is satisfied by the AI, or whether
+   the player bike must be driven — the current script leaves the player idle.
 
 ## Harness
 
