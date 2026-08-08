@@ -53,17 +53,42 @@ public static class InputProbe
 
     static int _q1, _q2;
 
-    /// <summary>Menus query "was this pressed" through these; are they called?</summary>
-    public static void AfterQuery(CpuContext c, IMemory m)
+    /// <summary>
+    /// func_800EF9D8(button, mode) is the game's "was this pressed" query --
+    /// the boot state machine calls it as (0x0B, 0x02). It reaches the edge
+    /// word through func_800EF4CC. Logging both says whether the menus are
+    /// asking, and what answer they get.
+    /// </summary>
+    static uint _lastA0, _lastA1;
+    static readonly System.Collections.Generic.HashSet<uint> _seenIds = new();
+
+    /// <summary>
+    /// a0 is a button id and a1 a mode; the function clobbers both, so they
+    /// have to be captured before it runs.
+    /// </summary>
+    public static void BeforeButtonQuery(CpuContext c, IMemory m)
     {
-        if (++_q1 % 300 == 1)
-            System.Console.Error.WriteLine($"[Query] func_800EF26C called {_q1}x, returned 0x{c.V0:X8}");
+        _lastA0 = c.A0 & 0xFF;
+        _lastA1 = c.A1 & 0xFFFF;
+        if (_seenIds.Add(_lastA0))
+            System.Console.Error.WriteLine(
+                $"[Query] first sighting of button id 0x{_lastA0:X2} (mode {_lastA1})");
     }
 
-    public static void AfterQuery2(CpuContext c, IMemory m)
+    public static void AfterButtonQuery(CpuContext c, IMemory m)
     {
-        if (++_q2 % 300 == 1)
-            System.Console.Error.WriteLine($"[Query] func_800EF2AC called {_q2}x, returned 0x{c.V0:X8}");
+        _q1++;
+        if ((c.V0 & 0xFF) != 0)
+            System.Console.Error.WriteLine(
+                $"[Query] HIT id=0x{_lastA0:X2} mode={_lastA1} -> 0x{c.V0 & 0xFF:X2}");
+    }
+
+    public static void AfterEdgeRead(CpuContext c, IMemory m)
+    {
+        _q2++;
+        if (c.V0 != 0 || _q2 % 600 == 1)
+            System.Console.Error.WriteLine(
+                $"[Query] func_800EF4CC #{_q2} -> 0x{c.V0:X8}");
     }
 
     public static void AfterPadParse(CpuContext c, IMemory m)

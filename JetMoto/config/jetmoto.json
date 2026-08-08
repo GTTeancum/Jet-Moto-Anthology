@@ -131,10 +131,12 @@
   "patches": [
     { "function": "func_800EF098", "mode": "post",
       "target": "Recompiled.InputProbe.AfterPadParse" },
-    { "function": "func_800EF26C", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterQuery" },
-    { "function": "func_800EF2AC", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterQuery2" },
+    { "function": "func_800EF9D8", "mode": "pre",
+      "target": "Recompiled.InputProbe.BeforeButtonQuery" },
+    { "function": "func_800EF9D8", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterButtonQuery" },
+    { "function": "func_800EF4CC", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterEdgeRead" },
     { "function": "func_800EEE60", "mode": "post",
       "target": "Recompiled.InputProbe.AfterInputFrame" }
   ]

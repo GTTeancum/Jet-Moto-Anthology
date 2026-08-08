@@ -76,23 +76,39 @@ functions, and **every stage is correct**:
 | BIOS pad buffer | `0x801EA0D8` | `0xFFBF4100` with Cross held |
 | parsed button word | `gp+0x70` | `0x00004000` = Cross |
 | edge ("newly pressed") | `gp+0x6C` | `0x00004000` on the press frame, `0` while held |
-| menu queries it | `func_800EF26C` / `func_800EF2AC` | **never called** |
+| game's own query | `func_800EF9D8(id, mode)` | returns **1** for the pressed button |
 
-So the game computes a perfectly good edge-detected button word each frame and
-then nothing consumes it. The menu state machine is never running its input
-handling — the game stays in the attract state machine and never enters the
-interactive title state. Pressing Right twice does not move the highlight off
-`1 PLAYER`, confirming it from the other end.
+So input works end to end and the game *acknowledges* it. `func_800EF26C` and
+`func_800EF2AC` are dead code — an earlier note claiming "nothing consumes the
+edge word" was hooking those, not the live path (`func_800EF9D8` ->
+`func_800EF4CC`).
 
-Two false starts worth remembering: sampling `gp+0x6C` once a second showed it
-permanently zero, because the edge is one frame wide; and hooking the parser
-was too early in the frame, since the parser runs before the accumulator. Both
-briefly suggested "input is broken" when it is not.
+**Button id map**, established by pressing one button at a time and reading
+which id the game reports a hit for:
 
-**Next lead:** find why the interactive title state is never entered. The flag
-at `gp+0x7C` selects between two input paths in `func_800EEE60` and reads 0
-(the normal path), so that is not it. The question is which state variable the
-title screen's menu is waiting on.
+| id | button | id | button |
+|---|---|---|---|
+| `0x00` | Triangle | `0x0A` | Down |
+| `0x01` | Cross | `0x0B` | Up |
+| `0x02` | Square | `0x0E` | Left |
+| `0x03` | Circle | `0x0F` | Right |
+| `0x06` | *any button* | `0x10` | Select |
+| `0x08` | R1 | `0x14` | Start |
+
+**What is still wrong:** despite every press being received and acknowledged,
+no menu transition happens. Cross, Start, Up, Left and Right all register and
+none moves the highlight off `1 PLAYER` or loads a new screen. One press *does*
+suppress the attract demo — after a press the demo stops starting — so input
+reaches game state, just not the menu.
+
+The title loop at `func_8013513x` polls id `0x0B` (Up) with mode 2 and, on a
+hit, takes a path that returns `-1`. That reads like an abort, not a select, so
+the menu's confirm handler is probably in a state that is never entered.
+
+Three measurement mistakes are recorded here because each briefly looked like a
+real failure: sampling `gp+0x6C` at 1 Hz (the edge is one frame wide), hooking
+the parser (which runs before the accumulator in the same frame), and hooking
+`func_800EF26C`/`2AC` (dead code).
 
 The attract loop at real-time pacing is: title ~30s, demo race ~11.5s, repeat.
 
