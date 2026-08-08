@@ -16,7 +16,7 @@ of completing laps as a rider.
 | 2 | Reaches game code without faulting | **done** |
 | 3 | PSYQ SDK calls routed to runtime | **11 routed** — full public libcd, VSync, DrawSync |
 | 4 | Game progresses past init | **done** — full startup sequence, main loop running |
-| 5 | Anything renders | **unknown — needs one windowed run** |
+| 5 | Anything renders | **done** — DEVELOPED BY screen, capture automated |
 | 6 | Menus navigable under scripted input | not started |
 | 7 | A race loads | not started |
 | 8 | **Lap counter increments** — the goal | not started |
@@ -34,34 +34,74 @@ Getting here took three genuine bug fixes in RecompOne's runtime, all found by
 tracing what the game was waiting on rather than by guesswork. They are
 documented in `DECISIONS.md`.
 
-## The one open question
+## Current blocker: libgpu's command queue never drains
 
-Frame dumps come back **entirely black** — VRAM reads back 0% non-zero across
-the whole 1024×512 buffer, even though decode and upload both succeed. Two
-possibilities, and they are not distinguishable from here:
+The port renders — the `DEVELOPED BY` startup screen displays correctly, and
+frame capture is automated (`RECOMPONE_OFFSCREEN` + `RECOMPONE_DUMP_DIR`,
+nothing appears on screen). It then hangs before the title screen and loads no
+further files.
 
-1. Rendering genuinely fails, and nothing reaches VRAM.
-2. Rendering works, and only the *offscreen readback* is blind, because with
-   the HLE backend active the frame lives in GL rather than in `gpu.Vram`.
+Located exactly, via `RECOMPONE_TRAP_VSYNC`:
 
-Option 2 is quite plausible: `GlCore.Present` bypasses VRAM entirely. **One
-windowed run settles it**, which is the single thing worth a human glance right
-now:
-
-```bash
-dotnet JetMoto/bin/Release/net10.0/JetMoto.dll "JetMotoPS1image/Jet Moto (USA).cue"
+```
+func_8011A840 -> func_80135280 -> func_80134DA4 -> func_8013F51C
+  -> LoadImage(0x800E7B54) -> func_800E9578 -> func_800E9E04 -> VSync(-1)
 ```
 
-If the licence screens appear, rendering is fine and only the capture path
-needs fixing — which unblocks fully automated verification from there on.
+`func_800E9578` is libgpu's 64-entry ring buffer. It computes
+`(head+1)&0x3F == tail`, finds the queue full, and waits. Queue globals are
+`head=0x8016BCA4`, `tail=0x8016BCA8`. The drain function is
+`func_800E986C` (the only writer of `tail` on the normal path, at `0x800E9A80`),
+and the wait loop **does** call it every iteration — it runs but never advances
+the tail.
+
+Ruled out so far:
+
+- GPUSTAT bit 26 (ready to receive command) — correctly set by the runtime.
+- GPU DMA raising no IRQ — correct. The game writes `DICR=0x00900000`, enabling
+  only channel 4 (SPU), so channel 2 completion is not meant to interrupt.
+- VBlank IRQ 0 never firing — **was** true, now fixed and verified reaching the
+  game's handler at `0x800F0A20`.
+- DMA CHCR Start bit left set — not the case; `PSMemory` already clears bit 24
+  before running the transfer.
+- The game's own `DrawSync` being needed to drain the queue — tested un-routed,
+  made no difference.
+
+Next thing to try: single-step `func_800E986C` and find which condition makes
+it bail before `0x800E9A80`. It reads a hardware register via a pointer at
+`0x8016BC80` and tests bit `0x01000000`, and another via `0x8016BC74` testing
+`0x04000000` — identify both registers and confirm the runtime models them.
+
+## Earlier open question (resolved)
+
+Frame dumps came back entirely black. The answer was option 2: rendering works,
+and the *capture* was blind, because with the HLE backend the frame never lands
+in `gpu.Vram` — `GlCore.Present` goes straight to the screen, and `ReadVram`
+returns empty even when the window is visibly rendering.
+
+Capture now takes `glReadPixels` on the default framebuffer after `DoRender`,
+which reflects exactly what is displayed. Verification is fully automated from
+here on.
 
 ## Next
 
-1. Settle the render question above.
-2. Name the libgpu public API the same way libcd was done, so `DrawOTag`,
-   `PutDrawEnv` and `PutDispEnv` route to the runtime.
+1. Unblock the libgpu queue (see above) — everything else waits on this.
+2. Name the rest of the libgpu public API. `DrawOTag`, `PutDrawEnv` and
+   `PutDispEnv` print nothing, so they need shape-based identification rather
+   than string cross-reference; the band `0x800E7300-0x800E7E00` holds the
+   already-named entry points.
 3. Scale naming past the debug-string anchors via PSYQ signature matching.
-4. Scripted pad input + memory assertions once something is on screen.
+4. Scripted pad input + memory assertions once menus are reachable.
+
+## Performance concern
+
+At present the port runs about **3 frames per second**, measured headless with
+no GL at all, so the cost is in the recompiled CPU code rather than rendering.
+Not worth chasing until the game actually progresses, but 3 fps is nowhere near
+playable and it will have to be dealt with before the lap goal is meaningful.
+Every generated function carries `MethodImplOptions.NoInlining`, and every
+memory access goes through an `IMemory` interface call — those are the first
+two things to look at.
 
 ## Harness
 
