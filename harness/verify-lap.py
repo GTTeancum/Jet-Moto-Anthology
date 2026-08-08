@@ -32,9 +32,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--addr", required=True,
                     help="comma-separated lap-counter addresses (the standings array)")
-    ap.add_argument("--settle", type=int, default=60,
-                    help="seconds to ignore at the start, while the race loads and the "
-                         "addresses still hold pre-race garbage")
+    ap.add_argument("--settle", type=int, default=25,
+                    help="seconds before the all-zero race-start marker is trusted; "
+                         "RAM is zeroed at process start so it is trivially true early")
     ap.add_argument("--min-lap-seconds", type=int, default=15,
                     help="reject an increase faster than this as not a real lap")
     ap.add_argument("--width", type=int, default=8, choices=(8, 16, 32),
@@ -92,6 +92,12 @@ def main():
             # instead is what produced a bogus "0 -> 2 in 29s" when the array
             # still held pre-race values.
             if race_start is None:
+                # RAM is zeroed at process start, so "all zero" is trivially
+                # true before the game has booted -- an earlier version anchored
+                # at t+1.4s and mislabelled the numbers that followed. Only
+                # accept the marker once the game has had time to reach a race.
+                if now < args.settle:
+                    continue
                 if hi == 0:
                     zero_run += 1
                     if zero_run >= 3:
