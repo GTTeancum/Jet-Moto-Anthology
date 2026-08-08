@@ -55,6 +55,26 @@ index f5935c8..905c1ff 100644
              case 0x14: break;
              case 0x15: _padBuf = c.A1; break;
              case 0x16: PadRead(m); break;
+diff --git a/RecompOne.Runtime/Cdrom/CueBin.cs b/RecompOne.Runtime/Cdrom/CueBin.cs
+index adb02c5..06001ae 100644
+--- a/RecompOne.Runtime/Cdrom/CueBin.cs
++++ b/RecompOne.Runtime/Cdrom/CueBin.cs
+@@ -100,10 +100,14 @@ public sealed class CueBin : IDisposable
+             int dataSectors = DataTrackSectors(t, stream);
+             if (lba >= dataSectors || pos >= stream.Length)
+             {
++                // [jetmoto-fork] The dedup only suppresses a repeated lba, but a
++                // runaway stream walks the lba forward, so this printed once per
++                // sector -- megabytes of console I/O that stalled the process on
++                // its own. Diagnostic only; behind the CD log flag now.
+                 if (lba != _lastOobLba)
+                 {
+                     _lastOobLba = lba;
+-                    Console.WriteLine($"[CueBin] there was read outside data track: lba={lba}, was this intended?");
++                    Log.Cd($"read outside data track: lba={lba}");
+                 }
+                 return buf;
+             }
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
 index 6027c49..aa6dcf3 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
@@ -676,6 +696,44 @@ index 6432fa4..0e758eb 100644
 +        _lastResult[0] = _status;
          c.V0 = 1;
      }
+ 
+diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
+index ad79811..0f64f76 100644
+--- a/RecompOne.Runtime/sdk/LibCdStream.cs
++++ b/RecompOne.Runtime/sdk/LibCdStream.cs
+@@ -19,6 +19,7 @@ public static class LibCdStream
+     static volatile bool _reading;
+     static int _pendingLba = -1;
+     static int _streamLba = -1;
++    static int _emptyRun;
+     static int _streamStartLba;
+     static readonly Stopwatch _clock = new();
+ 
+@@ -159,6 +160,25 @@ public static class LibCdStream
+             try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
+             catch { Thread.Sleep(2); continue; }
+ 
++            // [jetmoto-fork] Nothing bounded this walk. Past the end of the data
++            // track every read returns zeros, no branch below matches, and the
++            // thread spins _streamLba++ at full speed off the end of the disc
++            // forever -- burning a core and (before it was silenced) flooding
++            // the console with one warning per sector.
++            bool empty = true;
++            for (int i = 0; i < 16; i++) if (sec[i] != 0) { empty = false; break; }
++            if (empty)
++            {
++                if (++_emptyRun >= 2048)
++                {
++                    Log.Sdk($"stream ran past readable data at lba={_streamLba}, stopping");
++                    _reading = false;
++                    _emptyRun = 0;
++                    continue;
++                }
++            }
++            else _emptyRun = 0;
++
+             if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
+             if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
 index a036512..aeef0a4 100644
