@@ -45,6 +45,19 @@
     { "address": "0x800E3688", "name": "CdReadSync" },
     { "address": "0x800EB57C", "name": "VSync" },
 
+    // libcdstream. The STR intro is streamed, and with these unrouted the
+    // game's own ring buffer never fills: func_800E0EAC spins on StGetNext
+    // 0x800000 times, wrapped in another 0x800000-iteration retry in
+    // func_800E0E08. That nested spin was the entire reason the port looked
+    // like it ran at 3 fps -- stack sampling put 100% of samples in it.
+    // Identified from call sites: (ring,32) is StSetRing, the 5-argument call
+    // is StSetStream, (&addr,&header) is StGetNext, and the single-argument
+    // call made right after a successful fetch is StFreeRing.
+    { "address": "0x800E3038", "name": "StSetRing" },
+    { "address": "0x800E6608", "name": "StSetStream" },
+    { "address": "0x800E678C", "name": "StGetNext" },
+    { "address": "0x800E6690", "name": "StFreeRing" },
+
     // Tested un-routed as well (theory: the game's own DrawSync drains
     // libgpu's command queue). It made no difference -- the queue still never
     // drains -- so the hang is elsewhere and this stays routed.

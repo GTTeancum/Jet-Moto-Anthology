@@ -62,36 +62,40 @@ def load_config():
     return json.loads(strip_jsonc(CONFIG.read_text(encoding="utf-8")))
 
 
-def save_functions(entries):
+def append_function(addr_hex, name):
     """
-    Splice the functions[] array into the config as text.
+    Append one entry just inside the closing bracket of functions[].
 
-    A json.dumps round-trip would strip the // comments that document why the
-    config looks the way it does, and those comments are the only record of a
-    lot of reasoning. So the array is rewritten in place and everything else in
-    the file is left byte-for-byte alone.
+    Deliberately additive. The config's // comments record why every SDK name
+    was chosen and how it was identified, and that reasoning is worth more than
+    the convenience of regenerating the block -- so nothing existing is ever
+    rewritten or reordered.
     """
     text = CONFIG.read_text(encoding="utf-8")
-    body = ",\n".join(
-        f'    {{ "address": "{e["address"]}", "name": "{e["name"]}" }}'
-        for e in entries)
-    block = (
-        '  // Auto-maintained by harness/autorun.py: call targets the sweep did\n'
-        '  // not emit, discovered by running until it faults.\n'
-        '  "functions": [\n' + body + '\n  ],\n\n'
-    )
-    existing = re.search(
-        r'[ \t]*//[^\n]*\n(?:[ \t]*//[^\n]*\n)*[ \t]*"functions"\s*:\s*\[.*?\][ \t]*,?\s*\n\s*\n?'
-        r'|[ \t]*"functions"\s*:\s*\[.*?\][ \t]*,?\s*\n\s*\n?',
-        text, re.DOTALL)
-    if existing:
-        text = text[:existing.start()] + block + text[existing.end():]
+    open_at = text.find('"functions"')
+    if open_at < 0:
+        raise RuntimeError('no functions[] array in the config')
+    start = text.index('[', open_at)
+
+    depth, i = 0, start
+    while i < len(text):
+        if text[i] == '[':
+            depth += 1
+        elif text[i] == ']':
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
     else:
-        anchor = re.search(r'[ \t]*"patches"\s*:', text)
-        if not anchor:
-            raise RuntimeError("cannot find an anchor to insert functions[] before")
-        text = text[:anchor.start()] + block + text[anchor.start():]
-    CONFIG.write_text(text, encoding="utf-8")
+        raise RuntimeError('unterminated functions[] array')
+
+    head = text[:i].rstrip()
+    if not head.endswith('['):
+        head += ','
+    entry = (f'\n    // auto-added by harness/autorun.py: indirect call target'
+             f' the sweep did not emit\n'
+             f'    {{ "address": "{addr_hex}", "name": "{name}" }}\n  ')
+    CONFIG.write_text(head + entry + text[i:], encoding="utf-8")
 
 
 def recompile():
@@ -133,13 +137,9 @@ def diagnose(log):
     return "clean", "", stack
 
 
-def add_function(cfg, addr_hex):
-    """Add an explicit functions[] entry so the recompiler emits code there."""
-    funcs = cfg.setdefault("functions", [])
-    if any(f.get("address", "").lower() == addr_hex.lower() for f in funcs):
-        return False
-    funcs.append({"address": addr_hex, "name": f"func_{addr_hex[2:]}"})
-    return True
+def already_present(cfg, addr_hex):
+    return any(f.get("address", "").lower() == addr_hex.lower()
+               for f in cfg.get("functions", []))
 
 
 def main():
@@ -191,8 +191,8 @@ def main():
 
         if kind == "unmapped_call":
             cfg = load_config()
-            if add_function(cfg, detail):
-                save_functions(cfg["functions"])
+            if not already_present(cfg, detail):
+                append_function(detail, f"func_{detail[2:]}")
                 fixed.append(detail)
                 print(f"      -> added functions[] entry at {detail}")
                 continue
