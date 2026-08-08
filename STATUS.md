@@ -19,7 +19,7 @@ of completing laps as a rider.
 | 5 | Title screen renders | **done** — verified from an offscreen capture |
 | 6 | Menus navigable under scripted input | **done** |
 | 7 | A race loads | **done** — races render in full 3D, screenshot-verified |
-| 8 | **Lap counter increments** — the goal | in progress |
+| 8 | **Lap counter increments** — the goal | **not met** — see below |
 
 ## Where things stand
 
@@ -61,6 +61,30 @@ The apparent "3 fps" was never the recompiled code. It was an unrouted
 `StGetNext` spinning `0x800000` times inside another `0x800000`-iteration
 retry, and after that a deliberate 60 Hz frame limiter. Stack sampling with
 `dotnet-stack` found both; guessing at the memory path found nothing.
+
+## Gate 8: not met, and why the earlier result was wrong
+
+An automated check reported `LAP CONFIRMED` twice. **Neither result holds up**,
+and the reason matters more than the claim did.
+
+The attract demo restarts roughly every 25 seconds. Frame-difference analysis
+across a 2931-frame capture shows the pattern plainly: alternating stretches of
+zero change (the static title) and ~60% change (a demo race), each race lasting
+about 6000 presented frames at ~244 fps. **A lap cannot complete in 25 seconds**,
+so the counter increments being observed are demo restarts resetting state, not
+laps. Two runs of the same test disagreed with each other — 38s/90s in one,
+both increments in the same instant in another, then frozen for 470s — which is
+what finally exposed it.
+
+What is genuinely established: races render, with motion, and riders move. What
+is *not* established: that a full race runs to a completed lap.
+
+The blocker is menu navigation. The attract demo starts on its own a few
+seconds after the title appears, and a press during a demo only returns to the
+title, so a fixed-timing script bounces between the two forever.
+`harness/find-menu-route.py` searches the timing space and scores each candidate
+by whether it reaches a *sustained* race — track data loaded with no `TITLE.BS`
+reload afterwards.
 
 ## Gameplay confirmed
 
