@@ -85,7 +85,15 @@
     { "address": "0x800E7BB8", "name": "StoreImage" },
     { "address": "0x800E7C1C", "name": "MoveImage" },
     { "address": "0x800E23F0", "name": "MDEC_in_sync" },
-    { "address": "0x800E2488", "name": "MDEC_out_sync" }
+    { "address": "0x800E2488", "name": "MDEC_out_sync" },
+    // auto-added by harness/autorun.py: indirect call target the sweep did not emit
+    { "address": "0x8010EB74", "name": "func_8010EB74" },
+    // auto-added by harness/autorun.py: indirect call target the sweep did not emit
+    { "address": "0x8010E9F0", "name": "func_8010E9F0" },
+    // auto-added by harness/autorun.py: indirect call target the sweep did not emit
+    { "address": "0x8010F1D0", "name": "func_8010F1D0" },
+    // auto-added by harness/autorun.py: indirect call target the sweep did not emit
+    { "address": "0x8010EA78", "name": "func_8010EA78" }
   ],
 
   "patches": []
