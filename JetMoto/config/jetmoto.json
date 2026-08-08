@@ -44,6 +44,10 @@
     { "address": "0x800E36A8", "name": "CdRead" },
     { "address": "0x800E3688", "name": "CdReadSync" },
     { "address": "0x800EB57C", "name": "VSync" },
+
+    // Tested un-routed as well (theory: the game's own DrawSync drains
+    // libgpu's command queue). It made no difference -- the queue still never
+    // drains -- so the hang is elsewhere and this stays routed.
     { "address": "0x800E792C", "name": "DrawSync" },
 
     // --- Library internals. Not in the routed set, so these keep running as
