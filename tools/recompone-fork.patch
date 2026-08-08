@@ -1,0 +1,676 @@
+diff --git a/RecompOne.Runtime/Bios/BiosB.cs b/RecompOne.Runtime/Bios/BiosB.cs
+index f5935c8..905c1ff 100644
+--- a/RecompOne.Runtime/Bios/BiosB.cs
++++ b/RecompOne.Runtime/Bios/BiosB.cs
+@@ -96,8 +96,34 @@ public static class BiosB
+         return e.Buttons;
+     }
+ 
++    // [jetmoto-fork] InitPAD2 buffers, distinct from PAD_init2's single _padBuf.
++    static uint _pad2BufA, _pad2BufB;
++    static bool _pad2Started;
++
++    /// <summary>
++    /// Fill one InitPAD2 buffer with the controller packet the BIOS would have
++    /// left there. Byte order is fixed by how the game reads it back
++    /// (func_800EF098): it tests <c>buf[1] &gt;&gt; 4 == 4</c> for a digital pad
++    /// and then forms <c>(buf[3] | buf[2] &lt;&lt; 8) ^ 0xFFFF</c> -- so buf[3]
++    /// is the low button byte and buf[2] the high one. Buttons stay active-low,
++    /// matching <see cref="Hardware.Controller.State"/>.
++    /// </summary>
++    static void WritePad2(IMemory m, uint buf, ushort state, bool connected)
++    {
++        if (buf == 0) return;
++        m.WriteU8(buf + 0, (byte)(connected ? 0x00 : 0xFF));
++        m.WriteU8(buf + 1, (byte)(connected ? 0x41 : 0xFF));   // 0x4X = digital pad
++        m.WriteU8(buf + 2, (byte)(state >> 8));                // L2..SQUARE
++        m.WriteU8(buf + 3, (byte)(state & 0xFF));              // SELECT..LEFT
++    }
++
+     static void PadRead(IMemory m)
+     {
++        if (_pad2Started)
++        {
++            WritePad2(m, _pad2BufA, Hardware.Controller.State, true);
++            WritePad2(m, _pad2BufB, Hardware.Controller.State2, Hardware.Controller.Connected2);
++        }
+         if (_padBuf == 0) return;
+         ushort s = Hardware.Controller.State;
+         ushort swapped = (ushort)((s >> 8) | (s << 8));
+@@ -136,8 +162,15 @@ public static class BiosB
+             case 0x0F: CloseTh(c.A0); c.V0 = 1u; break;
+             case 0x10: break;
+             case 0x11: break;
+-            case 0x12: break;
+-            case 0x13: break;
++            // [jetmoto-fork] InitPAD2(buf1,len1,buf2,len2) / StartPAD2.
++            // Upstream ignores both, so _padBuf was only ever set by PAD_init2
++            // (B(15)) and a game using InitPAD2 -- as Jet Moto does -- never
++            // received any controller input at all.
++            case 0x12:
++                _pad2BufA = c.A0; _pad2BufB = c.A2;
++                Log.Bios($"InitPAD2 buf1=0x{c.A0:X8} len1={c.A1} buf2=0x{c.A2:X8} len2={c.A3}");
++                break;
++            case 0x13: _pad2Started = true; break;
+             case 0x14: break;
+             case 0x15: _padBuf = c.A1; break;
+             case 0x16: PadRead(m); break;
+diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
+index 6027c49..aa6dcf3 100644
+--- a/RecompOne.Runtime/Hardware/Interrupts.cs
++++ b/RecompOne.Runtime/Hardware/Interrupts.cs
+@@ -10,10 +10,11 @@ public static class Interrupts
+     public static void Deliver(int irq, CpuContext cpu, IMemory mem)
+     {
+         uint intrEnv = BiosB.IntrEnvInInterruptAddr;
+-        if (intrEnv == 0) return;
++        if (intrEnv == 0) { Log.Dma($"irq{irq}: no intrEnv"); return; }
+ 
+         uint handler = mem.ReadU32(intrEnv + 2u + (uint)irq * 4u);
+-        if (handler == 0) return;
++        if (handler == 0) { Log.Dma($"irq{irq}: no handler"); return; }
++        Log.Dma($"irq{irq}: dispatch handler=0x{handler:X8}");
+ 
+         //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
+         var snap = cpu.Snapshot();
+diff --git a/RecompOne.Runtime/Host/ScriptedInput.cs b/RecompOne.Runtime/Host/ScriptedInput.cs
+new file mode 100644
+index 0000000..df692ec
+--- /dev/null
++++ b/RecompOne.Runtime/Host/ScriptedInput.cs
+@@ -0,0 +1,101 @@
++using RecompOne.Runtime.Hardware;
++
++namespace RecompOne.Runtime.Host;
++
++/// <summary>
++/// [jetmoto-fork] Drives the controller from a script so unattended runs can
++/// navigate menus and, eventually, ride. Without this there is no way to get
++/// past a title screen in a headless run.
++///
++/// RECOMPONE_INPUT is a semicolon-separated list of <c>frame:buttons</c> steps,
++/// or <c>@path</c> to read the same text from a file (blank lines and # comments
++/// allowed). Buttons are '+'-separated names; an empty list releases everything.
++/// A step's state holds until the next step's frame.
++///
++///     RECOMPONE_INPUT="240:start;250:;300:down;310:;360:cross"
++///
++/// Frames are counted in presented frames, not wall clock, so a script replays
++/// identically regardless of how fast the host runs.
++/// </summary>
++public static class ScriptedInput
++{
++    static readonly Dictionary<string, ushort> Buttons = new(StringComparer.OrdinalIgnoreCase)
++    {
++        ["select"] = Controller.Select, ["l3"] = Controller.L3, ["r3"] = Controller.R3,
++        ["start"] = Controller.Start, ["up"] = Controller.Up, ["right"] = Controller.Right,
++        ["down"] = Controller.Down, ["left"] = Controller.Left,
++        ["l2"] = Controller.L2, ["r2"] = Controller.R2,
++        ["l1"] = Controller.L1, ["r1"] = Controller.R1,
++        ["triangle"] = Controller.Triangle, ["circle"] = Controller.Circle,
++        ["cross"] = Controller.Cross, ["square"] = Controller.Square,
++        // convenient aliases
++        ["x"] = Controller.Cross, ["o"] = Controller.Circle,
++        ["a"] = Controller.Cross, ["b"] = Controller.Circle,
++    };
++
++    static (int Frame, ushort Mask)[]? _steps;
++    static int _frame = -1;
++    static int _next;
++
++    public static bool Active => _steps is { Length: > 0 };
++    public static int Frame => _frame;
++
++    static void Load()
++    {
++        var spec = Environment.GetEnvironmentVariable("RECOMPONE_INPUT");
++        if (string.IsNullOrWhiteSpace(spec)) { _steps = []; return; }
++
++        if (spec.StartsWith('@'))
++        {
++            var path = spec[1..];
++            if (!File.Exists(path))
++            {
++                Console.Error.WriteLine($"[Input] script not found: {path}");
++                _steps = [];
++                return;
++            }
++            spec = string.Join(';', File.ReadAllLines(path)
++                .Select(l => l.Split('#')[0].Trim())
++                .Where(l => l.Length > 0));
++        }
++
++        var steps = new List<(int, ushort)>();
++        foreach (var part in spec.Split(';', StringSplitOptions.RemoveEmptyEntries |
++                                             StringSplitOptions.TrimEntries))
++        {
++            int colon = part.IndexOf(':');
++            if (colon < 0 || !int.TryParse(part[..colon].Trim(), out int frame))
++            {
++                Console.Error.WriteLine($"[Input] bad step, expected frame:buttons -- '{part}'");
++                continue;
++            }
++            ushort mask = 0;
++            foreach (var b in part[(colon + 1)..].Split('+', StringSplitOptions.RemoveEmptyEntries |
++                                                            StringSplitOptions.TrimEntries))
++            {
++                if (Buttons.TryGetValue(b, out var bit)) mask |= bit;
++                else Console.Error.WriteLine($"[Input] unknown button '{b}'");
++            }
++            steps.Add((frame, mask));
++        }
++        steps.Sort((a, b) => a.Item1.CompareTo(b.Item1));
++        _steps = steps.ToArray();
++        Console.Error.WriteLine($"[Input] {_steps.Length} scripted step(s)");
++    }
++
++    /// <summary>Advance one presented frame and apply any step that is now due.</summary>
++    public static void Tick()
++    {
++        if (_steps == null) Load();
++        if (_steps!.Length == 0) return;
++
++        _frame++;
++        while (_next < _steps.Length && _steps[_next].Frame <= _frame)
++        {
++            var (f, mask) = _steps[_next++];
++            Controller.State = (ushort)~mask;   // active low: a clear bit is pressed
++            Console.Error.WriteLine(
++                $"[Input] frame {_frame} (step @{f}) state=0x{Controller.State:X4}");
++        }
++    }
++}
+diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
+index 8a62627..d2fe881 100644
+--- a/RecompOne.Runtime/Host/Window/HostWindow.cs
++++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
+@@ -40,16 +40,41 @@ public static class HostWindow
+     {
+         ConfigManager.Load();
+ 
++        // [jetmoto-fork] opt-in headless: RECOMPONE_HEADLESS=1 skips window
++        // creation entirely so the port can run unattended in CI/harness runs.
++        // Upstream only reaches _headless when window creation throws.
++        var hl = Environment.GetEnvironmentVariable("RECOMPONE_HEADLESS");
++        if (hl == "1" || string.Equals(hl, "true", StringComparison.OrdinalIgnoreCase))
++        {
++            _headless = true;
++            Console.Error.WriteLine("[Host] headless mode (RECOMPONE_HEADLESS)");
++            return;
++        }
++
++        // [jetmoto-fork] RECOMPONE_OFFSCREEN=1 keeps a real GL context (so the
++        // GPU backend still rasterizes into VRAM and frames can be dumped) but
++        // never shows the window. Unlike full headless this still renders.
++        var offs = Environment.GetEnvironmentVariable("RECOMPONE_OFFSCREEN");
++        bool offscreen = offs == "1" || string.Equals(offs, "true", StringComparison.OrdinalIgnoreCase);
++
+         try
+         {
+             var options = WindowOptions.Default with
+             {
+                 Size = new Vector2D<int>(1280, 720),
+                 Title = title,
+-                VSync = ConfigManager.View.VSync,
++                VSync = offscreen ? false : ConfigManager.View.VSync,
+                 UpdatesPerSecond = 0,
+                 FramesPerSecond = 0,
+-                WindowState = ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
++                // A window with IsVisible=false never produces real rendering
++                // (VRAM reads back all zero), so offscreen keeps a genuine
++                // visible window and parks it far outside the desktop instead.
++                IsVisible = true,
++                Position = offscreen ? new Vector2D<int>(-4000, -4000)
++                                     : WindowOptions.Default.Position,
++                WindowState = offscreen
++                    ? WindowState.Normal
++                    : (ConfigManager.View.Fullscreen ? WindowState.Fullscreen : WindowState.Normal),
+                 API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
+             };
+             _window = Silk.NET.Windowing.Window.Create(options);
+@@ -177,6 +202,64 @@ public static class HostWindow
+         return best;
+     }
+ 
++    // [jetmoto-fork] frame dumping for the verification harness.
++    // RECOMPONE_DUMP_DIR=<dir> writes the PS1 display buffer as binary PPM
++    // (P6) every RECOMPONE_DUMP_EVERY frames, default 60. PPM avoids pulling
++    // in an image encoder; the harness converts to PNG.
++    static string? _dumpDir;
++    static int _dumpEvery = 60, _frameNo, _dumped;
++    static bool _dumpInit;
++
++    // Grab the presented framebuffer rather than emulated VRAM. With the HLE
++    // backend the frame never lands in gpu.Vram (GlCore.Present goes straight
++    // to the screen) and ReadVram comes back empty even when the window is
++    // visibly rendering, so glReadPixels on the default framebuffer is the
++    // only source that reflects what is actually displayed.
++    static void DumpFrame()
++    {
++        if (!_dumpInit)
++        {
++            _dumpInit = true;
++            _dumpDir = Environment.GetEnvironmentVariable("RECOMPONE_DUMP_DIR");
++            if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DUMP_EVERY"), out var n) && n > 0)
++                _dumpEvery = n;
++            if (!string.IsNullOrEmpty(_dumpDir)) Directory.CreateDirectory(_dumpDir);
++        }
++        if (string.IsNullOrEmpty(_dumpDir) || _gl == null || _window == null) return;
++        if (_frameNo++ % _dumpEvery != 0) return;
++
++        int w = _window.FramebufferSize.X, h = _window.FramebufferSize.Y;
++        if (w <= 0 || h <= 0) return;
++        int needed = w * h * 3;
++        if (_rgbDisplay.Length < needed) _rgbDisplay = new byte[needed];
++
++        try
++        {
++            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
++            _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
++            _gl.ReadPixels<byte>(0, 0, (uint)w, (uint)h,
++                PixelFormat.Rgb, PixelType.UnsignedByte, _rgbDisplay.AsSpan(0, needed));
++
++            // GL origin is bottom-left; PPM is top-down.
++            var path = Path.Combine(_dumpDir!, $"frame-{_dumped:D4}.ppm");
++            using (var fsw = File.Create(path))
++            {
++                var hdr = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
++                fsw.Write(hdr, 0, hdr.Length);
++                int stride = w * 3;
++                for (int y = h - 1; y >= 0; y--)
++                    fsw.Write(_rgbDisplay, y * stride, stride);
++            }
++
++            int nz = 0;
++            for (int i = 0; i < needed; i += 7) if (_rgbDisplay[i] != 0) nz++;
++            Console.Error.WriteLine(
++                $"[Dump] frame {_frameNo - 1} -> {path} ({w}x{h}) nonblack={nz * 7 * 100 / needed}%");
++            _dumped++;
++        }
++        catch (Exception e) { Console.Error.WriteLine($"[Dump] failed: {e.Message}"); }
++    }
++
+     public static void Present(Gpu? gpu)
+     {
+         _gpu = gpu;
+@@ -199,6 +282,7 @@ public static class HostWindow
+             ConfigManager.SaveView(PanelManager.Panels);
+         }
+         _window.DoRender();
++        DumpFrame();   // after DoRender: the default framebuffer now holds the frame
+     }
+ 
+     internal static void Pump()
+@@ -555,6 +639,25 @@ public static class HostWindow
+         RamMapPanel.SetTexture(_ramTex);
+     }
+ 
++    // [jetmoto-fork] same conversion as ConvertDisplay but against a caller
++    // supplied VRAM snapshot, so a backend readback can be dumped.
++    static void ConvertDisplayFrom(ushort[] vram, Gpu gpu, int w, int h)
++    {
++        int dx = gpu.DisplayX, dy = gpu.DisplayY;
++        int o = 0;
++        for (int y = 0; y < h; y++)
++        {
++            int line = ((dy + y) & (Gpu.VramHeight - 1)) * Gpu.VramWidth;
++            for (int x = 0; x < w; x++)
++            {
++                ushort px = vram[line + ((dx + x) & (Gpu.VramWidth - 1))];
++                _rgbDisplay[o++] = (byte)((px & 0x1F) << 3);
++                _rgbDisplay[o++] = (byte)(((px >> 5) & 0x1F) << 3);
++                _rgbDisplay[o++] = (byte)(((px >> 10) & 0x1F) << 3);
++            }
++        }
++    }
++
+     static void ConvertDisplay(Gpu gpu, int w, int h)
+     {
+         var vram = gpu.Vram;
+diff --git a/RecompOne.Runtime/Log.cs b/RecompOne.Runtime/Log.cs
+index ebd353f..d4a1d87 100644
+--- a/RecompOne.Runtime/Log.cs
++++ b/RecompOne.Runtime/Log.cs
+@@ -10,6 +10,23 @@ public static class Log
+     public static bool SdkOn = false;
+     public static bool MdecOn = false;
+ 
++    // [jetmoto-fork] RECOMPONE_LOG=sdk,cd,bios,gpu,dma,spu,mdec (or "all")
++    // lets the harness turn tracing on per-run instead of per-rebuild.
++    static Log()
++    {
++        var spec = Environment.GetEnvironmentVariable("RECOMPONE_LOG");
++        if (string.IsNullOrWhiteSpace(spec)) return;
++        var all = spec.Trim().Equals("all", StringComparison.OrdinalIgnoreCase);
++        var set = new HashSet<string>(
++            spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
++            StringComparer.OrdinalIgnoreCase);
++        bool On(string k) => all || set.Contains(k);
++        BiosOn = On("bios"); SpuOn = On("spu"); GpuOn = On("gpu");
++        DmaOn  = On("dma");  CdOn  = On("cd");  SdkOn = On("sdk");
++        MdecOn = On("mdec");
++        Console.Error.WriteLine($"[Log] tracing: {spec}");
++    }
++
+     public static void Mdec(string m)
+     {
+         if (MdecOn) Console.WriteLine($"[MDEC] {m}");
+diff --git a/RecompOne.Runtime/Memory/Dma.cs b/RecompOne.Runtime/Memory/Dma.cs
+index c376f15..8f95516 100644
+--- a/RecompOne.Runtime/Memory/Dma.cs
++++ b/RecompOne.Runtime/Memory/Dma.cs
+@@ -131,6 +131,7 @@ public sealed class Dma
+     {
+         bool master = (_dicr & (1u << 23)) != 0;
+         bool enabled = (_dicr & (1u << (16 + channel))) != 0;
++        Log.Dma($"complete ch{channel} dicr=0x{_dicr:X8} master={master} enabled={enabled}");
+         if (!master || !enabled) return;
+         _dicr |= 1u << (24 + channel);
+         _raiseIrq();
+diff --git a/RecompOne.Runtime/Memory/PSMemory.cs b/RecompOne.Runtime/Memory/PSMemory.cs
+index 8cae036..a4dd5bf 100644
+--- a/RecompOne.Runtime/Memory/PSMemory.cs
++++ b/RecompOne.Runtime/Memory/PSMemory.cs
+@@ -52,12 +52,18 @@ public sealed class PSMemory : IMemory
+         _hwregs[o + 3] = (byte)(v >> 24);
+     }
+ 
++    // [jetmoto-fork] RAM length is a power of two, so mirroring is a mask.
++    // `phys % (uint)_ram.Length` was a real hardware division on every single
++    // memory access, which is one of the reasons the port ran at ~3 fps.
++    private readonly uint _ramMask = (uint)(Runtime.Mode == RunMode.Devkit
++        ? MemoryMap.DevkitRamSize : MemoryMap.RetailRamSize) - 1u;
++
+     private void TrackWrite(uint phys, int size)
+     {
+         if (phys < MemoryMap.RamWindow)
+         {
+-            uint off = phys % (uint)_ram.Length;
+-            Runtime.RamLog.RecordWrite(phys % (uint)_ram.Length, size);
++            uint off = phys & _ramMask;
++            if (RamLogger.TrackWrites) Runtime.RamLog.RecordWrite(off, size);
+             Dispatcher.NotifyWrite(off);
+         }
+ 
+@@ -66,7 +72,24 @@ public sealed class PSMemory : IMemory
+     private void TrackRead(uint phys, int size)
+     {
+         if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
+-            Runtime.RamLog.RecordRead(phys % (uint)_ram.Length, size);
++            Runtime.RamLog.RecordRead(phys & _ramMask, size);
++    }
++
++    // [jetmoto-fork] RAM is by far the hottest target, and MMIO starts at
++    // 0x1F800000 -- far above RamWindow (0x800000) -- so serving RAM first
++    // cannot shadow any device. Returns false for everything else, which then
++    // takes the original path.
++    [System.Runtime.CompilerServices.MethodImpl(
++        System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
++    private bool FastRam(uint phys, int size, out int off)
++    {
++        if (phys < MemoryMap.RamWindow)
++        {
++            uint o = phys & _ramMask;
++            if (o + (uint)size <= (uint)_ram.Length) { off = (int)o; return true; }
++        }
++        off = 0;
++        return false;
+     }
+ 
+     private Span<byte> Resolve(uint address, int size)
+@@ -94,6 +117,7 @@ public sealed class PSMemory : IMemory
+     public byte ReadU8(uint address)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (!RamLogger.TrackReads && FastRam(phys, 1, out int fo)) return _ram[fo];
+         TrackRead(phys, 1);
+         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
+         return Resolve(address, 1)[0];
+@@ -102,6 +126,9 @@ public sealed class PSMemory : IMemory
+     public ushort ReadU16(uint address)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (!RamLogger.TrackReads && FastRam(phys, 2, out int fo))
++            return System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(
++                _ram.AsSpan(fo, 2));
+         TrackRead(phys, 2);
+         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
+         if (IsSpu(phys)) return _spu.ReadReg16(phys);
+@@ -113,6 +140,9 @@ public sealed class PSMemory : IMemory
+     public uint ReadU32(uint address)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (!RamLogger.TrackReads && FastRam(phys, 4, out int fo))
++            return System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
++                _ram.AsSpan(fo, 4));
+         TrackRead(phys, 4);
+         if (phys == 0x1F801810u) return _gpu.ReadData();
+         if (phys == 0x1F801814u) return _gpu.ReadStat();
+@@ -129,6 +159,12 @@ public sealed class PSMemory : IMemory
+     public void WriteU8(uint address, byte value)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (_frozenCount == 0 && !RamLogger.TrackWrites && FastRam(phys, 1, out int fo))
++        {
++            Dispatcher.NotifyWrite((uint)fo);
++            _ram[fo] = value;
++            return;
++        }
+         TrackWrite(phys, 1);
+         if (_cd != null && IsCd(phys)) { _cd.Write(phys, value); return; }
+ 
+@@ -139,6 +175,13 @@ public sealed class PSMemory : IMemory
+     public void WriteU16(uint address, ushort value)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (_frozenCount == 0 && !RamLogger.TrackWrites && FastRam(phys, 2, out int fo))
++        {
++            Dispatcher.NotifyWrite((uint)fo);
++            System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
++                _ram.AsSpan(fo, 2), value);
++            return;
++        }
+         TrackWrite(phys, 2);
+         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
+         if (IsSpu(phys)) { _spu.WriteReg16(phys, value); return; }
+@@ -159,6 +202,13 @@ public sealed class PSMemory : IMemory
+     public void WriteU32(uint address, uint value)
+     {
+         uint phys = MemoryMap.ToPhysical(address);
++        if (_frozenCount == 0 && !RamLogger.TrackWrites && FastRam(phys, 4, out int fo))
++        {
++            Dispatcher.NotifyWrite((uint)fo);   // overlay swap detection, cheap when idle
++            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
++                _ram.AsSpan(fo, 4), value);
++            return;
++        }
+         TrackWrite(phys, 4);
+         if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
+         if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }
+diff --git a/RecompOne.Runtime/Memory/RamLogger.cs b/RecompOne.Runtime/Memory/RamLogger.cs
+index a46e7eb..348766c 100644
+--- a/RecompOne.Runtime/Memory/RamLogger.cs
++++ b/RecompOne.Runtime/Memory/RamLogger.cs
+@@ -14,6 +14,11 @@ public sealed class RamLogger
+ 
+     public static bool TrackReads;
+ 
++    // [jetmoto-fork] Write tracking feeds the RAM-map debug panel only, but it
++    // ran a per-byte timestamp loop on every single RAM write. Off unless the
++    // panel is actually showing.
++    public static bool TrackWrites;
++
+     public float DecayFrames = 90f;
+     public Vector4 BackdropColor = new(0.25f, 0.15f, 0.15f, 1f);
+     public Vector4 WriteColor = new(1f, 0f, 0f, 0.75f);
+diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
+index fdf7b6b..9772e8f 100644
+--- a/RecompOne.Runtime/Runtime.cs
++++ b/RecompOne.Runtime/Runtime.cs
+@@ -49,7 +49,19 @@ public static class Runtime
+         HostWindow.Initialize(title);
+         LoadMemoryCards();
+         Audio.Initialize();
+-        Audio.SetMasterVolume(Config.ConfigManager.Game.Muted ? 0f : Config.ConfigManager.Game.MasterVolume);
++        // [jetmoto-fork] Automated runs must be silent. Headless and offscreen
++        // runs are harness runs by definition, and RECOMPONE_MUTE=1 forces it
++        // for a normal windowed run too.
++        static bool EnvOn(string k)
++        {
++            var v = Environment.GetEnvironmentVariable(k);
++            return v == "1" || string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
++        }
++        bool forceMute = EnvOn("RECOMPONE_MUTE") || EnvOn("RECOMPONE_HEADLESS")
++                         || EnvOn("RECOMPONE_OFFSCREEN");
++        Audio.SetMasterVolume(forceMute || Config.ConfigManager.Game.Muted
++            ? 0f : Config.ConfigManager.Game.MasterVolume);
++        if (forceMute) Console.Error.WriteLine("[Audio] muted");
+         if (Event.HasAnyListeners<RuntimeReadyEvent>())
+         {
+             Event.Dispatch(new RuntimeReadyEvent());
+@@ -87,6 +99,10 @@ public static class Runtime
+         Audio.Attach(Spu);
+         FrameClock.Throttle();
+         Sdk.LibCd.Tick();
++        // [jetmoto-fork] after HostWindow.Present, whose InputManager.Poll would
++        // otherwise clobber the scripted state, and before the pad buffers are
++        // refreshed from it.
++        Host.ScriptedInput.Tick();
+         if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
+         DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
+     }
+diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
+index 6432fa4..0e758eb 100644
+--- a/RecompOne.Runtime/sdk/LibCd.cs
++++ b/RecompOne.Runtime/sdk/LibCd.cs
+@@ -38,6 +38,10 @@ public static class LibCd
+     const byte StatRead = 0x20;
+     const byte StatSeek = 0x40;
+     const byte StatPlay = 0x80;
++    static int _cdReadCount;
++    static readonly int TrapCdRead =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_CDREAD"), out var _t) ? _t : -1;
++
+     static byte _status;
+     static byte _mode;
+     static byte _com;
+@@ -72,7 +76,11 @@ public static class LibCd
+     public static void CdInit(CpuContext c, IMemory m)
+     {
+         CdResetState();
+-        c.V0 = CdInitInternal() ? 0u : 1u;
++        // [jetmoto-fork] PSYQ CdInit() returns 1 on success, 0 on failure --
++        // same polarity as CdReset() just below, which upstream already has
++        // right. Returning 0 here made Jet Moto print "CdInit: Init failed"
++        // (its own string at 0x800DE9D8) and take a degraded boot path.
++        c.V0 = CdInitInternal() ? 1u : 0u;
+     }
+ 
+     public static void CdReset(CpuContext c, IMemory m)
+@@ -113,6 +121,11 @@ public static class LibCd
+             return;
+         }
+         int size = SectorSize(_mode);
++        // [jetmoto-fork][temporary] RECOMPONE_TRAP_CDREAD=<n> throws on the nth
++        // CdRead so the recompiled game-side call stack becomes visible.
++        if (++_cdReadCount == TrapCdRead)
++            throw new InvalidOperationException(
++                $"[trap] CdRead #{_cdReadCount} lba={lba} sectors={sectors}");
+         Dispatcher.LoadByLba(lba);
+         Log.Sdk($"CdRead sectors={sectors} buf=0x{buf:X8} mode=0x{_mode:X2} lba={lba} size={size}");
+ 
+@@ -125,6 +138,13 @@ public static class LibCd
+                 m.WriteU8(buf + (uint)(i * size + j), data[j]);
+         }
+         _lastIntr = Complete;
++        // [jetmoto-fork] Report the drive as having read, the way the ReadN
++        // command path already does. Callers poll CdReadSync and wait for the
++        // status byte to become StatMotor|StatRead (0x22) as proof the read
++        // happened; leaving it at StatMotor made Jet Moto re-issue the same
++        // 12-sector read forever and never reach its first frame.
++        _status = (byte)(StatMotor | StatRead);
++        _lastResult[0] = _status;
+         c.V0 = 1;
+     }
+ 
+diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
+index a036512..aeef0a4 100644
+--- a/RecompOne.Runtime/sdk/LibEtc.cs
++++ b/RecompOne.Runtime/sdk/LibEtc.cs
+@@ -9,11 +9,75 @@ public static class LibEtc
+     static int _vcount;
+     static readonly VSyncEvent _vsyncEvent = new();
+ 
++    // [jetmoto-fork] On hardware the vsync counter is advanced by the VBlank
++    // interrupt, not by the game calling VSync(). Deriving the query from
++    // elapsed time at 60 Hz keeps that property. Jet Moto spins on
++    // `while (VSync(-1) < target)` during boot, which never terminates if the
++    // counter only moves when VSync(0) is called.
++    static readonly long _t0 = System.Diagnostics.Stopwatch.GetTimestamp();
++
++    static int VCountNow => (int)((System.Diagnostics.Stopwatch.GetTimestamp() - _t0)
++                                  * 60 / System.Diagnostics.Stopwatch.Frequency);
++
++    // [jetmoto-fork] VBlank must fire on its own schedule, not only when the
++    // game calls VSync(0). PSYQ's libgpu services its 64-entry command queue
++    // from the VBlank handler, and it waits for queue space by spinning on
++    // VSync(-1) -- so tying IRQ 0 to VSync(0) alone deadlocks: the queue fills,
++    // libgpu spins on VSync(-1), and nothing ever drains it.
++    static int _lastVbl = -1;
++    static bool _inVbl;
++
++    // [jetmoto-fork] RECOMPONE_PEEK=addr[,addr...] logs each address, its
++    // 32-bit contents, and the value it points at, once per second. Cheap way
++    // to watch a few globals evolve without a debugger.
++    static uint[]? _peek;
++    static int _peekLast = -1;
++
++    static void Peek(IMemory m, int now)
++    {
++        if (_peek == null)
++        {
++            var spec = Environment.GetEnvironmentVariable("RECOMPONE_PEEK");
++            _peek = string.IsNullOrWhiteSpace(spec)
++                ? []
++                : spec.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
++                      .Select(s => Convert.ToUInt32(s.Replace("0x", ""), 16)).ToArray();
++        }
++        if (_peek.Length == 0 || now / 60 == _peekLast) return;
++        _peekLast = now / 60;
++        foreach (var a in _peek)
++        {
++            uint v = m.ReadU32(a);
++            string deref = "";
++            try { if (v != 0) deref = $" -> *0x{v:X8}=0x{m.ReadU32(v):X8}"; }
++            catch { deref = " -> <unmapped>"; }
++            Console.Error.WriteLine($"[Peek] 0x{a:X8}=0x{v:X8}{deref}");
++        }
++    }
++
++    static void MaybeVBlank(int now)
++    {
++        if (_inVbl || now == _lastVbl) return;
++        _lastVbl = now;
++        _inVbl = true;
++        try { Runtime.DispatchIrq(0); }
++        finally { _inVbl = false; }
++    }
++
++    // [jetmoto-fork] RECOMPONE_TRAP_VSYNC=<n> throws on the nth VSync so the
++    // recompiled game-side call stack is visible at an arbitrary point in the
++    // frame loop. Same trick as RECOMPONE_TRAP_CDREAD.
++    static int _vsyncCalls;
++    static readonly int TrapVSync =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_VSYNC"), out var _tv) ? _tv : -1;
++
+     public static void VSync(CpuContext c, IMemory m)
+     {
+         int mode = (int)c.A0;
++        if (++_vsyncCalls == TrapVSync)
++            throw new InvalidOperationException($"[trap] VSync #{_vsyncCalls} mode={mode}");
+         Log.Sdk($"VSync({mode})");
+-        if (mode < 0) { c.V0 = (uint)_vcount; return; }
++        if (mode < 0) { int now = VCountNow; Peek(m, now); MaybeVBlank(now); c.V0 = (uint)now; return; }
+         if (mode == 1) { c.V0 = 0; return; }
+ 
+         Runtime.PresentFrame();
