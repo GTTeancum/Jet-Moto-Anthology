@@ -120,3 +120,44 @@ The first offscreen implementation created the window with `IsVisible=false`.
 VRAM read back all zero. A window parked at `(-4000,-4000)` is a real window to
 the driver, still never appears on the user's desktop, and is the right way to
 get "headless" rendering here.
+
+### 2026-08-07 — Two more runtime bugs: InitPAD2 and the frame limiter
+
+**BIOS `InitPAD2`/`StartPAD2` were no-ops.** `_padBuf` was only ever assigned
+by `PAD_init2` (B(15)), which Jet Moto never calls. The consequence is worth
+stating plainly: the game received **no controller input at all**, from a real
+pad as much as from a scripted one. Now both 34-byte buffers are recorded and
+filled.
+
+The byte order was settled from the game's own parser rather than from docs.
+`func_800EF098` tests `buf[1] >> 4 == 4` for a digital pad and then forms
+`(buf[3] | buf[2] << 8) ^ 0xFFFF`, so `buf[3]` is the low button byte. A first
+attempt had bytes 2 and 3 swapped, which produced a plausible-looking buffer
+the game silently ignored — the same class of mistake as `CdRead`/`CdReadSync`.
+**Generalise: when a name or layout is ambiguous, the call site decides it.**
+
+**`FrameClock` capped harness runs at 60 Hz** and, in practice, ~10 fps.
+Unthrottling is now the default for headless and offscreen runs, which are
+harness runs by definition. The vsync counter stays wall-clock based so
+anything the game times off `VSync(-1)` still takes the same real time.
+
+### 2026-08-07 — Profile before optimising; the guess was wrong
+
+The port looked like it ran at 3 fps, and the obvious suspects in `PSMemory`
+were real: a hardware division on every memory access, a per-byte write-tracking
+loop, byte-by-byte word assembly. All were fixed. It made **no measurable
+difference**, because the actual cost was an unrouted `StGetNext` spinning
+`0x800000` times inside another `0x800000`-iteration retry, and after that a
+deliberate frame limiter.
+
+`dotnet-stack` found both in minutes by sampling — 100% of samples in the spin,
+then 4 of 4 asleep in `Throttle`. The `PSMemory` work was kept because it is
+correct and will matter once real gameplay runs, but it should not have been
+done first.
+
+### 2026-08-07 — The fork is a patch, not a checkout
+
+`tools/RecompOne/` is gitignored, which meant every runtime fix lived only in an
+untracked working copy and would have been lost on a re-clone. They now live in
+`tools/recompone-fork.patch` against a pinned upstream revision, restored by
+`tools/apply-fork.sh`. Regenerate the patch whenever the fork changes.
