@@ -75,6 +75,42 @@ index adb02c5..06001ae 100644
                  }
                  return buf;
              }
+diff --git a/RecompOne.Runtime/Dispatch/Dispatcher.cs b/RecompOne.Runtime/Dispatch/Dispatcher.cs
+index 24e34c6..b65f379 100644
+--- a/RecompOne.Runtime/Dispatch/Dispatcher.cs
++++ b/RecompOne.Runtime/Dispatch/Dispatcher.cs
+@@ -166,11 +166,31 @@ public static class Dispatcher
+         Runtime.OverlayLog.Record(name, OverlayEventKind.Unloaded);
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_COLLECT_UNMAPPED=1 turns an unmapped call from a
++    // crash into a logged, skipped call. Missing targets here are secondary
++    // entry points inside functions the detector merged, so they can only be
++    // found by running until each one is reached -- one crash per run makes
++    // that a recompile per address. Collecting instead surfaces a whole run's
++    // worth at once. The run's behaviour past the first skip is not
++    // trustworthy; this is for discovery only, never for verification.
++    static readonly bool CollectUnmapped =
++        Environment.GetEnvironmentVariable("RECOMPONE_COLLECT_UNMAPPED") is "1" or "true";
++    static readonly HashSet<uint> _unmappedSeen = [];
++
+     public static void Call(CpuContext c, IMemory m, uint addr)
+     {
+         if (BiosKernel.TryDispatch(c, m, addr)) return;
+         if (!_funcMap.TryGetValue(addr, out var fn))
++        {
++            if (CollectUnmapped)
++            {
++                lock (_unmappedSeen)
++                    if (_unmappedSeen.Add(addr))
++                        Console.Error.WriteLine($"[Unmapped] 0x{addr:X8}");
++                return;
++            }
+             throw new InvalidOperationException($"unmapped call: 0x{addr:X8}");
++        }
+         fn(c, m);
+     }
+ 
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
 index 6027c49..aa6dcf3 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
@@ -178,10 +214,10 @@ index 0000000..86a9225
 +}
 diff --git a/RecompOne.Runtime/Host/ScriptedInput.cs b/RecompOne.Runtime/Host/ScriptedInput.cs
 new file mode 100644
-index 0000000..df692ec
+index 0000000..8af05d2
 --- /dev/null
 +++ b/RecompOne.Runtime/Host/ScriptedInput.cs
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,107 @@
 +using RecompOne.Runtime.Hardware;
 +
 +namespace RecompOne.Runtime.Host;
@@ -267,13 +303,19 @@ index 0000000..df692ec
 +        Console.Error.WriteLine($"[Input] {_steps.Length} scripted step(s)");
 +    }
 +
-+    /// <summary>Advance one presented frame and apply any step that is now due.</summary>
++    /// <summary>Apply any step that is now due.</summary>
 +    public static void Tick()
 +    {
 +        if (_steps == null) Load();
 +        if (_steps!.Length == 0) return;
 +
-+        _frame++;
++        // Step numbers are vsync ticks (wall clock at 60 Hz), not presented
++        // frames. Presented-frame counting made a script speed-dependent: the
++        // same file needed ~13600 frames headless but would have taken 25
++        // minutes offscreen, which renders ~6x slower. Menus advance on the
++        // game's own wall-clock vsync waits, so ticks are the right unit and
++        // one script now works at any host speed.
++        _frame = Sdk.LibEtc.VCountNow;
 +        while (_next < _steps.Length && _steps[_next].Frame <= _frame)
 +        {
 +            var (f, mask) = _steps[_next++];
@@ -736,7 +778,7 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..aeef0a4 100644
+index a036512..68940b0 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
 @@ -9,11 +9,75 @@ public static class LibEtc
@@ -750,7 +792,7 @@ index a036512..aeef0a4 100644
 +    // counter only moves when VSync(0) is called.
 +    static readonly long _t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 +
-+    static int VCountNow => (int)((System.Diagnostics.Stopwatch.GetTimestamp() - _t0)
++    internal static int VCountNow => (int)((System.Diagnostics.Stopwatch.GetTimestamp() - _t0)
 +                                  * 60 / System.Diagnostics.Stopwatch.Frequency);
 +
 +    // [jetmoto-fork] VBlank must fire on its own schedule, not only when the
