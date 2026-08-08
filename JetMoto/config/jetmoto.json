@@ -26,16 +26,49 @@
   // the function that prints each string. Names here are matched as strings by
   // RecompOne.Recompiler/CodeGen/SdkPatches.cs and routed to the runtime HLE.
   "functions": [
-    { "address": "0x800E4B90", "name": "CdInit" },
-    { "address": "0x800E5314", "name": "CdRead" },
-    { "address": "0x800E4074", "name": "CdReady" },
-    { "address": "0x800EB6C4", "name": "VSync" },
+    // --- Public PSYQ API. These are the names SdkPatches.cs matches, so these
+    // are the functions that get replaced by the runtime HLE. Route at the
+    // public boundary, never at an internal: the internals take different
+    // arguments, which showed up as nonsense VSync(0)/VSync(2)/VSync(4) modes
+    // when 0x800EB6C4 was routed instead of its caller.
+    { "address": "0x800E3088", "name": "CdInit" },
+    { "address": "0x800E3224", "name": "CdControl" },
+    { "address": "0x800E336C", "name": "CdControlF" },
+    { "address": "0x800E34A8", "name": "CdControlB" },
+    { "address": "0x800E319C", "name": "CdSync" },
+    { "address": "0x800E31BC", "name": "CdReady" },
+    { "address": "0x800E3668", "name": "CdDataSync" },
+    // Call sites decide these two, not the internal they wrap: func_800EDE08
+    // calls 0x800E36A8 as (count, buf, mode=0x81) and 0x800E3688 as
+    // (mode=0, &result) followed by a status-byte compare.
+    { "address": "0x800E36A8", "name": "CdRead" },
+    { "address": "0x800E3688", "name": "CdReadSync" },
+    { "address": "0x800EB57C", "name": "VSync" },
     { "address": "0x800E792C", "name": "DrawSync" },
 
-    // Identified but not in the auto-routed set; named for readability and to
-    // anchor further cross-referencing of the surrounding libcd/libgpu code.
+    // --- Library internals. Not in the routed set, so these keep running as
+    // recompiled game code; named only for readability and to anchor further
+    // cross-referencing. Do NOT give these public API names -- that would
+    // route them and split state against their own callers.
+    { "address": "0x800E4B90", "name": "CD_init" },
+    { "address": "0x800E3DF0", "name": "CD_sync" },
+    { "address": "0x800E4074", "name": "CD_ready" },
+    { "address": "0x800E4344", "name": "CD_cw" },
+    { "address": "0x800E4834", "name": "CD_cmd_helper" },
+    { "address": "0x800E5314", "name": "CD_read" },
+    { "address": "0x800E55CC", "name": "CD_datasync" },
+    { "address": "0x800E4EA0", "name": "CD_read_retry" },
+    { "address": "0x800E521C", "name": "CD_readsync_impl" },
+    { "address": "0x800E38AC", "name": "CD_intr_handler" },
+    { "address": "0x800EB6C4", "name": "VSync_wait" },
     { "address": "0x800E748C", "name": "ResetGraph" },
-    { "address": "0x800E7834", "name": "DrawSyncCallback" }
+    { "address": "0x800E7834", "name": "DrawSyncCallback" },
+    { "address": "0x800E7AC0", "name": "ClearImage" },
+    { "address": "0x800E7B54", "name": "LoadImage" },
+    { "address": "0x800E7BB8", "name": "StoreImage" },
+    { "address": "0x800E7C1C", "name": "MoveImage" },
+    { "address": "0x800E23F0", "name": "MDEC_in_sync" },
+    { "address": "0x800E2488", "name": "MDEC_out_sync" }
   ],
 
   "patches": []
