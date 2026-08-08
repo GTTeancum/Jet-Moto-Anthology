@@ -126,5 +126,16 @@
     { "address": "0x8010AE5C", "name": "func_8010AE5C" }
   ],
 
-  "patches": []
+  // Diagnostic: is the pad parser even called in menu states, and what does it
+  // compute? The buffer it reads is correct but the game does not act on input.
+  "patches": [
+    { "function": "func_800EF098", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterPadParse" },
+    { "function": "func_800EF26C", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterQuery" },
+    { "function": "func_800EF2AC", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterQuery2" },
+    { "function": "func_800EEE60", "mode": "post",
+      "target": "Recompiled.InputProbe.AfterInputFrame" }
+  ]
 }

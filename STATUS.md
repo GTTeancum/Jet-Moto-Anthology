@@ -63,27 +63,36 @@ The apparent "3 fps" was never the recompiled code. It was an unrouted
 retry, and after that a deliberate 60 Hz frame limiter. Stack sampling with
 `dotnet-stack` found both; guessing at the memory path found nothing.
 
-## Gate 6: retracted — the game does not act on input
+## Gate 6: the input pipeline is correct; the menu never reads it
 
 Earlier this was marked done because `NAVIGATE/PICKRIDE.BS` loaded after
-scripted presses. That was the **attract sequence** cycling menus by itself,
-not a response to input.
+scripted presses. That was the **attract sequence** cycling menus by itself.
 
-What is actually established, by peeking the pad buffer at `0x801EA0D8` while
-holding a button:
+The input path has now been traced end to end with hooks on the game's own
+functions, and **every stage is correct**:
 
-- The buffer is populated exactly as the game's own parser expects —
-  `0xFFBF4100` with Cross held, and `func_800EF098` computes
-  `(buf[3] | buf[2] << 8) ^ 0xFFFF` = `0x4000` = Cross.
-- The game nevertheless does not respond. Pressing X or Start on the title for
-  seconds at a time never leaves it, and a press during a demo does not cut the
-  demo short — demos run their full ~11.5s either way.
+| stage | address | result |
+|---|---|---|
+| BIOS pad buffer | `0x801EA0D8` | `0xFFBF4100` with Cross held |
+| parsed button word | `gp+0x70` | `0x00004000` = Cross |
+| edge ("newly pressed") | `gp+0x6C` | `0x00004000` on the press frame, `0` while held |
+| menu queries it | `func_800EF26C` / `func_800EF2AC` | **never called** |
 
-So input plumbing is correct up to the buffer, and something downstream never
-consumes it. The next step is to find what the menu code actually reads: either
-`func_800EF098` is not being called in this state, or the menus take input from
-a different path (libpad rather than the BIOS buffers, or an interrupt-driven
-callback that is not being invoked).
+So the game computes a perfectly good edge-detected button word each frame and
+then nothing consumes it. The menu state machine is never running its input
+handling — the game stays in the attract state machine and never enters the
+interactive title state. Pressing Right twice does not move the highlight off
+`1 PLAYER`, confirming it from the other end.
+
+Two false starts worth remembering: sampling `gp+0x6C` once a second showed it
+permanently zero, because the edge is one frame wide; and hooking the parser
+was too early in the frame, since the parser runs before the accumulator. Both
+briefly suggested "input is broken" when it is not.
+
+**Next lead:** find why the interactive title state is never entered. The flag
+at `gp+0x7C` selects between two input paths in `func_800EEE60` and reads 0
+(the normal path), so that is not it. The question is which state variable the
+title screen's menu is waiting on.
 
 The attract loop at real-time pacing is: title ~30s, demo race ~11.5s, repeat.
 
