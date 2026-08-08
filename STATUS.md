@@ -24,14 +24,14 @@ of completing laps as a rider.
 ## Where things stand
 
 The port boots, plays its streamed intro, reaches the title screen, accepts
-scripted controller input, walks the menus, and loads a track. What remains is
-confirming a lap actually completes.
+scripted controller input, walks the menus, loads a track, and **runs races in
+full 3D**. What remains is asserting on a lap counter.
 
 Everything is verified without a human watching: offscreen rendering into a
 window parked off-desktop, frames captured via `glReadPixels`, audio forced
 silent, controller driven from a script.
 
-## The five runtime bugs found so far
+## The runtime bugs found so far
 
 All in RecompOne's runtime, not in the port, and all found by asking what the
 game was waiting on rather than by inspection. Details in `DECISIONS.md`.
@@ -79,7 +79,7 @@ consistent with a live simulation.
 
 ## How it got unstuck
 
-The complete ISLAND1 race set loads — `.FLR` collision, `.CAM` camera, `.TPT`,
+The complete track set loads — `.FLR` collision, `.CAM` camera, `.TPT`,
 `.TMS` textures, `.DMD` models, `VCORE.VAB` sound bank, overview map. Nineteen secondary entry points had to be added to `functions[]`, each found by
 running until it faulted. `RECOMPONE_COLLECT_UNMAPPED=1` turns an unmapped call
 into a logged skip rather than a crash, so a whole run's worth surfaces at once
@@ -102,13 +102,11 @@ Three things were masking progress:
 
 ## Next
 
-1. Let `autorun.py --input harness/race-run.txt` converge on the remaining
-   unmapped calls in the race code.
-2. Then find the lap counter with `harness/findcounter.py` and assert on it
+1. Find the lap counter with `harness/findcounter.py` and assert on it
    with `harness/verify-lap.py`.
-3. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
+2. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
    print nothing and so need shape-based identification.
-4. Decide whether "a rider completes laps" is satisfied by the AI, or whether
+3. Decide whether "a rider completes laps" is satisfied by the AI, or whether
    the player bike must be driven — the current script leaves the player idle.
 
 ## Harness
