@@ -94,9 +94,8 @@ the full pack, spray particles and sponsor banners. GTE transforms, texturing
 and the display list all work.
 
 Left alone the game runs its **attract demo**, cycling title -> AI race ->
-title. That is the "let the AI race" outcome with no menu navigation needed at
-all. With 8 scripted confirms it instead enters a real race on DARK and stays
-there, with no input after the race begins.
+title. The demo races are genuine AI racing but only run ~25 seconds before
+restarting, so they cannot demonstrate a completed lap.
 
 RAM sampling during a race shows 20-41% of memory changing between snapshots,
 consistent with a live simulation.
@@ -120,14 +119,15 @@ Three things were masking progress:
 - RAM snapshots looked static between samples, which suggested nothing was
   happening. That was misleading: the run had crashed, and static menu screens
   legitimately change only ~25 bytes per sample anyway.
-- The scripted press sequence was far too long. 76 confirms started a race and
-  then aborted back to the title repeatedly, visible as `TITLE.BS` reloading
-  between track loads. Eight confirms is right.
+- The scripted press sequence interacts badly with the attract demo. Presses
+  during a demo only return to the title, so a fixed-timing script can bounce
+  between title and demo indefinitely. This is still unsolved; see gate 8.
 
 ## Next
 
-1. Find the lap counter with `harness/findcounter.py` and assert on it
-   with `harness/verify-lap.py`.
+1. Get a *sustained* race via `harness/find-menu-route.py`, then re-run
+   `harness/verify-lap.py` against it. The lap-counter array is already located
+   (`0x801744B4`, stride `0x84`); what is missing is a race long enough to use it.
 2. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
    print nothing and so need shape-based identification.
 3. Decide whether "a rider completes laps" is satisfied by the AI, or whether
