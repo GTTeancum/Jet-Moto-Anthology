@@ -101,9 +101,24 @@ none moves the highlight off `1 PLAYER` or loads a new screen. One press *does*
 suppress the attract demo — after a press the demo stops starting — so input
 reaches game state, just not the menu.
 
-The title loop at `func_8013513x` polls id `0x0B` (Up) with mode 2 and, on a
-hit, takes a path that returns `-1`. That reads like an abort, not a select, so
-the menu's confirm handler is probably in a state that is never entered.
+**Localised to a state-machine dispatch problem.** The interactive title code
+is `func_80134FBC` (it polls action `0x0B` with **mode 2**). Hooks show:
+
+- No query with mode 2 is *ever* issued — every observed query is mode 0.
+- `func_80134FBC` is never entered, and neither is either of its two callers,
+  `func_801395B8` / `func_8013963C`.
+- Both callers have **zero static callers**: they are reached only through a
+  function-pointer table, and that table never selects them.
+
+So the game never dispatches to its interactive title state. Ruled out along
+the way: the key-binding table at `0x801D25F8` is correctly populated
+(`table[mode*128 + id]`, with `table[0x0B] = 0x0B`), and the STR movie player
+(`func_800E0CDC`) nests to depth ~20 but unwinds cleanly — 200 entries, 200
+exits, final depth 0 — so it is not stuck.
+
+**Next step:** find the state-machine dispatch table and see which handler it
+selects instead. The same pattern of pointer-table dispatch caused the earlier
+`unmapped call` faults, so the table is likely built at runtime.
 
 Three measurement mistakes are recorded here because each briefly looked like a
 real failure: sampling `gp+0x6C` at 1 Hz (the edge is one frame wide), hooking

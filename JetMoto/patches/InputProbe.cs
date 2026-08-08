@@ -59,6 +59,54 @@ public static class InputProbe
     /// word through func_800EF4CC. Logging both says whether the menus are
     /// asking, and what answer they get.
     /// </summary>
+    static int _strIn, _strOut;
+
+    /// <summary>
+    /// func_800E0CDC is the STR movie player (it calls StSetRing/StSetStream).
+    /// Trapping mid-title showed the stack inside it ~80 frames deep. If entries
+    /// and exits balance it is being re-entered per frame legitimately; if
+    /// entries run away from exits the game never leaves the movie.
+    /// </summary>
+    public static void StrEnter(CpuContext c, IMemory m)
+    {
+        _strIn++;
+        if (_strIn <= 5 || _strIn % 200 == 0)
+            System.Console.Error.WriteLine($"[STR] enter #{_strIn} (exits {_strOut}, depth {_strIn - _strOut})");
+    }
+
+    public static void StrExit(CpuContext c, IMemory m)
+    {
+        _strOut++;
+        if (_strOut <= 5 || _strOut % 200 == 0)
+            System.Console.Error.WriteLine($"[STR] exit  #{_strOut} (depth {_strIn - _strOut})");
+    }
+
+    static int _tw, _c1, _c2;
+
+    /// <summary>
+    /// func_80134FBC holds the interactive title wait loop -- the one that
+    /// polls action 0x0B with mode 2. No mode-2 query has ever been observed,
+    /// so the loop appears never to run. These say whether it, or either of
+    /// its two callers, is reached at all.
+    /// </summary>
+    public static void EnterTitleWait(CpuContext c, IMemory m)
+    {
+        if (++_tw <= 3)
+            System.Console.Error.WriteLine($"[Flow] func_80134FBC (title wait) entered #{_tw}");
+    }
+
+    public static void EnterCaller1(CpuContext c, IMemory m)
+    {
+        if (++_c1 <= 3)
+            System.Console.Error.WriteLine($"[Flow] func_801395B8 entered #{_c1}");
+    }
+
+    public static void EnterCaller2(CpuContext c, IMemory m)
+    {
+        if (++_c2 <= 3)
+            System.Console.Error.WriteLine($"[Flow] func_8013963C entered #{_c2}");
+    }
+
     static uint _lastA0, _lastA1;
     static readonly System.Collections.Generic.HashSet<uint> _seenIds = new();
 
