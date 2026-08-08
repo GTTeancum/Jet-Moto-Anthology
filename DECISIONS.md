@@ -81,3 +81,40 @@ adding an image-encoder dependency to the fork.
 machine-emitted code in `generated/main.cs` (unused labels, self-assignments,
 unreachable branches) and would bury real diagnostics from hand-written patch
 code. Nothing we author lives in `generated/`.
+
+### 2026-08-07 — Three real bugs in RecompOne's runtime, not in the port
+
+Worth recording because the instinct on a recomp is to assume the fault is in
+your own naming or config. In all three cases the port was right and the
+runtime was wrong, and each was found by asking "what is the game waiting on?"
+rather than by inspection.
+
+1. `LibCd.CdInit` returned 0 on success while `CdReset` returned 1. PSYQ's
+   `CdInit()` returns 1. The game printed its own "CdInit: Init failed"
+   (`0x800DE9D8`) and took a degraded boot path.
+2. `LibCd.CdRead` performed the read but never set `StatRead`. Callers poll
+   `CdReadSync` until the status byte is `0x22` as proof the read occurred;
+   the `ReadN` command path already did this, so the omission was inconsistent
+   within the same file.
+3. `LibEtc.VSync(-1)` returned a counter advanced only by the game's own
+   `VSync(0)` calls. On hardware VBlank advances it. A boot-time
+   `while (VSync(-1) < target)` spin therefore never terminated.
+
+None of these can go upstream — the maintainer rejects AI-authored PRs — so
+they live in `tools/RecompOne/`, each tagged `[jetmoto-fork]` so they survive
+a re-clone by grep.
+
+### 2026-08-07 — Locate loops with a trap, not by reading
+
+`RECOMPONE_TRAP_CDREAD=<n>` throws on the nth `CdRead`, and the resulting .NET
+exception carries the full recompiled game-side call stack. That found the
+retry loop in seconds after a fair amount of wasted time reading generated
+MIPS-to-C# by hand and guessing at which function owned the loop. Generalise
+this: when the question is "who is calling this", trap and read the stack.
+
+### 2026-08-07 — IsVisible=false does not render
+
+The first offscreen implementation created the window with `IsVisible=false`.
+VRAM read back all zero. A window parked at `(-4000,-4000)` is a real window to
+the driver, still never appears on the user's desktop, and is the right way to
+get "headless" rendering here.
