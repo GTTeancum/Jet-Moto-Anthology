@@ -1,0 +1,18 @@
+{
+  "game": {
+    "id": "SCUS-94309",
+    "name": "JetMoto",
+    "output": "../generated"
+  },
+  "cue": "../../JetMotoPS1image/Jet Moto (USA).cue",
+
+  // Jet Moto ships a single 979 KB boot EXE (SCUS_943.09, text @ 0x800DD2D0).
+  // No overlay code binaries were found on the disc -- everything else is data
+  // (.TMS/.DMD/.TPT/.FLR/.CAM track geometry, .TIM textures, .VAB banks,
+  // .BS MDEC stills, .DA streamed XA). Revisit if a code blob turns up inside
+  // the .DA or .PAC containers.
+  "overlays": [],
+
+  "addressComments": true,
+  "patches": []
+}
