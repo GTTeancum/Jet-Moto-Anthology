@@ -30,7 +30,13 @@ RE_PEEK = re.compile(r"\[Peek\] 0x([0-9A-F]{8})=0x([0-9A-F]{8})")
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--addr", required=True, help="lap counter address, e.g. 0x800A1234")
+    ap.add_argument("--addr", required=True,
+                    help="comma-separated lap-counter addresses (the standings array)")
+    ap.add_argument("--settle", type=int, default=60,
+                    help="seconds to ignore at the start, while the race loads and the "
+                         "addresses still hold pre-race garbage")
+    ap.add_argument("--min-lap-seconds", type=int, default=15,
+                    help="reject an increase faster than this as not a real lap")
     ap.add_argument("--width", type=int, default=8, choices=(8, 16, 32),
                     help="how many bits of the peeked word are the counter")
     ap.add_argument("--laps", type=int, default=1, help="laps that must be observed")
@@ -42,6 +48,7 @@ def main():
         print(f"port not built: {PORT}")
         return 2
 
+    addrs = [a.strip().upper().replace("0X", "") for a in args.addr.split(",")]
     env = {
         **os.environ,
         "RECOMPONE_HEADLESS": "1",
@@ -50,39 +57,63 @@ def main():
     }
 
     mask = (1 << args.width) - 1
-    seen, start, first_ts = [], None, None
+    latest = {}
+    baseline = None
+    peak, peak_ts, history = None, None, []
     t0 = time.time()
 
-    print(f"watching {args.addr} ({args.width}-bit) for {args.laps} lap(s), "
-          f"{args.timeout}s budget")
+    print(f"watching {len(addrs)} address(es) ({args.width}-bit) for {args.laps} lap(s); "
+          f"ignoring the first {args.settle}s, {args.timeout}s budget")
     p = subprocess.Popen(["dotnet", str(PORT), str(CUE)],
                          cwd=ROOT, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", bufsize=1)
     try:
         for line in p.stdout:
-            if time.time() - t0 > args.timeout:
+            now = time.time() - t0
+            if now > args.timeout:
                 print(f"\nTIMEOUT after {args.timeout}s")
                 break
             m = RE_PEEK.search(line)
             if not m:
                 continue
-            v = int(m.group(2), 16) & mask
-            if start is None:
-                start, first_ts = v, time.time()
-                print(f"  initial value {v}")
+            latest[m.group(1)] = int(m.group(2), 16) & mask
+            if len(latest) < len(addrs):
                 continue
-            if not seen or seen[-1] != v:
-                seen.append(v)
-                print(f"  t+{time.time()-t0:6.1f}s  value {v}")
-            if v - start >= args.laps:
-                print(f"\nLAP CONFIRMED: {args.addr} went {start} -> {v} "
-                      f"in {time.time()-first_ts:.0f}s")
+
+            # The array is sorted by standings, so an individual slot can go
+            # down when riders swap places. The maximum across it is what
+            # actually tracks race progress.
+            hi = max(latest.values())
+
+            # Settle first: before the race initialises these hold stale values,
+            # which is exactly what made a naive first-read baseline report a
+            # bogus "0 -> 2 in 29s".
+            if now < args.settle:
+                continue
+            if baseline is None:
+                baseline, peak, peak_ts = hi, hi, time.time()
+                print(f"  t+{now:6.1f}s  baseline {baseline} {sorted(latest.values())}")
+                continue
+
+            if hi > peak:
+                dt = time.time() - peak_ts
+                history.append((round(now, 1), hi, round(dt, 1)))
+                print(f"  t+{now:6.1f}s  max {peak} -> {hi} "
+                      f"(+{dt:.0f}s) {sorted(latest.values())}")
+                if dt < args.min_lap_seconds:
+                    print(f"      rejected: {dt:.0f}s is too fast to be a lap")
+                    baseline = hi   # resync and keep watching
+                peak, peak_ts = hi, time.time()
+
+            if peak - baseline >= args.laps:
+                print(f"\nLAP CONFIRMED: max lap count {baseline} -> {peak}; "
+                      f"increments at {history}")
                 return 0
     finally:
         p.kill()
 
-    print(f"\nNo lap observed. Values seen: {seen or '(none)'}")
+    print(f"\nNo lap observed. Increments: {history or '(none)'}")
     return 1
 
 
