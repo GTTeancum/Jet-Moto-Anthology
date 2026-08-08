@@ -18,7 +18,7 @@ of completing laps as a rider.
 | 4 | Game progresses past init | **done** |
 | 5 | Title screen renders | **done** — verified from an offscreen capture |
 | 6 | Menus navigable under scripted input | **done** |
-| 7 | A race loads | **done** — reaches ISLAND1 track data |
+| 7 | A race loads | **done** — full ISLAND1 track set loaded, race code running |
 | 8 | **Lap counter increments** — the goal | in progress |
 
 ## Where things stand
@@ -53,15 +53,39 @@ game was waiting on rather than by inspection. Details in `DECISIONS.md`.
 | libcdstream routed | 211 |
 | unthrottled | **2016** (~100 fps) |
 
+Offscreen rendering costs a lot: ~9 fps against ~55 headless. Lap counting does
+not need rendering, so verification runs headless and visual checks are done
+separately.
+
 The apparent "3 fps" was never the recompiled code. It was an unrouted
 `StGetNext` spinning `0x800000` times inside another `0x800000`-iteration
 retry, and after that a deliberate 60 Hz frame limiter. Stack sampling with
 `dotnet-stack` found both; guessing at the memory path found nothing.
 
+## Race status
+
+The complete ISLAND1 race set loads — `.FLR` collision, `.CAM` camera, `.TPT`,
+`.TMS` textures, `.DMD` models, `VCORE.VAB` sound bank, overview map. Execution
+then enters the race code and faults on `unmapped call: 0x8010AB44`, ten frames
+deep in gameplay functions. That is the ordinary indirect-call gap that
+`autorun.py` fixes on its own, now that it can drive the menus (`--input`).
+
+Two things that were masking this:
+
+- After the intro finished streaming, nothing bounded `LibCdStream`, so it
+  walked off the end of the disc forever (observed at lba 1.4 million) and
+  `CueBin` printed a warning per sector. Megabytes of console I/O were stalling
+  the process. Both fixed.
+- RAM snapshots looked static between samples, which suggested nothing was
+  happening. That was misleading: the run had crashed, and static menu screens
+  legitimately change only ~25 bytes per sample anyway.
+
 ## Next
 
-1. Confirm a lap completes — dump RAM across a race and use
-   `harness/findcounter.py` to find the lap counter, then assert on it.
+1. Let `autorun.py --input harness/race-run.txt` converge on the remaining
+   unmapped calls in the race code.
+2. Then find the lap counter with `harness/findcounter.py` and assert on it
+   with `harness/verify-lap.py`.
 2. Name the libgpu public API (`DrawOTag`, `PutDrawEnv`, `PutDispEnv`), which
    print nothing and so need shape-based identification.
 3. Check the CueBin warning about reads outside the data track (lba

@@ -112,12 +112,14 @@ def build():
     return "Build succeeded" in out or rc == 0, out
 
 
-def run_port(timeout):
+def run_port(timeout, input_script=None):
     """One headless run. Returns (log_text, verdict)."""
     env = {
         "RECOMPONE_HEADLESS": "1",
         "DOTNET_gcServer": "1",
     }
+    if input_script:
+        env["RECOMPONE_INPUT"] = f"@{input_script}"
     rc, out = sh(["dotnet", str(PORT_DLL), str(CUE)], timeout=timeout, env=env)
     return out, ("survived" if rc == "timeout" else f"exit {rc}")
 
@@ -150,6 +152,8 @@ def main():
     ap.add_argument("--once", action="store_true", help="run once, do not fix")
     ap.add_argument("--no-rebuild", action="store_true",
                     help="skip recompile/build on the first iteration")
+    ap.add_argument("--input", default=None,
+                    help="scripted controller file to drive menus (harness/race-run.txt)")
     args = ap.parse_args()
 
     LOGDIR.mkdir(parents=True, exist_ok=True)
@@ -168,14 +172,15 @@ def main():
                 return 2
             print(f"[{i}] recompiled ({count} functions), built")
 
-        log, verdict = run_port(args.timeout)
+        log, verdict = run_port(args.timeout, args.input)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         (LOGDIR / f"run-{stamp}.log").write_text(log, encoding="utf-8")
 
         kind, detail, stack = diagnose(log)
         depth = len(stack)
         printed = [l for l in log.splitlines()
-                   if l and not l.startswith(("   at ", "[Host]"))][:12]
+                   if l and not l.startswith(("   at ", "[Host]", "[Input]",
+                                              "[RamDump]", "[Audio]"))][:8]
 
         print(f"[{i}] {verdict} | fault={kind} {detail} | stack depth {depth}")
         for l in printed:
