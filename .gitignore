@@ -18,3 +18,7 @@ harness/captures/
 harness/traces/
 *.png
 *.log
+
+# RecompOne runtime-generated files (written next to the working directory)
+interface.ini
+*.sav
