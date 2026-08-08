@@ -1,0 +1,20 @@
+# Disc image — user-provided, never committed (400+ MB, copyrighted game data)
+JetMotoPS1image/
+JetMoto/disc/
+
+# Recompiler output — regenerated from the config + disc
+JetMoto/generated/
+
+# Upstream tool checkout
+tools/RecompOne/
+
+# .NET
+bin/
+obj/
+*.user
+
+# Harness artifacts
+harness/captures/
+harness/traces/
+*.png
+*.log
