@@ -130,10 +130,10 @@ index 6027c49..aa6dcf3 100644
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
 diff --git a/RecompOne.Runtime/Host/FrameClock.cs b/RecompOne.Runtime/Host/FrameClock.cs
-index edd260b..4dc9fc6 100644
+index edd260b..eed6448 100644
 --- a/RecompOne.Runtime/Host/FrameClock.cs
 +++ b/RecompOne.Runtime/Host/FrameClock.cs
-@@ -9,9 +9,28 @@ internal static class FrameClock
+@@ -9,9 +9,34 @@ internal static class FrameClock
      static readonly Stopwatch _clock = Stopwatch.StartNew();
      static double _nextFrameMs;
  
@@ -151,6 +151,12 @@ index edd260b..4dc9fc6 100644
 +            var v = Environment.GetEnvironmentVariable(k);
 +            return v == "1" || string.Equals(v, "true", StringComparison.OrdinalIgnoreCase);
 +        }
++        // Explicit RECOMPONE_UNTHROTTLE=0 wins over the headless/offscreen
++        // default. Fast-forward is right for soak runs, but anything that has
++        // to reason about the game's own pacing -- driving menus, timing a lap
++        // -- is far easier at real speed.
++        var explicitOff = Environment.GetEnvironmentVariable("RECOMPONE_UNTHROTTLE");
++        if (explicitOff is "0" or "false" or "False") return false;
 +        return On("RECOMPONE_UNTHROTTLE") || On("RECOMPONE_HEADLESS") || On("RECOMPONE_OFFSCREEN");
 +    }
 +
@@ -214,10 +220,10 @@ index 0000000..86a9225
 +}
 diff --git a/RecompOne.Runtime/Host/ScriptedInput.cs b/RecompOne.Runtime/Host/ScriptedInput.cs
 new file mode 100644
-index 0000000..8af05d2
+index 0000000..014912e
 --- /dev/null
 +++ b/RecompOne.Runtime/Host/ScriptedInput.cs
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,151 @@
 +using RecompOne.Runtime.Hardware;
 +
 +namespace RecompOne.Runtime.Host;
@@ -303,9 +309,53 @@ index 0000000..8af05d2
 +        Console.Error.WriteLine($"[Input] {_steps.Length} scripted step(s)");
 +    }
 +
++    // [jetmoto-fork] RECOMPONE_INPUT_LIVE=<path> reads the current button state
++    // from a file every tick, so a harness can drive the pad reactively instead
++    // of guessing timings up front. Fixed scripts cannot navigate past the
++    // attract demo reliably: it starts on its own and a press during it only
++    // returns to the title, so a script bounces between the two. Watching what
++    // the game loads and responding is deterministic.
++    static string? _livePath;
++    static bool _liveInit;
++    static long _liveStamp = -1;
++    static ushort _liveMask;
++
++    static void LiveTick()
++    {
++        if (!_liveInit)
++        {
++            _liveInit = true;
++            _livePath = Environment.GetEnvironmentVariable("RECOMPONE_INPUT_LIVE");
++            if (!string.IsNullOrEmpty(_livePath))
++                Console.Error.WriteLine($"[Input] live input from {_livePath}");
++        }
++        if (string.IsNullOrEmpty(_livePath)) return;
++
++        try
++        {
++            var fi = new FileInfo(_livePath);
++            if (!fi.Exists) return;
++            long stamp = fi.LastWriteTimeUtc.Ticks ^ fi.Length;
++            if (stamp != _liveStamp)
++            {
++                _liveStamp = stamp;
++                ushort mask = 0;
++                foreach (var b in File.ReadAllText(_livePath)
++                             .Split('+', StringSplitOptions.RemoveEmptyEntries |
++                                         StringSplitOptions.TrimEntries))
++                    if (Buttons.TryGetValue(b, out var bit)) mask |= bit;
++                _liveMask = mask;
++                Console.Error.WriteLine($"[Input] live state 0x{(ushort)~mask:X4}");
++            }
++            Controller.State = (ushort)~_liveMask;
++        }
++        catch { /* harness may be mid-write; keep the previous state */ }
++    }
++
 +    /// <summary>Apply any step that is now due.</summary>
 +    public static void Tick()
 +    {
++        LiveTick();
 +        if (_steps == null) Load();
 +        if (_steps!.Length == 0) return;
 +
@@ -778,10 +828,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..68940b0 100644
+index a036512..9068ce8 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,11 +9,75 @@ public static class LibEtc
+@@ -9,15 +9,110 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -792,8 +842,23 @@ index a036512..68940b0 100644
 +    // counter only moves when VSync(0) is called.
 +    static readonly long _t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 +
-+    internal static int VCountNow => (int)((System.Diagnostics.Stopwatch.GetTimestamp() - _t0)
-+                                  * 60 / System.Diagnostics.Stopwatch.Frequency);
++    // [jetmoto-fork] The vsync counter advances one tick per presented frame,
++    // so the game's frame-counted logic and its VSync-timed logic agree.
++    //
++    // It was wall-clock derived at first, to break a boot-time spin of the form
++    // `while (VSync(-1) < target)`. That worked but made the world
++    // inconsistent: unthrottled the game runs several hundred fps, so anything
++    // it counts in frames ran ~10x fast while anything timed off VSync(-1) ran
++    // at real speed. Attract demos meant to last ~25s finished in ~4s, and race
++    // state behaved erratically.
++    //
++    // The spin is still handled, by advancing the tick when the game polls
++    // repeatedly without presenting -- that is precisely the situation where
++    // hardware would have had a VBlank fire underneath it.
++    static int _pollsSinceTick;
++    const int PollsPerForcedTick = 64;
++
++    internal static int VCountNow => _vcount;
 +
 +    // [jetmoto-fork] VBlank must fire on its own schedule, not only when the
 +    // game calls VSync(0). PSYQ's libgpu services its 64-entry command queue
@@ -854,7 +919,27 @@ index a036512..68940b0 100644
 +            throw new InvalidOperationException($"[trap] VSync #{_vsyncCalls} mode={mode}");
          Log.Sdk($"VSync({mode})");
 -        if (mode < 0) { c.V0 = (uint)_vcount; return; }
-+        if (mode < 0) { int now = VCountNow; Peek(m, now); MaybeVBlank(now); c.V0 = (uint)now; return; }
++        if (mode < 0)
++        {
++            // Polling without presenting: on hardware a VBlank would still be
++            // firing underneath, so advance after enough polls to keep spins
++            // from hanging.
++            if (++_pollsSinceTick >= PollsPerForcedTick)
++            {
++                _pollsSinceTick = 0;
++                _vcount++;
++                MaybeVBlank(_vcount);
++            }
++            Peek(m, _vcount);
++            c.V0 = (uint)_vcount;
++            return;
++        }
          if (mode == 1) { c.V0 = 0; return; }
  
          Runtime.PresentFrame();
+         _vcount++;
++        _pollsSinceTick = 0;
++        MaybeVBlank(_vcount);
+ 
+         if (Event.HasAnyListeners<VSyncEvent>())
+         {

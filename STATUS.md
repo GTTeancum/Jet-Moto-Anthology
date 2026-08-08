@@ -17,7 +17,7 @@ of completing laps as a rider.
 | 3 | PSYQ SDK calls routed to runtime | **15 routed** — libcd, libcdstream, VSync, DrawSync |
 | 4 | Game progresses past init | **done** |
 | 5 | Title screen renders | **done** — verified from an offscreen capture |
-| 6 | Menus navigable under scripted input | **done** |
+| 6 | Menus navigable under scripted input | **not verified** — see below |
 | 7 | A race loads | **done** — races render in full 3D, screenshot-verified |
 | 8 | **Lap counter increments** — the goal | **not met** — see below |
 
@@ -41,8 +41,9 @@ game was waiting on rather than by inspection. Details in `DECISIONS.md`.
    status `0x22` retried the same read forever.
 3. `LibEtc.VSync(-1)` returned a counter only advanced by the game's own
    `VSync(0)`, deadlocking a boot-time spin. VBlank is now time-driven.
-4. BIOS `InitPAD2`/`StartPAD2` were no-ops, so the game received **no
-   controller input at all** — from a real pad either, not only a scripted one.
+4. BIOS `InitPAD2`/`StartPAD2` were no-ops, so the pad buffers were never
+   filled at all. Fixing that makes the buffers correct, but the game still
+   does not act on them — see gate 6.
 5. Not a bug but a big one: `FrameClock` capped harness runs at ~10 fps.
 
 ## Performance
@@ -61,6 +62,30 @@ The apparent "3 fps" was never the recompiled code. It was an unrouted
 `StGetNext` spinning `0x800000` times inside another `0x800000`-iteration
 retry, and after that a deliberate 60 Hz frame limiter. Stack sampling with
 `dotnet-stack` found both; guessing at the memory path found nothing.
+
+## Gate 6: retracted — the game does not act on input
+
+Earlier this was marked done because `NAVIGATE/PICKRIDE.BS` loaded after
+scripted presses. That was the **attract sequence** cycling menus by itself,
+not a response to input.
+
+What is actually established, by peeking the pad buffer at `0x801EA0D8` while
+holding a button:
+
+- The buffer is populated exactly as the game's own parser expects —
+  `0xFFBF4100` with Cross held, and `func_800EF098` computes
+  `(buf[3] | buf[2] << 8) ^ 0xFFFF` = `0x4000` = Cross.
+- The game nevertheless does not respond. Pressing X or Start on the title for
+  seconds at a time never leaves it, and a press during a demo does not cut the
+  demo short — demos run their full ~11.5s either way.
+
+So input plumbing is correct up to the buffer, and something downstream never
+consumes it. The next step is to find what the menu code actually reads: either
+`func_800EF098` is not being called in this state, or the menus take input from
+a different path (libpad rather than the BIOS buffers, or an interrupt-driven
+callback that is not being invoked).
+
+The attract loop at real-time pacing is: title ~30s, demo race ~11.5s, repeat.
 
 ## Gate 8: not met, and why the earlier result was wrong
 
