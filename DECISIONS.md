@@ -186,3 +186,27 @@ So an explicit `functions[]` entry per address — exactly what `autorun.py`
 adds — is the correct fix, and discovering them by running until each one
 faults is the only sound way to find them. It is cheap: an iteration is about
 25 seconds once the log flood is gone.
+
+### 2026-08-07 — The lap counter is a per-rider array at 0x801744B4, stride 0x84
+
+Found by diffing RAM snapshots across a race rather than by reverse
+engineering the HUD, which is what `RamDump` + `harness/findcounter.py` were
+built for.
+
+```
+0x801744B4  [0,0,0,0,0,0,0,1,1,1,1,1,1,1]   rider 0
+0x80174538  [0,0,0,0,0,0,0,1,1,1,1,1,1,1]   rider 1
+0x801745BC  [0,0,0,0,0,0,0,1,1,1,1,1,1,1]   rider 2
+0x80174640  [0,0,0,0,0,0,0,0,1,1,1,1,1,1]   rider 3
+0x801746C4  [0,0,0,0,0,0,0,0,0,0,0,0,1,1]   rider 4
+```
+
+The staggering is the tell: a shared frame counter or timer would move in
+lockstep, but these increment at different moments, which is what a field of
+racers crossing the line at different times looks like. Stride `0x84` is the
+rider struct size.
+
+`0x80173C74` also looks lap-like but resets (…2,2,2,1,1…), so it is probably a
+displayed or leader-relative lap that restarts with the attract loop. Not the
+one to assert on.
+

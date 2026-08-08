@@ -55,7 +55,7 @@ def main():
 
     print(f"watching {args.addr} ({args.width}-bit) for {args.laps} lap(s), "
           f"{args.timeout}s budget")
-    p = subprocess.Popen([sys.executable and "dotnet", str(PORT), str(CUE)],
+    p = subprocess.Popen(["dotnet", str(PORT), str(CUE)],
                          cwd=ROOT, env=env, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True,
                          encoding="utf-8", errors="replace", bufsize=1)
