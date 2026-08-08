@@ -161,3 +161,28 @@ done first.
 untracked working copy and would have been lost on a re-clone. They now live in
 `tools/recompone-fork.patch` against a pinned upstream revision, restored by
 `tools/apply-fork.sh`. Regenerate the patch whenever the fork changes.
+
+### 2026-08-07 — Why linear sweep misses these, and why one-at-a-time is right
+
+The race code kept faulting on `unmapped call` at addresses like `0x8010AB44`,
+and the instinct was to bulk-harvest them rather than grind one per run. Two
+attempts at that failed, and the reason is worth recording.
+
+They are not in a static table: searching the EXE for the literal address finds
+nothing, because the dispatch table is built in RAM at runtime
+(`s2 = *(base + idx*4); jalr s2`). Harvesting pointer-shaped words from a RAM
+snapshot produced 375 "targets", but the first several were string-pool
+addresses — the filter cannot tell code from data, and guessing wrong emits
+junk functions.
+
+They are also not findable by prologue scanning. Every `addiu sp, sp, -N` in
+the failing regions is *already* emitted. `FunctionDetector.LinearSweep` skips
+any address covered by an existing function (`f.Start <= addr < f.End`), so
+these are **secondary entry points inside functions the detector merged**.
+Nothing static distinguishes them from ordinary mid-function labels; only the
+fact that the game calls them does.
+
+So an explicit `functions[]` entry per address — exactly what `autorun.py`
+adds — is the correct fix, and discovering them by running until each one
+faults is the only sound way to find them. It is cheap: an iteration is about
+25 seconds once the log flood is gone.
