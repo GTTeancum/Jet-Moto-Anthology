@@ -69,9 +69,11 @@ job is the rest of libcd — `CdReadSync`, `CdSync`, `CdControl`, `CdGetSector`,
 and, more importantly, nothing pumps frames — so it is only useful for
 execution-progress testing, never for "does it render".
 
-`RECOMPONE_OFFSCREEN=1` creates a real GL context in a window with
-`IsVisible=false`. Nothing ever appears on the user's screen (their stated
-requirement) but rendering is real and frames can be dumped. Frame dumping is
+`RECOMPONE_OFFSCREEN=1` creates a real GL context in a window parked outside
+the desktop (see the `IsVisible=false` entry at the end — the first attempt
+hid the window and got no rendering at all). Nothing ever appears on the
+user's screen (their stated requirement) but rendering is real and frames can
+be dumped. Frame dumping is
 `RECOMPONE_DUMP_DIR` + `RECOMPONE_DUMP_EVERY`, written as binary PPM to avoid
 adding an image-encoder dependency to the fork.
 
