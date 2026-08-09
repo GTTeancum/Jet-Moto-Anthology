@@ -964,7 +964,7 @@ index fdf7b6b..5d2f09e 100644
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
      }
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..0e758eb 100644
+index 6432fa4..300a160 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
 @@ -38,6 +38,10 @@ public static class LibCd
@@ -1017,6 +1017,34 @@ index 6432fa4..0e758eb 100644
          c.V0 = 1;
      }
  
+@@ -252,10 +272,14 @@ public static class LibCd
+         c.V0 = fp;
+     }
+ 
+-    public static void CdSyncCallback(CpuContext c, IMemory m) { c.V0 = _cbSync; _cbSync = c.A0; }
+-    public static void CdReadyCallback(CpuContext c, IMemory m) { c.V0 = _cbReady; _cbReady = c.A0; }
+-    public static void CdReadCallback(CpuContext c, IMemory m) { c.V0 = _cbData; _cbData = c.A0; }
+-    public static void CdDataCallback(CpuContext c, IMemory m) { c.V0 = _cbData; _cbData = c.A0; }
++    public static void CdSyncCallback(CpuContext c, IMemory m)
++        { c.V0 = _cbSync; _cbSync = c.A0; Log.Sdk($"CdSyncCallback <- 0x{c.A0:X8}"); }
++    public static void CdReadyCallback(CpuContext c, IMemory m)
++        { c.V0 = _cbReady; _cbReady = c.A0; Log.Sdk($"CdReadyCallback <- 0x{c.A0:X8}"); }
++    public static void CdReadCallback(CpuContext c, IMemory m)
++        { c.V0 = _cbData; _cbData = c.A0; Log.Sdk($"CdReadCallback <- 0x{c.A0:X8}"); }
++    public static void CdDataCallback(CpuContext c, IMemory m)
++        { c.V0 = _cbData; _cbData = c.A0; Log.Sdk($"CdDataCallback <- 0x{c.A0:X8}"); }
+ 
+     public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
+     public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
+@@ -315,6 +339,8 @@ public static class LibCd
+                 break;
+             case Setmode:
+                 if (param != 0) _mode = m.ReadU8(param);
++                Log.Sdk($"Setmode 0x{_mode:X2} (speed={((_mode & 0x80) != 0 ? "2x" : "1x")} " +
++                        $"rt={((_mode & 0x40) != 0)} size={SectorSize(_mode)})");
+                 break;
+             case Setfilter:
+                 if (param != 0) { _filterFile = m.ReadU8(param); _filterChannel = m.ReadU8(param + 1); }
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
 index ad79811..0f64f76 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
@@ -1056,10 +1084,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..bdbd034 100644
+index a036512..5965ee2 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,158 @@ public static class LibEtc
+@@ -9,15 +9,173 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -1101,6 +1129,7 @@ index a036512..bdbd034 100644
 +    static readonly long TicksPerFrame =
 +        (long)(System.Diagnostics.Stopwatch.Frequency * 1001.0 / 60000.0);
 +    static long _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
++    static long _lastCdPump = System.Diagnostics.Stopwatch.GetTimestamp();
 +
 +    // [jetmoto-fork] RECOMPONE_FRAME_DIVIDER=<n> makes VSync(0) wait n fields
 +    // instead of one, so the game advances at 60/n Hz.
@@ -1197,6 +1226,20 @@ index a036512..bdbd034 100644
 +                    MaybeVBlank(_vcount);
 +                }
 +            }
++            // [jetmoto-fork] CD data delivery must not depend on the game
++            // presenting a frame. LibCd.Tick runs the registered data callback,
++            // and it was only reachable from PresentFrame -- i.e. from VSync(0).
++            // Jet Moto 2 waits for a sector by polling VSync(-1) without ever
++            // presenting, so the callback never fired, the wait timed out and
++            // the read retried forever. On hardware the CD interrupt is
++            // asynchronous, so pump it here too, rate-limited to one field.
++            long tnow = System.Diagnostics.Stopwatch.GetTimestamp();
++            if (tnow - _lastCdPump >= TicksPerFrame)
++            {
++                _lastCdPump = tnow;
++                LibCd.Tick();
++            }
++
 +            Peek(m, _vcount);
 +            c.V0 = (uint)_vcount;
 +            return;

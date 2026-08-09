@@ -1,0 +1,67 @@
+{
+  "game": {
+    "id": "SCUS-94167",
+    "name": "JetMoto2",
+    "output": "../generated"
+  },
+  "cue": "../../JetMoto2_PS1image/Jet Moto 2 (v1.1).cue",
+
+  // Jet Moto 2 ships a single 897 KB boot EXE (SCUS_941.67, text @ 0x801048B8).
+  // The disc dump had no cue sheet; one was generated from the 17 track files
+  // (track 1 MODE2/2352 verified by sync pattern and mode byte, 2-17 audio with
+  // the 2-second pregap inside each file, matching Jet Moto 1's layout).
+  "overlays": [],
+
+  // Same as Jet Moto 1: entry-point scanning alone misses functions reached
+  // only through function pointers.
+  "linearSweep": true,
+
+  "addressComments": true,
+  // PSYQ SDK entry points, found the same way as Jet Moto 1: the retail build
+  // keeps the debug string pool, each library function prints a string bearing
+  // its own name, and the public wrapper is the small function whose only
+  // callee is that internal. Route at the public boundary, never the internal.
+  //
+  // PSYQ here is newer than JM1's (bios.c v1.86 / sys.c v1.135, 1997) and its
+  // CdRead no longer prints, so that pair is not identifiable from strings.
+  "functions": [
+    { "address": "0x8010DD08", "name": "CdInit" },
+    { "address": "0x8010DE10", "name": "CdSync" },
+    { "address": "0x8010DE30", "name": "CdReady" },
+    { "address": "0x8010E2B8", "name": "CdDataSync" },
+    // Three siblings all funnelling into CD_cw (0x8010EF00); usage profile
+    // matches JM1, where the most-called is CdControl and the one that also
+    // calls CdSync is CdControlB.
+    { "address": "0x8010DE78", "name": "CdControl" },
+    { "address": "0x8010DFB4", "name": "CdControlF" },
+    { "address": "0x8010E0E8", "name": "CdControlB" },
+    { "address": "0x80117D6C", "name": "VSync" },
+
+    // Callback setters. JM2 reads via CdlReadN streaming rather than CdRead,
+    // and LibCd.Tick only delivers DataReady when a data callback has been
+    // registered -- with these unrouted _cbData stays 0 and the game waits
+    // forever after issuing cmd 0x06. Identified by shape: small wrappers whose
+    // caller passes a code address as the argument.
+    // Correction: these are "read the global, store the new value, return the
+    // old" accessors -- exactly PSYQ callback-setter semantics. The first guess
+    // (0x8010E254/E274/E234) pointed at wrappers that call internals instead.
+    { "address": "0x8010DE50", "name": "CdReadyCallback" },
+    { "address": "0x8010DE64", "name": "CdReadCallback" },
+    // The read driver (the registered data callback) fetches sectors through
+    // this; a0 is a destination buffer and a1 a word count.
+    { "address": "0x8010E274", "name": "CdGetSector" },
+    { "address": "0x80112E98", "name": "DrawSync" },
+
+    // Internals, named for readability only -- NOT routed.
+    { "address": "0x8010F5A4", "name": "CD_init" },
+    { "address": "0x8010E9B8", "name": "CD_sync" },
+    { "address": "0x8010EC38", "name": "CD_ready" },
+    { "address": "0x8010EF00", "name": "CD_cw" },
+    { "address": "0x8010F784", "name": "CD_datasync" },
+    { "address": "0x80117EE4", "name": "VSync_wait" },
+    { "address": "0x80112B1C", "name": "ResetGraph" },
+    { "address": "0x80113144", "name": "LoadImage" },
+    { "address": "0x8011301C", "name": "ClearImage" }
+  ],
+  "patches": []
+}

@@ -22,3 +22,5 @@ harness/traces/
 # RecompOne runtime-generated files (written next to the working directory)
 interface.ini
 *.sav
+JetMoto2_PS1image/
+JetMoto2/generated/
