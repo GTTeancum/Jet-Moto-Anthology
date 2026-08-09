@@ -126,9 +126,27 @@ So the menu polls input every frame and receives correct answers, and still
 does not transition. The defect is in what the menu does with the answer, not
 in obtaining it.
 
-**Next step:** identify the function containing `0x8014E9FC-0x8014EBE8`, find
-where it stores the swept button state, and find what reads that store — the
-break is between the snapshot and the menu's use of it.
+**The menu tick is understood.** `func_80134D14(struct)` runs per frame:
+
+```
+func_8014E9CC(struct)          # sweep: sets [struct+0x14] = -1, then queries
+                               # each button id with mode = [struct+0x10];
+                               # a hit writes the button index to [struct+0x14]
+if ([struct+0x14] >= 0) func_80134C2C(struct, index)   # act on it
+if ([struct+0x84] > 0)  [struct+0x84]--                # startup lockout
+```
+
+Observed live with `struct = 0x807FE740`: the lockout counts 299 -> 0 correctly
+(~5s at 60 Hz) and then stays 0, so it is not blocking. But `[struct+0x14]`
+stays **-1 at every tick**, including during a press — so the sweep is not
+recording a hit even though the same sweep's query sites *do* return hits when
+logged directly.
+
+That is the contradiction to resolve next: either `func_80134D14` belongs to a
+screen other than the title (it is dispatched, but so are a dozen handlers), or
+its queries and the observed hits happen in different frames. The cheap way to
+settle it is to log `[struct+0x10]` (the mode the sweep passes) and the tick's
+own query results together, rather than inferring across two runs.
 
 The attract loop at real-time pacing is: title ~30s, demo race ~11.5s, repeat.
 

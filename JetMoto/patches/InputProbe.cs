@@ -59,6 +59,38 @@ public static class InputProbe
     /// word through func_800EF4CC. Logging both says whether the menus are
     /// asking, and what answer they get.
     /// </summary>
+    static uint _menuStruct;
+    static int _menuTicks;
+    static int _lastSel = -99;
+    static int _lastLock = -99;
+
+    /// <summary>
+    /// func_80134D14 is the menu's per-frame tick: it sweeps input into a
+    /// struct, then acts on [struct+0x14] (the chosen button, -1 = none) unless
+    /// [struct+0x84] (a lockout counter) is holding it off. a0 is the struct.
+    /// </summary>
+    public static void MenuTickEnter(CpuContext c, IMemory m) => _menuStruct = c.A0;
+
+    public static void MenuTickExit(CpuContext c, IMemory m)
+    {
+        _menuTicks++;
+        if (_menuStruct == 0) return;
+        int sel, lockout;
+        try
+        {
+            sel = (int)m.ReadU32(_menuStruct + 0x14u);
+            lockout = (int)m.ReadU32(_menuStruct + 0x84u);
+        }
+        catch { return; }
+        if (sel != _lastSel || lockout != _lastLock || _menuTicks % 900 == 0)
+        {
+            _lastSel = sel; _lastLock = lockout;
+            System.Console.Error.WriteLine(
+                $"[Menu] tick #{_menuTicks} struct=0x{_menuStruct:X8} " +
+                $"selected={sel} lockout={lockout}");
+        }
+    }
+
     static int _strIn, _strOut;
 
     /// <summary>

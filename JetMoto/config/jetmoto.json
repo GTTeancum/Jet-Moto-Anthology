@@ -131,6 +131,10 @@
   "patches": [
     { "function": "func_800EF098", "mode": "post",
       "target": "Recompiled.InputProbe.AfterPadParse" },
+    { "function": "func_80134D14", "mode": "pre",
+      "target": "Recompiled.InputProbe.MenuTickEnter" },
+    { "function": "func_80134D14", "mode": "post",
+      "target": "Recompiled.InputProbe.MenuTickExit" },
     { "function": "func_800E0CDC", "mode": "pre",
       "target": "Recompiled.InputProbe.StrEnter" },
     { "function": "func_800E0CDC", "mode": "post",
