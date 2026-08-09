@@ -101,29 +101,34 @@ none moves the highlight off `1 PLAYER` or loads a new screen. One press *does*
 suppress the attract demo — after a press the demo stops starting — so input
 reaches game state, just not the menu.
 
-**Localised to a state-machine dispatch problem.** The interactive title code
-is `func_80134FBC` (it polls action `0x0B` with **mode 2**). Hooks show:
+**Where it actually stands** (an earlier note here blamed state-machine
+dispatch; that was wrong and is corrected below).
 
-- No query with mode 2 is *ever* issued — every observed query is mode 0.
-- `func_80134FBC` is never entered, and neither is either of its two callers,
-  `func_801395B8` / `func_8013963C`.
-- Both callers have **zero static callers**: they are reached only through a
-  function-pointer table, and that table never selects them.
+The real title handler is `func_801370B4`. It loads `STARTUP\TITLE.BS` and
+calls `func_8013C05C`, a generic menu driver, passing the option handlers
+(`0x80137130`, `0x80137160`, and `0x801377F8` = Options). **Both are dispatched
+and run.**
 
-So the game never dispatches to its interactive title state. Ruled out along
-the way: the key-binding table at `0x801D25F8` is correctly populated
-(`table[mode*128 + id]`, with `table[0x0B] = 0x0B`), and the STR movie player
-(`func_800E0CDC`) nests to depth ~20 but unwinds cleanly — 200 entries, 200
-exits, final depth 0 — so it is not stuck.
+`func_80134FBC` / `func_801395B8` / `func_8013963C` are *not* the title — they
+are the controller-config screen (`MISC\CONTROL%d.BS`). Their never being
+reached is expected, not a defect. That invalidated the previous "the title
+state is never dispatched" conclusion.
 
-**Next step:** find the state-machine dispatch table and see which handler it
-selects instead. The same pattern of pointer-table dispatch caused the earlier
-`unmapped call` faults, so the table is likely built at runtime.
+Logging the caller (`RA`) of every input query shows two pollers running every
+frame:
 
-Three measurement mistakes are recorded here because each briefly looked like a
-real failure: sampling `gp+0x6C` at 1 Hz (the edge is one frame wide), hooking
-the parser (which runs before the accumulator in the same frame), and hooking
-`func_800EF26C`/`2AC` (dead code).
+- `RA=0x8014E9FC..0x8014EBE8` — sweeps ids `0x00`-`0x15` with mode 0. This is
+  the menu's input snapshot, and it returns hits for pressed buttons.
+- `RA=0x801352E4/0x801352F8` — ids `0x0A`/`0x08` with mode 2, inside
+  `func_801352B4`.
+
+So the menu polls input every frame and receives correct answers, and still
+does not transition. The defect is in what the menu does with the answer, not
+in obtaining it.
+
+**Next step:** identify the function containing `0x8014E9FC-0x8014EBE8`, find
+where it stores the swept button state, and find what reads that store — the
+break is between the snapshot and the menu's use of it.
 
 The attract loop at real-time pacing is: title ~30s, demo race ~11.5s, repeat.
 

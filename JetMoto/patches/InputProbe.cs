@@ -118,9 +118,12 @@ public static class InputProbe
     {
         _lastA0 = c.A0 & 0xFF;
         _lastA1 = c.A1 & 0xFFFF;
-        if (_seenIds.Add(_lastA0))
+        // RA identifies the caller, which is the quickest way to find which
+        // screen code is actually polling input at any moment.
+        uint key = (c.RA & 0xFFFFFF) | (_lastA0 << 24);
+        if (_seenIds.Add(key))
             System.Console.Error.WriteLine(
-                $"[Query] first sighting of button id 0x{_lastA0:X2} (mode {_lastA1})");
+                $"[Query] id 0x{_lastA0:X2} mode {_lastA1} asked from RA=0x{c.RA:X8}");
     }
 
     public static void AfterButtonQuery(CpuContext c, IMemory m)
