@@ -7,6 +7,46 @@ Two ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 | **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
 
+## Loose files
+
+Either game will boot from an extracted tree of loose files instead of a
+bin/cue image, and prefers it when one is present. Extract with:
+
+```bash
+python tools/extract-disc.py --cue "JetMotoPS1image/Jet Moto (USA).cue" --out JetMoto/disc
+```
+
+```
+JetMoto/disc/
+  disc.json        manifest: tracks, files, sector map
+  files/...        the ISO tree, ";1" suffixes stripped -- browsable, moddable
+  cdaudio/*.ogg    one per CD-DA track
+  structure.bin    the sectors belonging to no file (descriptors, directories)
+```
+
+The disc is still addressed by sector everywhere above the CD layer -- by the
+game's own ISO reader, by overlay loading, by the recompiler config -- so the
+tree is not just a folder of files: the runtime rebuilds a byte-faithful view of
+the data track from it, at the original LBAs. `--verify` proves that, comparing
+every sector against the image:
+
+```bash
+python tools/extract-disc.py --cue "JetMoto2_PS1image/Jet Moto 2 (v1.1).cue" --out JetMoto2/disc --verify
+```
+
+Both discs currently verify 100% identical (34186/34186 and 59103/59103).
+
+Turning the redbook tracks into ogg takes the soundtrack from ~450 MB of raw
+PCM to ~45 MB, and it plays: the runtime had never produced CD audio at all, so
+this is music neither port had before. Files whose ISO entry points at a CD-DA
+track rather than at data -- Jet Moto 2's `.DA` files each start exactly on an
+audio track -- are recorded as references and served by the soundtrack.
+
+`RECOMPONE_DISC=<path>` forces a specific disc of either kind;
+`RECOMPONE_DISC_PREFER=cue` keeps the image even when loose files exist.
+
+---
+
 ## Jet Moto 2
 
 Boots through the logos and FMVs to the title screen, the menus respond to the
@@ -130,9 +170,9 @@ requirement. `RECOMPONE_FRAME_DIVIDER=2` throttles to the original's 30 Hz.
 ## Known loose ends
 
 - **Sound is unverified in detail.** It plays, but music and effects have never
-  been checked for correctness and the 13 Red Book audio tracks are unexercised.
-  `CueBin` warns about reads just past the data track (lba 34186-34195), which is
-  exactly where those tracks begin.
+  been checked for correctness. The 13 Red Book tracks are no longer unexercised:
+  with a loose disc they are ogg files and the game plays them (the attract
+  sequence starts track 10), which is music this port previously never produced.
 - **`QUICKY.PAC`** in `PICKTRAC` has never been examined.
 - **Diagnostic scaffolding** in `JetMoto/patches/InputProbe.cs` is unwired but
   still present.

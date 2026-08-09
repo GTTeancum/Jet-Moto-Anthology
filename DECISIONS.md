@@ -350,3 +350,47 @@ the driver: raising IRQ7 from inside the register write (too early — the state
 machine advances only after that write returns, so every packet restarted at
 its first byte), and synthesising I_STAT bit 7 around the chain walk (the
 cleanup cleared the bit and acknowledged the transfer on the game's behalf).
+
+---
+
+### 2026-08-09 — Loose files, and why a folder of files is not enough
+
+Both ports now prefer an extracted tree over a bin/cue image. The obvious
+implementation -- dump the ISO to a folder and serve files by name -- would have
+worked for Jet Moto 1 and failed completely for Jet Moto 2, because almost
+nothing above the CD layer asks for a *file*. The game's own ISO reader, overlay
+activation, `CdSearchFile`, and the recompiler's overlay config all address the
+disc by **sector**.
+
+So the loose tree keeps the original LBAs and the runtime rebuilds the data
+track from three sources: file contents from the loose files, the sectors
+belonging to no file (volume descriptors, path tables, directory records) from a
+small `structure.bin` — 43 sectors for Jet Moto 1, 90 for Jet Moto 2 — and a
+synthesised blank sector for everything else. Sector headers are generated, so
+`Setmode`'s 2340-byte whole-sector view works exactly as it does off the image.
+
+**One seam, at `CueBin`.** Every consumer already reached the disc through it,
+so backing its members with a `LooseDisc` made loose files work everywhere at
+once rather than teaching each caller about a second disc format.
+
+`--verify` compares every reconstructed sector against the image and both discs
+come back 100% identical. That check is the whole reason to trust this: "the
+files are all there" is not the property that matters.
+
+Two things the extraction had to learn from the data rather than from
+assumption:
+
+- **Files that are not files.** Jet Moto 2's `.DA` entries sit past the end of
+  the data track — `CANYON.DA` begins exactly at audio track 2. They name the
+  redbook tracks so the game can find them by filename. The first extraction
+  wrote sixteen zero-byte files and looked fine; they are now recorded as track
+  references and answered by the soundtrack.
+- **Form 2 sectors.** XA payloads are 2324 bytes and cannot survive a 2048-byte
+  view, so any file containing one is stored as whole 2352-byte sectors and
+  served back verbatim.
+
+CD audio is a genuine gain rather than a port of existing behaviour: the runtime
+accepted `CdlPlay` and produced no samples, so both games had always run without
+music. It needed wiring in two places, because the two games reach the drive
+differently — `CdController` for Jet Moto 2's hardware path, and the libcd HLE
+for Jet Moto 1's.
