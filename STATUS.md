@@ -32,6 +32,16 @@ What it needed, none of which Jet Moto 1 did (details in `DECISIONS.md`):
   `SysEnqIntRP` interrupt chain, which was stored and never walked. The game
   ships its own pad driver and needs both.
 
+Verified under scripted pad input: the menu selection moves with left/right,
+Cross confirms through Choose Race Type and the track briefing, and the race
+itself runs — timer counting, lap counter, minimap and speedometer all live,
+across several different tracks over a long run, with no crashes and no
+unmapped calls.
+
+Not machine-verified: a completed lap. The harness can hold the throttle but
+cannot steer, so finishing a lap needs a person at the controls — the same way
+Jet Moto 1's three-lap race was confirmed.
+
 Known issue: a garbled sprite blob follows the rider in-race, most likely a
 particle or spray effect. Cosmetic; the race is otherwise correct.
 
