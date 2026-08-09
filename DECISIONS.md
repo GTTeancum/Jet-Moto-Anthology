@@ -131,10 +131,14 @@ filled.
 
 The byte order was settled from the game's own parser rather than from docs.
 `func_800EF098` tests `buf[1] >> 4 == 4` for a digital pad and then forms
-`(buf[3] | buf[2] << 8) ^ 0xFFFF`, so `buf[3]` is the low button byte. A first
-attempt had bytes 2 and 3 swapped, which produced a plausible-looking buffer
-the game silently ignored — the same class of mistake as `CdRead`/`CdReadSync`.
-**Generalise: when a name or layout is ambiguous, the call site decides it.**
+`(buf[3] | buf[2] << 8) ^ 0xFFFF`, so `buf[3]` looks like the low button byte.
+
+> **Superseded 2026-08-09 — this conclusion was wrong.** That reading is exactly
+> backwards. The real BIOS buffer holds SELECT..LEFT first, so the game's word is
+> byte-swapped relative to the standard layout. With the order above, every
+> button arrived 8 bits from where it belonged and Square acted as Left. The
+> reasoning felt airtight and was not; it was corrected by a person pressing keys
+> and reporting the symptom. See the 2026-08-09 entry.
 
 **`FrameClock` capped harness runs at 60 Hz** and, in practice, ~10 fps.
 Unthrottling is now the default for headless and offscreen runs, which are
