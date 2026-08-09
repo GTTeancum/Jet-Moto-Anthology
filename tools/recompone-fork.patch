@@ -1,8 +1,8 @@
 diff --git a/RecompOne.Runtime/Bios/BiosB.cs b/RecompOne.Runtime/Bios/BiosB.cs
-index f5935c8..905c1ff 100644
+index f5935c8..ece513a 100644
 --- a/RecompOne.Runtime/Bios/BiosB.cs
 +++ b/RecompOne.Runtime/Bios/BiosB.cs
-@@ -96,8 +96,34 @@ public static class BiosB
+@@ -96,8 +96,41 @@ public static class BiosB
          return e.Buttons;
      }
  
@@ -23,8 +23,15 @@ index f5935c8..905c1ff 100644
 +        if (buf == 0) return;
 +        m.WriteU8(buf + 0, (byte)(connected ? 0x00 : 0xFF));
 +        m.WriteU8(buf + 1, (byte)(connected ? 0x41 : 0xFF));   // 0x4X = digital pad
-+        m.WriteU8(buf + 2, (byte)(state >> 8));                // L2..SQUARE
-+        m.WriteU8(buf + 3, (byte)(state & 0xFF));              // SELECT..LEFT
++        // Byte order settled by observed behaviour, not by reading the parser.
++        // The game forms its button word as (buf[3] | buf[2] << 8), which made
++        // it look as though buf[3] should hold SELECT..LEFT. With that order,
++        // pressing Square (bit 15) acted as Left (bit 7) in menus -- an exact
++        // 8-bit shift, i.e. the two bytes reversed. The real BIOS buffer holds
++        // SELECT..LEFT first, so the game's internal word is byte-swapped
++        // relative to the standard 16-bit layout.
++        m.WriteU8(buf + 2, (byte)(state & 0xFF));              // SELECT..LEFT
++        m.WriteU8(buf + 3, (byte)(state >> 8));                // L2..SQUARE
 +    }
 +
      static void PadRead(IMemory m)
@@ -37,7 +44,7 @@ index f5935c8..905c1ff 100644
          if (_padBuf == 0) return;
          ushort s = Hardware.Controller.State;
          ushort swapped = (ushort)((s >> 8) | (s << 8));
-@@ -136,8 +162,15 @@ public static class BiosB
+@@ -136,8 +169,15 @@ public static class BiosB
              case 0x0F: CloseTh(c.A0); c.V0 = 1u; break;
              case 0x10: break;
              case 0x11: break;
@@ -246,6 +253,78 @@ index 24e34c6..a9cbb44 100644
              throw new InvalidOperationException($"unmapped call: 0x{addr:X8}");
 +        }
          fn(c, m);
+     }
+ 
+diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
+index 8b55b53..767516e 100644
+--- a/RecompOne.Runtime/Gpu/Gpu.cs
++++ b/RecompOne.Runtime/Gpu/Gpu.cs
+@@ -19,6 +19,14 @@ public sealed partial class Gpu
+     int _texDepth;
+     int _blendMode;
+     bool _dither;
++
++    // [jetmoto-fork] Dithering is removed outright. The PS1 GPU dithered when
++    // reducing 24-bit shaded colour to 15-bit output, which on a modern display
++    // reads as a fixed 4x4 crosshatch over every gouraud and modulated-texture
++    // surface. The game's own request is still tracked in _dither so GPUSTAT
++    // bit 9 reports what it set -- only the rendering effect is suppressed.
++    internal const bool DitherEnabled = false;
++    internal bool EffectiveDither => _dither && DitherEnabled;
+     bool _texDisable;
+ 
+     int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
+diff --git a/RecompOne.Runtime/Gpu/GpuHleForward.cs b/RecompOne.Runtime/Gpu/GpuHleForward.cs
+index 80a937d..4af164e 100644
+--- a/RecompOne.Runtime/Gpu/GpuHleForward.cs
++++ b/RecompOne.Runtime/Gpu/GpuHleForward.cs
+@@ -13,7 +13,7 @@ public sealed partial class Gpu
+     {
+         ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
+         TwMaskX = _texWinMaskX, TwMaskY = _texWinMaskY, TwOffX = _texWinOffX, TwOffY = _texWinOffY,
+-        SetMask = _setMask, CheckMask = _checkMask, Dither = _dither,
++        SetMask = _setMask, CheckMask = _checkMask, Dither = EffectiveDither,
+     };
+ 
+     static HleVertex HV(in Vert v) => new()
+diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
+index 6f7a426..e2eeb07 100644
+--- a/RecompOne.Runtime/Gpu/GpuRaster.cs
++++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
+@@ -99,7 +99,7 @@ public sealed partial class Gpu
+         int bias0 = IsTopLeft(b, c) ? 0 : -1;
+         int bias1 = IsTopLeft(c, a) ? 0 : -1;
+         int bias2 = IsTopLeft(a, b) ? 0 : -1;
+-        bool ditherTex = _dither && !raw;
++        bool ditherTex = EffectiveDither && !raw;
+ 
+         int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
+         int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
+@@ -136,7 +136,7 @@ public sealed partial class Gpu
+                     if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
+                     Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
+                 }
+-                else Plot(x, y, r, g, bl, semi, _dither && gouraud);
++                else Plot(x, y, r, g, bl, semi, EffectiveDither && gouraud);
+             }
+         }
+     }
+@@ -252,7 +252,7 @@ public sealed partial class Gpu
+         if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
+         int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
+         int steps = Math.Max(dx, dy);
+-        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, _dither); return; }
++        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, EffectiveDither); return; }
+         for (int i = 0; i <= steps; i++)
+         {
+             double t = (double)i / steps;
+@@ -262,7 +262,7 @@ public sealed partial class Gpu
+             int g = (int)(g0 + (g1 - g0) * t);
+             int b = (int)(b0 + (b1 - b0) * t);
+             if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
+-            Plot(x, y, r, g, b, semi, _dither);
++            Plot(x, y, r, g, b, semi, EffectiveDither);
+         }
      }
  
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs

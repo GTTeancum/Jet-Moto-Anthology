@@ -16,6 +16,62 @@ namespace Recompiled;
 /// </summary>
 public static class InputProbe
 {
+    static int _t8014DAB8;
+    public static void Tick8014DAB8(CpuContext c, IMemory m)
+    {
+        if (++_t8014DAB8 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_8014DAB8 x{_t8014DAB8} a0=0x{c.A0:X8}");
+    }
+
+    static int _t8014E5F8;
+    public static void Tick8014E5F8(CpuContext c, IMemory m)
+    {
+        if (++_t8014E5F8 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_8014E5F8 x{_t8014E5F8} a0=0x{c.A0:X8}");
+    }
+
+    static int _t8014E888;
+    public static void Tick8014E888(CpuContext c, IMemory m)
+    {
+        if (++_t8014E888 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_8014E888 x{_t8014E888} a0=0x{c.A0:X8}");
+    }
+
+    static int _t80135454;
+    public static void Tick80135454(CpuContext c, IMemory m)
+    {
+        if (++_t80135454 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_80135454 x{_t80135454} a0=0x{c.A0:X8}");
+    }
+
+    static int _t801352B4;
+    public static void Tick801352B4(CpuContext c, IMemory m)
+    {
+        if (++_t801352B4 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_801352B4 x{_t801352B4} a0=0x{c.A0:X8}");
+    }
+
+    static int _t8014C99C;
+    public static void Tick8014C99C(CpuContext c, IMemory m)
+    {
+        if (++_t8014C99C % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_8014C99C x{_t8014C99C} a0=0x{c.A0:X8}");
+    }
+
+    static int _t8014B938;
+    public static void Tick8014B938(CpuContext c, IMemory m)
+    {
+        if (++_t8014B938 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_8014B938 x{_t8014B938} a0=0x{c.A0:X8}");
+    }
+
+    static int _t801325E8;
+    public static void Tick801325E8(CpuContext c, IMemory m)
+    {
+        if (++_t801325E8 % 600 == 1)
+            System.Console.Error.WriteLine($"[Tick] func_801325E8 x{_t801325E8} a0=0x{c.A0:X8}");
+    }
+
     static int _calls;
     static uint _last = 0xDEADBEEF;
 
