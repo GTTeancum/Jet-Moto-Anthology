@@ -59,6 +59,61 @@ public static class InputProbe
     /// word through func_800EF4CC. Logging both says whether the menus are
     /// asking, and what answer they get.
     /// </summary>
+
+    static int _seen80137428;
+    public static void Seen80137428(CpuContext c, IMemory m)
+    {
+        if (++_seen80137428 == 1)
+            System.Console.Error.WriteLine("[Seen] func_80137428 entered");
+        else if (_seen80137428 % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_80137428 x{_seen80137428}");
+    }
+
+    static int _seen8013AA28;
+    public static void Seen8013AA28(CpuContext c, IMemory m)
+    {
+        if (++_seen8013AA28 == 1)
+            System.Console.Error.WriteLine("[Seen] func_8013AA28 entered");
+        else if (_seen8013AA28 % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_8013AA28 x{_seen8013AA28}");
+    }
+
+    static int _seen8013D7C8;
+    public static void Seen8013D7C8(CpuContext c, IMemory m)
+    {
+        if (++_seen8013D7C8 == 1)
+            System.Console.Error.WriteLine("[Seen] func_8013D7C8 entered");
+        else if (_seen8013D7C8 % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_8013D7C8 x{_seen8013D7C8}");
+    }
+
+    static int _seen8011B3D0;
+    public static void Seen8011B3D0(CpuContext c, IMemory m)
+    {
+        if (++_seen8011B3D0 == 1)
+            System.Console.Error.WriteLine("[Seen] func_8011B3D0 entered");
+        else if (_seen8011B3D0 % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_8011B3D0 x{_seen8011B3D0}");
+    }
+
+    static int _seen80154A5C;
+    public static void Seen80154A5C(CpuContext c, IMemory m)
+    {
+        if (++_seen80154A5C == 1)
+            System.Console.Error.WriteLine("[Seen] func_80154A5C entered");
+        else if (_seen80154A5C % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_80154A5C x{_seen80154A5C}");
+    }
+
+    static int _seen8013C05C;
+    public static void Seen8013C05C(CpuContext c, IMemory m)
+    {
+        if (++_seen8013C05C == 1)
+            System.Console.Error.WriteLine("[Seen] func_8013C05C entered");
+        else if (_seen8013C05C % 3000 == 0)
+            System.Console.Error.WriteLine($"[Seen] func_8013C05C x{_seen8013C05C}");
+    }
+
     static uint _menuStruct;
     static int _menuTicks;
     static int _lastSel = -99;
@@ -69,7 +124,22 @@ public static class InputProbe
     /// struct, then acts on [struct+0x14] (the chosen button, -1 = none) unless
     /// [struct+0x84] (a lockout counter) is holding it off. a0 is the struct.
     /// </summary>
-    public static void MenuTickEnter(CpuContext c, IMemory m) => _menuStruct = c.A0;
+    static readonly System.Collections.Generic.HashSet<ulong> _structModes = new();
+    static int _hitsThisTick;
+
+    public static void MenuTickEnter(CpuContext c, IMemory m)
+    {
+        _menuStruct = c.A0;
+        _hitsThisTick = 0;
+        try
+        {
+            uint mode = m.ReadU32(_menuStruct + 0x10u);
+            if (_structModes.Add(((ulong)_menuStruct << 32) | mode))
+                System.Console.Error.WriteLine(
+                    $"[Menu] tick struct=0x{_menuStruct:X8} uses mode={(int)mode}");
+        }
+        catch { }
+    }
 
     public static void MenuTickExit(CpuContext c, IMemory m)
     {
@@ -82,7 +152,11 @@ public static class InputProbe
             lockout = (int)m.ReadU32(_menuStruct + 0x84u);
         }
         catch { return; }
-        if (sel != _lastSel || lockout != _lastLock || _menuTicks % 900 == 0)
+        if (_hitsThisTick > 0)
+            System.Console.Error.WriteLine(
+                $"[Menu] tick #{_menuTicks} had {_hitsThisTick} hit(s) -> selected={sel} " +
+                $"lockout={lockout} struct=0x{_menuStruct:X8}");
+        if (sel != _lastSel || lockout != _lastLock || _menuTicks % 1800 == 0)
         {
             _lastSel = sel; _lastLock = lockout;
             System.Console.Error.WriteLine(
@@ -162,8 +236,12 @@ public static class InputProbe
     {
         _q1++;
         if ((c.V0 & 0xFF) != 0)
+        {
+            _hitsThisTick++;
             System.Console.Error.WriteLine(
-                $"[Query] HIT id=0x{_lastA0:X2} mode={_lastA1} -> 0x{c.V0 & 0xFF:X2}");
+                $"[Query] HIT id=0x{_lastA0:X2} mode={_lastA1} " +
+                $"(menuStruct=0x{_menuStruct:X8})");
+        }
     }
 
     public static void AfterEdgeRead(CpuContext c, IMemory m)

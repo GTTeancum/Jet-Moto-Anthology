@@ -75,11 +75,121 @@ index adb02c5..06001ae 100644
                  }
                  return buf;
              }
+diff --git a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs b/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
+index 234f148..cbb487d 100644
+--- a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
++++ b/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
+@@ -14,12 +14,91 @@ public static class ConsoleMirror
+ 
+     public static int Version { get { lock (_gate) return _version; } }
+ 
++    // [jetmoto-fork] Persist everything to a log file next to the game, so a
++    // run that crashes or is killed still leaves a record. The in-memory ring
++    // above only feeds the debug panel and is lost on exit.
++    //
++    //   RECOMPONE_LOG_FILE=<path>  override the location
++    //   RECOMPONE_LOG_FILE=off     disable file logging
++    //
++    // The previous run is kept as jetmoto.prev.log so a crash can be compared
++    // against the run before it. Every line is flushed immediately -- a log you
++    // only get on a clean exit is useless for diagnosing a hang or a crash.
++    static StreamWriter? _file;
++
++    static void OpenLogFile()
++    {
++        try
++        {
++            var spec = Environment.GetEnvironmentVariable("RECOMPONE_LOG_FILE");
++            if (string.Equals(spec, "off", StringComparison.OrdinalIgnoreCase)) return;
++
++            string path = !string.IsNullOrWhiteSpace(spec)
++                ? spec!
++                : Path.Combine(AppContext.BaseDirectory, "jetmoto.log");
++
++            var dir = Path.GetDirectoryName(path);
++            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
++
++            var prev = Path.ChangeExtension(path, ".prev.log");
++            if (File.Exists(path))
++            {
++                try { File.Copy(path, prev, overwrite: true); } catch { }
++            }
++
++            _file = new StreamWriter(new FileStream(path, FileMode.Create,
++                FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
++
++            _file.WriteLine($"=== JetMoto run {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
++            _file.WriteLine($"log: {path}");
++            foreach (var key in new[]
++                     {
++                         "RECOMPONE_HEADLESS", "RECOMPONE_OFFSCREEN", "RECOMPONE_UNTHROTTLE",
++                         "RECOMPONE_MUTE", "RECOMPONE_LOG", "RECOMPONE_INPUT",
++                         "RECOMPONE_INPUT_LIVE", "RECOMPONE_PEEK", "RECOMPONE_DUMP_DIR",
++                     })
++            {
++                var v = Environment.GetEnvironmentVariable(key);
++                if (!string.IsNullOrEmpty(v)) _file.WriteLine($"env: {key}={v}");
++            }
++            _file.WriteLine(new string('-', 60));
++            Console.Error.WriteLine($"[Log] writing to {path}");
++        }
++        catch (Exception e)
++        {
++            Console.Error.WriteLine($"[Log] could not open log file: {e.Message}");
++            _file = null;
++        }
++    }
++
+     public static void Install()
+     {
+         if (_installed) return;
+         _installed = true;
++        OpenLogFile();
+         Console.SetOut(new Tee(Console.Out));
+         Console.SetError(new Tee(Console.Error));
++
++        // Catch the two ways a run normally dies, so the tail of the log is
++        // the reason rather than silence.
++        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
++        {
++            try
++            {
++                _file?.WriteLine($"=== UNHANDLED EXCEPTION ===\n{e.ExceptionObject}");
++                _file?.Flush();
++            }
++            catch { }
++        };
++        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
++        {
++            try
++            {
++                _file?.WriteLine($"=== exit {DateTime.Now:HH:mm:ss} ===");
++                _file?.Flush();
++            }
++            catch { }
++        };
+     }
+ 
+     public static void Clear()
+@@ -69,7 +148,12 @@ public static class ConsoleMirror
+ 
+     static void FlushPendingLocked()
+     {
+-        _lines.Add(_pending.ToString());
++        var line = _pending.ToString();
++        _lines.Add(line);
++        if (_file != null)
++        {
++            try { _file.WriteLine(line); } catch { }
++        }
+         _pending.Clear();
+         if (_lines.Count > MaxLines) _lines.RemoveRange(0, _lines.Count - MaxLines);
+     }
 diff --git a/RecompOne.Runtime/Dispatch/Dispatcher.cs b/RecompOne.Runtime/Dispatch/Dispatcher.cs
-index 24e34c6..b65f379 100644
+index 24e34c6..a9cbb44 100644
 --- a/RecompOne.Runtime/Dispatch/Dispatcher.cs
 +++ b/RecompOne.Runtime/Dispatch/Dispatcher.cs
-@@ -166,11 +166,31 @@ public static class Dispatcher
+@@ -166,11 +166,58 @@ public static class Dispatcher
          Runtime.OverlayLog.Record(name, OverlayEventKind.Unloaded);
      }
  
@@ -94,8 +204,35 @@ index 24e34c6..b65f379 100644
 +        Environment.GetEnvironmentVariable("RECOMPONE_COLLECT_UNMAPPED") is "1" or "true";
 +    static readonly HashSet<uint> _unmappedSeen = [];
 +
++    // [jetmoto-fork] RECOMPONE_TRACE_CALLS=lo-hi logs each distinct indirect
++    // call target in that address range, once. The game's screen state machine
++    // dispatches through a runtime-built function-pointer table, so the only
++    // way to see which handler it picks is to watch the dispatcher.
++    static readonly (uint Lo, uint Hi) TraceRange = ParseRange();
++    static readonly HashSet<uint> _tracedSeen = [];
++
++    static (uint, uint) ParseRange()
++    {
++        var spec = Environment.GetEnvironmentVariable("RECOMPONE_TRACE_CALLS");
++        if (string.IsNullOrWhiteSpace(spec)) return (1, 0);   // empty range
++        var parts = spec.Split('-', StringSplitOptions.TrimEntries);
++        try
++        {
++            uint lo = Convert.ToUInt32(parts[0].Replace("0x", ""), 16);
++            uint hi = parts.Length > 1 ? Convert.ToUInt32(parts[1].Replace("0x", ""), 16) : lo;
++            Console.Error.WriteLine($"[Trace] logging indirect calls in 0x{lo:X8}-0x{hi:X8}");
++            return (lo, hi);
++        }
++        catch { return (1, 0); }
++    }
++
      public static void Call(CpuContext c, IMemory m, uint addr)
      {
++        if (addr >= TraceRange.Lo && addr <= TraceRange.Hi)
++            lock (_tracedSeen)
++                if (_tracedSeen.Add(addr))
++                    Console.Error.WriteLine($"[Trace] dispatch -> 0x{addr:X8}");
++
          if (BiosKernel.TryDispatch(c, m, addr)) return;
          if (!_funcMap.TryGetValue(addr, out var fn))
 +        {
@@ -130,10 +267,19 @@ index 6027c49..aa6dcf3 100644
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
 diff --git a/RecompOne.Runtime/Host/FrameClock.cs b/RecompOne.Runtime/Host/FrameClock.cs
-index edd260b..eed6448 100644
+index edd260b..b4ba578 100644
 --- a/RecompOne.Runtime/Host/FrameClock.cs
 +++ b/RecompOne.Runtime/Host/FrameClock.cs
-@@ -9,9 +9,34 @@ internal static class FrameClock
+@@ -4,14 +4,42 @@ namespace RecompOne.Runtime.Host;
+ 
+ internal static class FrameClock
+ {
+-    const double FrameMs = 1000.0 / 60.0;
++    // [jetmoto-fork] NTSC field rate is 60000/1001 Hz = 59.94, not a flat 60.
++    // Jet Moto is SCUS (NTSC-U), so this is the rate its timing was written
++    // against. The difference is small but it is free to be correct.
++    const double FrameMs = 1001.0 / 60.0;
+ 
      static readonly Stopwatch _clock = Stopwatch.StartNew();
      static double _nextFrameMs;
  
@@ -828,10 +974,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..9068ce8 100644
+index a036512..f0a661b 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,110 @@ public static class LibEtc
+@@ -9,15 +9,127 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -857,6 +1003,12 @@ index a036512..9068ce8 100644
 +    // hardware would have had a VBlank fire underneath it.
 +    static int _pollsSinceTick;
 +    const int PollsPerForcedTick = 64;
++
++    // One NTSC field, in Stopwatch ticks. The forced tick above is clamped to
++    // this so the vsync counter can never run ahead of real time.
++    static readonly long TicksPerFrame =
++        (long)(System.Diagnostics.Stopwatch.Frequency * 1001.0 / 60000.0);
++    static long _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
 +
 +    internal static int VCountNow => _vcount;
 +
@@ -922,13 +1074,23 @@ index a036512..9068ce8 100644
 +        if (mode < 0)
 +        {
 +            // Polling without presenting: on hardware a VBlank would still be
-+            // firing underneath, so advance after enough polls to keep spins
-+            // from hanging.
++            // firing underneath, so a spin of the form
++            // `while (VSync(-1) < target)` has to be able to terminate.
++            //
++            // But the forced tick must never outrun real time. Advancing purely
++            // on poll count let a tight loop inflate the counter far past 60 Hz,
++            // and everything the game times off it -- animation, demo length,
++            // physics pacing -- ran visibly fast even with rendering throttled.
 +            if (++_pollsSinceTick >= PollsPerForcedTick)
 +            {
 +                _pollsSinceTick = 0;
-+                _vcount++;
-+                MaybeVBlank(_vcount);
++                long now = System.Diagnostics.Stopwatch.GetTimestamp();
++                if (now - _lastTickStamp >= TicksPerFrame)
++                {
++                    _lastTickStamp = now;
++                    _vcount++;
++                    MaybeVBlank(_vcount);
++                }
 +            }
 +            Peek(m, _vcount);
 +            c.V0 = (uint)_vcount;
@@ -939,6 +1101,7 @@ index a036512..9068ce8 100644
          Runtime.PresentFrame();
          _vcount++;
 +        _pollsSinceTick = 0;
++        _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
 +        MaybeVBlank(_vcount);
  
          if (Event.HasAnyListeners<VSyncEvent>())

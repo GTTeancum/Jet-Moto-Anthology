@@ -126,32 +126,8 @@
     { "address": "0x8010AE5C", "name": "func_8010AE5C" }
   ],
 
-  // Diagnostic: is the pad parser even called in menu states, and what does it
-  // compute? The buffer it reads is correct but the game does not act on input.
-  "patches": [
-    { "function": "func_800EF098", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterPadParse" },
-    { "function": "func_80134D14", "mode": "pre",
-      "target": "Recompiled.InputProbe.MenuTickEnter" },
-    { "function": "func_80134D14", "mode": "post",
-      "target": "Recompiled.InputProbe.MenuTickExit" },
-    { "function": "func_800E0CDC", "mode": "pre",
-      "target": "Recompiled.InputProbe.StrEnter" },
-    { "function": "func_800E0CDC", "mode": "post",
-      "target": "Recompiled.InputProbe.StrExit" },
-    { "function": "func_80134FBC", "mode": "pre",
-      "target": "Recompiled.InputProbe.EnterTitleWait" },
-    { "function": "func_801395B8", "mode": "pre",
-      "target": "Recompiled.InputProbe.EnterCaller1" },
-    { "function": "func_8013963C", "mode": "pre",
-      "target": "Recompiled.InputProbe.EnterCaller2" },
-    { "function": "func_800EF9D8", "mode": "pre",
-      "target": "Recompiled.InputProbe.BeforeButtonQuery" },
-    { "function": "func_800EF9D8", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterButtonQuery" },
-    { "function": "func_800EF4CC", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterEdgeRead" },
-    { "function": "func_800EEE60", "mode": "post",
-      "target": "Recompiled.InputProbe.AfterInputFrame" }
-  ]
+  // Diagnostic hooks for the input investigation live in
+  // JetMoto/patches/InputProbe.cs. They are unwired so normal runs produce a
+  // clean log; re-add entries here to switch them back on.
+  "patches": []
 }
