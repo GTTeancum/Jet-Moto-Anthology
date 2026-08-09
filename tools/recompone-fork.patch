@@ -267,12 +267,15 @@ index 6027c49..aa6dcf3 100644
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
 diff --git a/RecompOne.Runtime/Host/FrameClock.cs b/RecompOne.Runtime/Host/FrameClock.cs
-index edd260b..b4ba578 100644
+index edd260b..a506418 100644
 --- a/RecompOne.Runtime/Host/FrameClock.cs
 +++ b/RecompOne.Runtime/Host/FrameClock.cs
-@@ -4,14 +4,42 @@ namespace RecompOne.Runtime.Host;
+@@ -2,16 +2,44 @@ using System.Diagnostics;
  
- internal static class FrameClock
+ namespace RecompOne.Runtime.Host;
+ 
+-internal static class FrameClock
++public static class FrameClock
  {
 -    const double FrameMs = 1000.0 / 60.0;
 +    // [jetmoto-fork] NTSC field rate is 60000/1001 Hz = 59.94, not a flat 60.
@@ -974,10 +977,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..f0a661b 100644
+index a036512..bdbd034 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,127 @@ public static class LibEtc
+@@ -9,15 +9,158 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -1002,13 +1005,36 @@ index a036512..f0a661b 100644
 +    // repeatedly without presenting -- that is precisely the situation where
 +    // hardware would have had a VBlank fire underneath it.
 +    static int _pollsSinceTick;
-+    const int PollsPerForcedTick = 64;
++
++    // The forced tick exists only to break a genuine spin, and it must not fire
++    // during ordinary play. Normal frames poll VSync(-1) about 7 times, so 64
++    // was far too low: whenever a frame took longer than one field -- which is
++    // most of them, since the port renders a little under 60 fps -- a forced
++    // tick landed on top of the frame's own tick and the game's clock ran at
++    // roughly double speed. A real spin polls thousands of times with no
++    // VSync(0) at all, so require both a high poll count and several fields of
++    // real time with no presented frame.
++    const int PollsPerForcedTick = 2000;
++    const int FieldsBeforeForcedTick = 4;
 +
 +    // One NTSC field, in Stopwatch ticks. The forced tick above is clamped to
 +    // this so the vsync counter can never run ahead of real time.
 +    static readonly long TicksPerFrame =
 +        (long)(System.Diagnostics.Stopwatch.Frequency * 1001.0 / 60000.0);
 +    static long _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
++
++    // [jetmoto-fork] RECOMPONE_FRAME_DIVIDER=<n> makes VSync(0) wait n fields
++    // instead of one, so the game advances at 60/n Hz.
++    //
++    // On hardware a frame that overran a field made VSync(0) block until the
++    // *next* vblank, so a game whose frame cost more than 16.7ms ran at a
++    // steady 30 Hz. The port is fast enough to make every field, so that
++    // natural halving disappears and the simulation steps twice as often as it
++    // did on a PS1 -- everything moves at double speed while the frame rate
++    // counter still looks correct.
++    static readonly int FrameDivider = Math.Clamp(
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_FRAME_DIVIDER"), out var _fd) ? _fd : 1,
++        1, 6);
 +
 +    internal static int VCountNow => _vcount;
 +
@@ -1085,7 +1111,7 @@ index a036512..f0a661b 100644
 +            {
 +                _pollsSinceTick = 0;
 +                long now = System.Diagnostics.Stopwatch.GetTimestamp();
-+                if (now - _lastTickStamp >= TicksPerFrame)
++                if (now - _lastTickStamp >= TicksPerFrame * FieldsBeforeForcedTick)
 +                {
 +                    _lastTickStamp = now;
 +                    _vcount++;
@@ -1099,6 +1125,14 @@ index a036512..f0a661b 100644
          if (mode == 1) { c.V0 = 0; return; }
  
          Runtime.PresentFrame();
++        // A divider of n means n vblanks elapsed, so the counter advances by n
++        // and the extra fields are actually waited out.
++        for (int extra = 1; extra < FrameDivider; extra++)
++        {
++            Host.FrameClock.Throttle();
++            _vcount++;
++            MaybeVBlank(_vcount);
++        }
          _vcount++;
 +        _pollsSinceTick = 0;
 +        _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
