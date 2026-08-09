@@ -258,3 +258,95 @@ careful reasoning that feels conclusive and is not.
 **Rule for next time: when something has an observable end-to-end symptom, get
 the symptom first.** Instrumentation is for narrowing a search once the
 behaviour is known, not for establishing what the behaviour is.
+
+---
+
+## Jet Moto 2 (SCUS-94167)
+
+### 2026-08-09 — Same engine, almost none of the same problems
+
+"Pretty much the same engine" turned out to be true of the game and false of
+everything the port depends on. Jet Moto 1 reaches the disc through the PSYQ
+libcd HLE and the controller through the BIOS pad calls. Jet Moto 2 reaches
+both through **the hardware**, and the runtime's hardware models were the parts
+nobody had exercised.
+
+Four bugs in RecompOne's CD controller, all only reachable from the hardware
+path:
+
+1. `AdvanceStreaming()` existed and **nothing ever called it**, so `ReadN`
+   delivered exactly one sector and stalled. The game timed out and reissued
+   the read forever.
+2. `ReadNextSector` always returned the 2048-byte user area, ignoring Setmode
+   bit 5. Jet Moto 2 boots asking for whole 2340-byte sectors, so every field
+   it parsed was 12 bytes off and its own ISO reader never found `CD001`.
+3. The interrupt flags were raised but **IRQ 2 was never delivered to the CPU**.
+   A game that does its CD work from the interrupt handler therefore never
+   asked for the data — zero DMA transfers in a whole run.
+4. Writing the request-data bit rewound the sector FIFO. The game pulls the
+   12-byte header in one DMA and the 2048-byte payload in a second, so it got
+   the header twice and never the payload.
+
+**The decision that unlocked all four: stop routing libcd.** Jet Moto 1 needed
+the HLE; for Jet Moto 2 the HLE and the game's own libcd were two half-states
+of one drive, which is why the boot read looped at a stale position no matter
+which layer was "fixed". Only `VSync` and `DrawSync` stay routed.
+
+### 2026-08-09 — Overlays, and a base address recovered from call targets
+
+Jet Moto 2 is overlay-based: `/BIN/JM2SHELL.BIN` is the shell, and each of the
+20 `/BIN/<track>.BIN` files is a per-track code overlay. None has a PS-X EXE
+header, so the load addresses had to be inferred.
+
+- **Shell, 0x800C10B8.** Scored candidate bases by how many `jal` targets land
+  on a function prologue and how many `lui`/`addiu` constants land on a string
+  in the pool at file offset 0. The winner led both by a wide margin, and the
+  runtime confirmed it within 2 KB: the dispatcher only commits an overlay when
+  a write lands in its first page, and the game's DMA did exactly that.
+- **Tracks, 0x801020B8 — all of them.** The resident executable calls five
+  fixed addresses in the gap below its own base, which only makes sense if
+  every track overlay loads at one address and exports the same entry points.
+  Matching those five targets against prologues in three different track files
+  agreed on 0x801020B8; Nebulous puts 11 of its 12 internal calls on a prologue
+  there and at most 3 anywhere else.
+
+Overlay activation had to be added to the hardware path too — it was wired only
+into the libcd HLE. **Arm on the LBA a read starts at, never on each streamed
+sector**: `ICEBERG.BIN` spans sectors 489-491 and `ISLAND1.BIN` begins at 491,
+so announcing every sector loaded Island 1's code over the Iceberg track that
+was actually being read, and the game jumped into the wrong overlay.
+
+### 2026-08-09 — The controller: a dead interrupt chain and a missing device
+
+Jet Moto 2 never calls a BIOS pad function — `PadInit` is dead code in the
+retail build, referenced by nothing. It ships **its own SIO driver**, and two
+separate gaps kept it from ever running.
+
+1. **`SysEnqIntRP` stored the handler chain and nothing walked it.** Only
+   libetc's callback table was dispatched, so a library installing itself the
+   BIOS way was silently dead. Jet Moto 2 registers one chain element at
+   priority 2; with the walk added, its driver woke up and touched SIO for the
+   first time.
+2. **There was no SIO0 device at all.** 0x1F801040-4F fell through to the
+   generic register array, so a write went nowhere and a read returned the last
+   value written.
+
+Finding the driver needed the runtime, not static analysis: it keeps the SIO
+base in a *data word*, so scanning for `lui`/`addiu` pairs that build
+0x1F801040 found nothing in any module, in main, shell or overlays. A one-shot
+stack dump on the first SIO write named it immediately.
+
+The subtle part was the acknowledge. The driver waits on I_STAT bit 7 for the
+*previous* byte, and clears that same bit at the end of every byte it sends.
+Latching the acknowledge immediately meant the driver's own clear wiped it, the
+next byte's wait timed out, and every packet died two bytes in — reported as
+"no controller". On hardware the pad answers ~100us later, i.e. *after* the
+clear. **Deferring the latch by one observation** is what made the full
+`01 42 00 00 00` exchange complete; the driver then went on to probe with 0x43,
+which is a pad it believes in.
+
+Two dead ends worth recording, both from guessing at timing instead of reading
+the driver: raising IRQ7 from inside the register write (too early — the state
+machine advances only after that write returns, so every packet restarted at
+its first byte), and synthesising I_STAT bit 7 around the chain walk (the
+cleanup cleared the bit and acknowledged the transfer on the game's behalf).

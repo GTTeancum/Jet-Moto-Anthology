@@ -1,0 +1,18 @@
+# Navigate into a Single Track race, then hold accelerate.
+900:cross
+930:
+1080:cross
+1110:
+1260:cross
+1290:
+1440:cross
+1470:
+1620:cross
+1650:
+1800:cross
+1830:
+1980:cross
+2010:
+2160:cross
+2190:
+2400:cross

@@ -10,7 +10,246 @@
   // The disc dump had no cue sheet; one was generated from the 17 track files
   // (track 1 MODE2/2352 verified by sync pattern and mode byte, 2-17 audio with
   // the 2-second pregap inside each file, matching Jet Moto 1's layout).
-  "overlays": [],
+  "overlays": [
+    {
+      "name": "shell",
+      "lba": 494,
+      "size": 193572,
+      "base": "0x800C10B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x800D4790" }
+      ]
+    },
+
+    // The per-track overlays in /BIN. Every one of them is loaded at the same
+    // address and exports the same entry points, which is why the resident
+    // executable can `jal 0x80102204` regardless of which track is in play.
+    // The base was recovered from those call targets: of the five addresses the
+    // main executable calls into this gap, 11 of Nebulous's 12 internal calls
+    // land on a function prologue at 0x801020B8 and at most 3 at any other
+    // candidate.
+    {
+      "name": "alpine1",
+      "lba": 474,
+      "size": 2096,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "alpine2",
+      "lba": 476,
+      "size": 2092,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "alpine3",
+      "lba": 478,
+      "size": 2104,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "canyon",
+      "lba": 480,
+      "size": 3756,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "cave",
+      "lba": 482,
+      "size": 3860,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "dark",
+      "lba": 484,
+      "size": 2160,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "geyser",
+      "lba": 486,
+      "size": 4640,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "iceberg",
+      "lba": 489,
+      "size": 2280,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "island1",
+      "lba": 491,
+      "size": 1888,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "island2",
+      "lba": 492,
+      "size": 1852,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "island3",
+      "lba": 493,
+      "size": 1884,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "nebulous",
+      "lba": 589,
+      "size": 7636,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "park",
+      "lba": 593,
+      "size": 2088,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "quake",
+      "lba": 595,
+      "size": 2644,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "resort",
+      "lba": 597,
+      "size": 2524,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "ruins",
+      "lba": 599,
+      "size": 2564,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "swamp1",
+      "lba": 601,
+      "size": 1808,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "swamp2",
+      "lba": 602,
+      "size": 2836,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "swamp3",
+      "lba": 604,
+      "size": 1808,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    },
+    {
+      "name": "volcano",
+      "lba": 605,
+      "size": 4240,
+      "base": "0x801020B8",
+      "linearSweep": true,
+      "functions": [
+        { "address": "0x80102224" },
+        { "address": "0x80102588" }
+      ]
+    }
+  ],
 
   // Same as Jet Moto 1: entry-point scanning alone misses functions reached
   // only through function pointers.
@@ -25,16 +264,42 @@
   // PSYQ here is newer than JM1's (bios.c v1.86 / sys.c v1.135, 1997) and its
   // CdRead no longer prints, so that pair is not identifiable from strings.
   "functions": [
-    { "address": "0x8010DD08", "name": "CdInit" },
-    { "address": "0x8010DE10", "name": "CdSync" },
-    { "address": "0x8010DE30", "name": "CdReady" },
-    { "address": "0x8010E2B8", "name": "CdDataSync" },
+    { "address": "0x80142A84" },
+    { "address": "0x80142A80" },
+    { "address": "0x8011DC94" },
+    { "address": "0x8011F780" },
+    { "address": "0x8012582C" },
+    { "address": "0x8011F8F0" },
+    { "address": "0x8011F898" },
+    { "address": "0x80125500" },
+    { "address": "0x80124FE0" },
+    { "address": "0x80124F30" },
+    { "address": "0x8012559C" },
+    { "address": "0x8012503C" },
+    { "address": "0x80142AC4" },
+    { "address": "0x8011F574" },
+    { "address": "0x8011F600" },
+    { "address": "0x80102204" },
+    { "address": "0x80124D48" },
+    { "address": "0x801254D8" },
+    { "address": "0x80124CC0" },
+    { "address": "0x80124E44" },
+    { "address": "0x8010DD08", "name": "CD_init_pub" },
+    { "address": "0x8010DE10", "name": "CD_sync_pub" },
+    { "address": "0x8010DE30", "name": "CD_ready_pub" },
+    { "address": "0x8010E2B8", "name": "CD_datasync_pub" },
     // Three siblings all funnelling into CD_cw (0x8010EF00); usage profile
     // matches JM1, where the most-called is CdControl and the one that also
     // calls CdSync is CdControlB.
-    { "address": "0x8010DE78", "name": "CdControl" },
-    { "address": "0x8010DFB4", "name": "CdControlF" },
-    { "address": "0x8010E0E8", "name": "CdControlB" },
+    { "address": "0x8010DE78", "name": "CD_control" },
+    { "address": "0x8010DFB4", "name": "CD_controlF" },
+    { "address": "0x8010E0E8", "name": "CD_controlB" },
+    // CdSearchFile: identified by its own debug strings ("CdSearchFile:
+    // searching %s...", "%s: dir was not found"). Its ISO walk was producing a
+    // bogus LBA (8850, inside /ENDINGS) after reading the PVD, which is what
+    // sent the boot read into an endless retry. The runtime HLE looks the name
+    // up through a correct ISO parser instead.
+    { "address": "0x8010FC1C", "name": "CD_searchfile" },
     { "address": "0x80117D6C", "name": "VSync" },
 
     // Callback setters. JM2 reads via CdlReadN streaming rather than CdRead,
@@ -45,11 +310,8 @@
     // Correction: these are "read the global, store the new value, return the
     // old" accessors -- exactly PSYQ callback-setter semantics. The first guess
     // (0x8010E254/E274/E234) pointed at wrappers that call internals instead.
-    { "address": "0x8010DE50", "name": "CdReadyCallback" },
-    { "address": "0x8010DE64", "name": "CdReadCallback" },
-    // The read driver (the registered data callback) fetches sectors through
-    // this; a0 is a destination buffer and a1 a word count.
-    { "address": "0x8010E274", "name": "CdGetSector" },
+    { "address": "0x8010DE50", "name": "CD_readycb" },
+    { "address": "0x8010DE64", "name": "CD_readcb" },
     { "address": "0x80112E98", "name": "DrawSync" },
 
     // Internals, named for readability only -- NOT routed.

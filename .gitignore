@@ -24,3 +24,10 @@ interface.ini
 *.sav
 JetMoto2_PS1image/
 JetMoto2/generated/
+
+# Harness capture directories (frame dumps, per-run scratch)
+harness/jm1regress/
+harness/jm2in/
+harness/jm2lap/
+harness/jm2race/
+harness/jm2shots/

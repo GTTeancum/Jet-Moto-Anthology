@@ -1,0 +1,17 @@
+# Select 1 PLAYER and keep confirming through the setup screens.
+900:cross
+930:
+1080:cross
+1110:
+1260:cross
+1290:
+1440:cross
+1470:
+1620:cross
+1650:
+1800:cross
+1830:
+1980:cross
+2010:
+2160:cross
+2190:

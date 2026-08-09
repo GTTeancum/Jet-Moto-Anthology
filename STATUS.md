@@ -1,5 +1,44 @@
 # Status
 
+Two ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
+
+| Game | State |
+|------|-------|
+| **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
+| **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
+
+## Jet Moto 2
+
+Boots through the logos and FMVs to the title screen, the menus respond to the
+pad, and Single Track races load and play with a live HUD, lap counter and
+speedometer.
+
+```bash
+dotnet JetMoto2/bin/Release/net10.0/JetMoto2.dll "JetMoto2_PS1image/Jet Moto 2 (v1.1).cue"
+```
+
+What it needed, none of which Jet Moto 1 did (details in `DECISIONS.md`):
+
+- **The libcd HLE turned off.** Jet Moto 2 drives the CD hardware itself, and
+  running both layers left the drive in two half-states. Only `VSync` and
+  `DrawSync` stay routed.
+- **Four CD controller fixes** in the runtime: nothing drove the sector
+  streamer, the drive ignored Setmode's 2340-byte sector size, IRQ 2 was never
+  delivered to the CPU, and the request-data bit rewound the sector FIFO.
+- **21 overlays registered** — the shell at 0x800C10B8 and all 20 per-track
+  overlays at a shared 0x801020B8, both recovered from call targets since the
+  files carry no PS-X EXE header.
+- **A SIO0 controller port**, which the runtime did not model at all, plus the
+  `SysEnqIntRP` interrupt chain, which was stored and never walked. The game
+  ships its own pad driver and needs both.
+
+Known issue: a garbled sprite blob follows the rider in-race, most likely a
+particle or spray effect. Cosmetic; the race is otherwise correct.
+
+---
+
+## Jet Moto
+
 **Goal:** Jet Moto (SCUS-94309) recompiled via RecompOne, playable to the point
 of completing laps as a rider.
 

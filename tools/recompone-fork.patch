@@ -1,8 +1,17 @@
 diff --git a/RecompOne.Runtime/Bios/BiosB.cs b/RecompOne.Runtime/Bios/BiosB.cs
-index f5935c8..ece513a 100644
+index f5935c8..09c2ca1 100644
 --- a/RecompOne.Runtime/Bios/BiosB.cs
 +++ b/RecompOne.Runtime/Bios/BiosB.cs
-@@ -96,8 +96,41 @@ public static class BiosB
+@@ -15,6 +15,8 @@ public static class BiosB
+     static readonly TCB[] _tcbs = new TCB[MaxThreads];
+ 
+     static readonly uint[] _intChain = new uint[4];
++    // [jetmoto-fork] exposed so Interrupts can actually walk the chain
++    internal static uint[] IntChains => _intChain;
+ 
+     public static uint IntrEnvInInterruptAddr = 0u;
+ 
+@@ -96,8 +98,41 @@ public static class BiosB
          return e.Buttons;
      }
  
@@ -44,7 +53,7 @@ index f5935c8..ece513a 100644
          if (_padBuf == 0) return;
          ushort s = Hardware.Controller.State;
          ushort swapped = (ushort)((s >> 8) | (s << 8));
-@@ -136,8 +169,15 @@ public static class BiosB
+@@ -136,8 +171,15 @@ public static class BiosB
              case 0x0F: CloseTh(c.A0); c.V0 = 1u; break;
              case 0x10: break;
              case 0x11: break;
@@ -62,6 +71,133 @@ index f5935c8..ece513a 100644
              case 0x14: break;
              case 0x15: _padBuf = c.A1; break;
              case 0x16: PadRead(m); break;
+@@ -277,6 +319,8 @@ public static class BiosB
+     {
+         uint priority = c.A0 & 3u;
+         uint struc = c.A1;
++        Log.Bios($"SysEnqIntRP prio={priority} struc=0x{struc:X8} " +
++                 $"handler=0x{m.ReadU32(struc + 4u):X8} verifier=0x{m.ReadU32(struc + 8u):X8}");
+         c.V0 = _intChain[priority];
+         m.WriteU32(struc, _intChain[priority]);
+         _intChain[priority] = struc;
+diff --git a/RecompOne.Runtime/Cdrom/CdController.cs b/RecompOne.Runtime/Cdrom/CdController.cs
+index 7af9864..46fac46 100644
+--- a/RecompOne.Runtime/Cdrom/CdController.cs
++++ b/RecompOne.Runtime/Cdrom/CdController.cs
+@@ -205,7 +205,14 @@ public sealed class CdController
+             case 3:
+                 if (_index == 0)
+                 {
+-                    if ((val & 0x80) != 0) { _dataFifoPos = 0; _dataReady = true; }
++                    // [jetmoto-fork] The request-data bit latches the sector
++                    // buffer; it does not rewind it. Rewinding on every write
++                    // broke sequential transfers: Jet Moto 2 pulls the 12-byte
++                    // header and subheader in one DMA and then the 2048-byte
++                    // user area in a second, so resetting the position handed it
++                    // the header twice and never the data. The position is reset
++                    // where hardware resets it -- when a new sector arrives.
++                    if ((val & 0x80) != 0) _dataReady = true;
+                     else _dataReady = false;
+                 }
+                 else if (_index == 1)
+@@ -256,6 +263,16 @@ public sealed class CdController
+                 }
+                 _reading = true;
+                 _playing = false;
++                // [jetmoto-fork] Overlay activation was wired only into the
++                // libcd HLE, so a game driving the CD hardware directly loaded
++                // its overlay's bytes into RAM and then jumped into code the
++                // dispatcher had never armed. Arm on the LBA the read starts
++                // at -- not on every sector the stream passes over. Jet Moto
++                // 2's ICEBERG.BIN occupies sectors 489-491 and ISLAND1.BIN
++                // begins at 491, so announcing each streamed sector loaded
++                // Island 1's code on top of the Iceberg track that was
++                // actually being read.
++                Dispatch.Dispatcher.LoadByLba(_seekLba);
+                 ReadNextSector();
+                 QueueIrq(3, [DriveStatus()]);
+                 QueueIrq(1, [DriveStatus()]);
+@@ -362,6 +379,16 @@ public sealed class CdController
+                 }
+                 _reading = true;
+                 _playing = false;
++                // [jetmoto-fork] Overlay activation was wired only into the
++                // libcd HLE, so a game driving the CD hardware directly loaded
++                // its overlay's bytes into RAM and then jumped into code the
++                // dispatcher had never armed. Arm on the LBA the read starts
++                // at -- not on every sector the stream passes over. Jet Moto
++                // 2's ICEBERG.BIN occupies sectors 489-491 and ISLAND1.BIN
++                // begins at 491, so announcing each streamed sector loaded
++                // Island 1's code on top of the Iceberg track that was
++                // actually being read.
++                Dispatch.Dispatcher.LoadByLba(_seekLba);
+                 ReadNextSector();
+                 QueueIrq(3, [DriveStatus()]);
+                 QueueIrq(1, [DriveStatus()]);
+@@ -393,6 +420,27 @@ public sealed class CdController
+         ClearInInterrupt();
+     }
+ 
++    // [jetmoto-fork] The controller raised its interrupt flags but never handed
++    // the CDROM interrupt to the CPU -- only the BIOS "in interrupt" marker was
++    // set. Under the libcd HLE that was invisible, because the HLE ran the
++    // game's callbacks itself. A game driving the hardware directly, though,
++    // does all its work from the IRQ handler: acknowledge, request the sector,
++    // then DMA it. With no IRQ 2 the handler never ran, the game never issued
++    // the data request, and every read timed out and was retried forever.
++    //
++    // Dispatch is deferred to a safe point rather than done inside the MMIO
++    // write that issued the command, so the handler never re-enters the
++    // controller while it is still mid-command.
++    private bool _inIrqDispatch;
++
++    public void ServiceInterrupt()
++    {
++        if (_inIrqDispatch || _irqFlags == 0) return;
++        _inIrqDispatch = true;
++        try { Runtime.DispatchIrq(2); }
++        finally { _inIrqDispatch = false; }
++    }
++
+     public void AdvanceStreaming()
+     {
+         if (!_reading || !_streamPending) return;
+@@ -430,6 +478,9 @@ public sealed class CdController
+ 
+     public void DmaReadData(IMemory m, uint addr, uint byteCount)
+     {
++        RecompOne.Runtime.Log.Cd(
++            $"dma -> 0x{addr:X8} n={byteCount} pos={_dataFifoPos} ready={_dataReady} " +
++            $"head={BitConverter.ToString(_dataBuf, Math.Min(_dataFifoPos, Math.Max(0, _dataBuf.Length - 8)), 8)}");
+         for (uint i = 0; i < byteCount; i++)
+             m.WriteU8(addr + i, _dataFifoPos < _dataBuf.Length ? _dataBuf[_dataFifoPos++] : (byte)0);
+         if (_dataFifoPos >= _dataBuf.Length) _dataReady = false;
+@@ -454,12 +505,24 @@ public sealed class CdController
+             _m.WriteU16(BiosB.IntrEnvInInterruptAddr, 0);
+     }
+ 
++    // [jetmoto-fork] Setmode bit 5 selects the 2340-byte whole-sector transfer;
++    // otherwise the drive delivers the 2048-byte user area.
++    private int ModeSectorSize() => (_mode & 0x20) != 0 ? 2340 : 2048;
++
+     private void ReadNextSector()
+     {
+         try
+         {
+-            _dataBuf = _fs.ReadSector(_seekLba);
++            // [jetmoto-fork] Honour the drive mode's sector size. ReadSector
++            // always returned the 2048-byte user area, but Setmode bit 5 asks
++            // for the whole 2340-byte sector -- header and subheader included --
++            // and Jet Moto 2 boots in exactly that mode. Handing it user data
++            // shifted every field 12 bytes, so the game's own ISO reader never
++            // found "CD001" in the volume descriptor and re-read LBA 16 forever.
++            _dataBuf = _fs.ReadSectorData(_seekLba, ModeSectorSize());
++            _dataFifoPos = 0;
+             DbgReadRun("read", _seekLba);
++            RecompOne.Runtime.Log.Cd($"read lba={_seekLba} size={_dataBuf.Length}");
+             _lastReadLba = _seekLba;
+             _sectorsRead++;
+             _seekLba++;
 diff --git a/RecompOne.Runtime/Cdrom/CueBin.cs b/RecompOne.Runtime/Cdrom/CueBin.cs
 index adb02c5..06001ae 100644
 --- a/RecompOne.Runtime/Cdrom/CueBin.cs
@@ -328,12 +464,105 @@ index 6f7a426..e2eeb07 100644
      }
  
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..aa6dcf3 100644
+index 6027c49..e3ac519 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -10,10 +10,11 @@ public static class Interrupts
+@@ -7,13 +7,104 @@ namespace RecompOne.Runtime;
+ 
+ public static class Interrupts
+ {
++    // [jetmoto-fork] Handlers registered through SysEnqIntRP were stored and
++    // never run. Only libetc's callback table (the one HookEntryInt sets up)
++    // was dispatched, so any library installing itself the other way -- the
++    // BIOS's own interrupt chain -- was silently dead. Jet Moto 2 registers a
++    // chain at priority 2 and gets nothing.
++    //
++    // The BIOS walks each priority chain and, for every element, calls the
++    // verifier first; a non-zero return means "this interrupt is mine", and
++    // only then is the handler called. Element layout is
++    //   +0 next, +4 handler, +8 verifier, +C unused.
++    const uint IStat = 0x1F801070u;
++    const uint IMask = 0x1F801074u;
++    // The pad handler sends the next byte from inside its own interrupt, which
++    // acknowledges and raises IRQ7 again -- so the chain legitimately nests, once
++    // per byte of the packet. A depth cap keeps a misbehaving handler from
++    // recursing without bound.
++    static int _chainDepth;
++    const int MaxChainDepth = 16;
++
++    static void RunChains(int irq, CpuContext cpu, IMemory mem)
++    {
++        if (_chainDepth >= MaxChainDepth) return;
++        var chains = BiosB.IntChains;
++        bool any = false;
++        for (int p = 0; p < chains.Length; p++) any |= chains[p] != 0u;
++        if (!any) return;
++
++        // A verifier's whole job is to test its bit in I_STAT, so the bit has
++        // to be raised before the walk and dropped afterwards -- otherwise
++        // every verifier declines and the handler never runs.
++        //
++        // IRQ7 is the exception: the controller acknowledge latches in the SIO
++        // device and the game clears it itself, one byte at a time. Synthesising
++        // and then dropping the bit here acknowledged the transfer on the game's
++        // behalf and restarted every packet at its first byte.
++        bool ownStat = irq != 7;
++        if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) | (1u << irq));
++
++        _chainDepth++;
++        try
++        {
++            for (int p = 0; p < chains.Length; p++)
++            {
++                uint el = chains[p];
++                int guard = 0;
++                while (el != 0u && guard++ < 64)
++                {
++                    uint handler = mem.ReadU32(el + 4u);
++                    uint verifier = mem.ReadU32(el + 8u);
++                    bool mine = true;
++                    if (verifier != 0u)
++                    {
++                        var s = cpu.Snapshot();
++                        Dispatcher.Call(cpu, mem, verifier);
++                        mine = cpu.V0 != 0u;
++                        cpu.Restore(s);
++                    }
++                    if (mine && handler != 0u)
++                    {
++                        var s = cpu.Snapshot();
++                        Dispatcher.Call(cpu, mem, handler);
++                        cpu.Restore(s);
++                    }
++                    el = mem.ReadU32(el);
++                }
++            }
++        }
++        finally
++        {
++            _chainDepth--;
++            if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) & ~(1u << irq));
++        }
++    }
++
++    // [jetmoto-fork] The pad driver sends one byte per controller interrupt and
++    // advances its state machine only after the register write that queued the
++    // byte has returned -- so IRQ7 cannot be raised from inside the write
++    // itself. Raising it there restarted every packet at its first byte.
++    // Latching the acknowledge and draining it here, once the frame's handler
++    // has unwound, lets the packet run to completion.
++    static void PumpSio(CpuContext cpu, IMemory mem)
++    {
++        var sio = Runtime.Sio;
++        if (sio == null) return;
++        for (int i = 0; i < 12 && sio.IrqPending; i++)
++            Deliver(7, cpu, mem);
++    }
++
      public static void Deliver(int irq, CpuContext cpu, IMemory mem)
      {
++        RunChains(irq, cpu, mem);
++
          uint intrEnv = BiosB.IntrEnvInInterruptAddr;
 -        if (intrEnv == 0) return;
 +        if (intrEnv == 0) { Log.Dma($"irq{irq}: no intrEnv"); return; }
@@ -345,6 +574,183 @@ index 6027c49..aa6dcf3 100644
  
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
+@@ -21,5 +112,7 @@ public static class Interrupts
+         Dispatcher.Call(cpu, mem, handler);
+         mem.WriteU16(intrEnv, 0);
+         cpu.Restore(snap);
++
++        if (irq != 7) PumpSio(cpu, mem);
+     }
+ }
+diff --git a/RecompOne.Runtime/Hardware/Sio.cs b/RecompOne.Runtime/Hardware/Sio.cs
+new file mode 100644
+index 0000000..6565866
+--- /dev/null
++++ b/RecompOne.Runtime/Hardware/Sio.cs
+@@ -0,0 +1,163 @@
++namespace RecompOne.Runtime.Hardware;
++
++/// <summary>
++/// [jetmoto-fork] SIO0 -- the controller/memory-card port.
++///
++/// The runtime had no model for it at all: 0x1F801040-4F fell through to the
++/// generic hardware-register array, so a write went nowhere and a read returned
++/// whatever had last been written. Games that reach the pad through the BIOS
++/// (Jet Moto 1) never noticed. Jet Moto 2 uses libpad, which talks to this port
++/// directly, and with no device answering it concluded no controller was
++/// present -- the menus rendered perfectly and ignored every button.
++///
++/// The transfer is modelled synchronously: each byte the game writes to
++/// JOY_TX_DATA immediately produces the pad's reply in the receive FIFO and
++/// asserts /ACK. Real hardware takes a few hundred cycles per byte and raises
++/// IRQ7 on each acknowledge, but libpad drives the exchange to completion
++/// inside one handler, so answering immediately gives it the same packet.
++/// </summary>
++public sealed class Sio
++{
++    public const uint Base = 0x1F801040u;
++    public const uint End = 0x1F80104Fu;
++
++    byte _rx;
++    bool _rxFull;
++    int _step = -1;          // -1 = idle, otherwise index into the packet
++    int _port;
++    ushort _ctrl, _mode, _baud = 0x0088;
++    bool _ack;
++
++    // [jetmoto-fork] /ACK latches an interrupt request. Jet Moto 2's own pad
++    // driver waits on I_STAT bit 7 after every byte (func_80150424) and clears
++    // it by writing 0xFFFFFF7F (func_80150478); without the latch the driver
++    // times out after the device-id byte and reports no controller.
++    bool _irq;
++
++    // The acknowledge is deliberately deferred by one observation. The pad
++    // takes ~100us to answer, so on hardware the latch for byte N is set only
++    // *after* the driver has finished byte N and cleared I_STAT -- and byte
++    // N+1 then waits on it. Latching immediately meant the driver's own clear
++    // at the end of byte N wiped it, byte N+1's wait timed out, and every
++    // packet died two bytes in.
++    bool _ackDeferred;
++
++    /// <summary>Controller acknowledge, surfaced as I_STAT bit 7.</summary>
++    public bool IrqPending
++    {
++        get
++        {
++            if (_ackDeferred) { _ackDeferred = false; _irq = true; }
++            return _irq;
++        }
++    }
++
++    /// <summary>The game clearing I_STAT bit 7 also drops the /ACK line.</summary>
++    public void AckIrq() { _irq = false; _ack = false; }
++
++    public static bool InRange(uint phys) => phys >= Base && phys <= End;
++
++    /// <summary>The five-byte reply a digital pad gives to 01 42 00 00 00.</summary>
++    byte Respond(byte tx)
++    {
++        ushort state = _port == 0 ? Controller.State : Controller.State2;
++        bool present = _port == 0 || Controller.Connected2;
++        if (!present) { _ack = false; return 0xFF; }
++
++        switch (_step)
++        {
++            case 0:                       // address byte: 01 selects the pad
++                _ack = tx == 0x01;
++                return 0xFF;              // controller is still hi-Z
++            case 1:                       // command 42 (poll) -> device id
++                _ack = true;
++                return 0x41;              // 0x41 = digital pad, 1 halfword of data
++            case 2:
++                _ack = true;
++                return 0x5A;              // "data follows"
++            case 3:
++                _ack = true;
++                return (byte)(state & 0xFF);        // SELECT L3 R3 START UP RIGHT DOWN LEFT
++            case 4:
++                _ack = false;             // last byte: no further acknowledge
++                return (byte)(state >> 8);          // L2 R2 L1 R1 /\ O X []
++            default:
++                _ack = false;
++                return 0xFF;
++        }
++    }
++
++    public void Write(uint phys, uint value, int size)
++    {
++        switch (phys & 0xFu)
++        {
++            case 0x0:                                  // JOY_TX_DATA
++                if (_step >= 0)
++                {
++                    _rx = Respond((byte)value);
++                    _rxFull = true;
++                    _step++;
++                    if (_ack) _ackDeferred = true;
++                }
++                break;
++            case 0x8:
++                if (size == 1) return;
++                _mode = (ushort)value;
++                break;
++            case 0xA:
++                SetCtrl((ushort)value);
++                break;
++            case 0xE:
++                _baud = (ushort)value;
++                break;
++        }
++    }
++
++    void SetCtrl(ushort v)
++    {
++        _ctrl = v;
++        _port = (v & 0x2000) != 0 ? 1 : 0;
++
++        // Bit 1 drives /JOYn low, which is what starts a packet. Dropping it
++        // ends the packet, so the next transfer begins at the address byte.
++        if ((v & 0x0002) != 0)
++        {
++            if (_step < 0) _step = 0;
++        }
++        else
++        {
++            _step = -1;
++            _rxFull = false;
++            _ack = false;
++        }
++
++        if ((v & 0x0010) != 0) { _ack = false; _irq = false; }   // acknowledge / reset IRQ
++        if ((v & 0x0040) != 0)                          // reset
++        {
++            _step = -1; _rxFull = false; _ack = false; _irq = false; _rx = 0xFF;
++        }
++    }
++
++    public uint Read(uint phys, int size)
++    {
++        switch (phys & 0xFu)
++        {
++            case 0x0:                                  // JOY_RX_DATA
++                _rxFull = false;
++                return _rx;
++            case 0x4:                                  // JOY_STAT
++            {
++                uint stat = 1u                          // TX ready
++                          | (_rxFull ? 2u : 0u)         // RX FIFO not empty
++                          | 4u                          // TX finished
++                          | (_ack ? 0x80u : 0u)         // /ACK asserted
++                          | (_irq ? 0x200u : 0u);       // interrupt request
++                return stat;
++            }
++            case 0x8: return _mode;
++            case 0xA: return _ctrl;
++            case 0xE: return _baud;
++        }
++        return 0;
++    }
++}
 diff --git a/RecompOne.Runtime/Host/FrameClock.cs b/RecompOne.Runtime/Host/FrameClock.cs
 index edd260b..a506418 100644
 --- a/RecompOne.Runtime/Host/FrameClock.cs
@@ -791,10 +1197,27 @@ index c376f15..8f95516 100644
          _dicr |= 1u << (24 + channel);
          _raiseIrq();
 diff --git a/RecompOne.Runtime/Memory/PSMemory.cs b/RecompOne.Runtime/Memory/PSMemory.cs
-index 8cae036..a4dd5bf 100644
+index 8cae036..80728a3 100644
 --- a/RecompOne.Runtime/Memory/PSMemory.cs
 +++ b/RecompOne.Runtime/Memory/PSMemory.cs
-@@ -52,12 +52,18 @@ public sealed class PSMemory : IMemory
+@@ -15,6 +15,8 @@ public sealed class PSMemory : IMemory
+     private readonly Spu _spu = new();
+     private readonly Mdec _mdec = new();
+     private readonly Timers _timers = new();
++    // [jetmoto-fork] SIO0 controller port; see Hardware/Sio.cs.
++    private readonly Sio _sio = new();
+     private readonly Dma _dma;
+     private CdController? _cd;
+ 
+@@ -29,6 +31,7 @@ public sealed class PSMemory : IMemory
+     {
+         _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
+         Runtime.Gpu = _gpu;
++        Runtime.Sio = _sio;
+         Runtime.Spu = _spu;
+         Bios.KromFont.InstallInto(_bios);
+     }
+@@ -52,12 +55,18 @@ public sealed class PSMemory : IMemory
          _hwregs[o + 3] = (byte)(v >> 24);
      }
  
@@ -815,7 +1238,7 @@ index 8cae036..a4dd5bf 100644
              Dispatcher.NotifyWrite(off);
          }
  
-@@ -66,7 +72,24 @@ public sealed class PSMemory : IMemory
+@@ -66,7 +75,24 @@ public sealed class PSMemory : IMemory
      private void TrackRead(uint phys, int size)
      {
          if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
@@ -841,15 +1264,27 @@ index 8cae036..a4dd5bf 100644
      }
  
      private Span<byte> Resolve(uint address, int size)
-@@ -94,6 +117,7 @@ public sealed class PSMemory : IMemory
+@@ -80,7 +106,9 @@ public sealed class PSMemory : IMemory
+             return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
+ 
+         if (phys >= MemoryMap.HwRegsBase && phys < MemoryMap.HwRegsBase + MemoryMap.HwRegsSize)
++        {
+             return _hwregs.AsSpan((int)(phys - MemoryMap.HwRegsBase), size);
++        }
+ 
+         if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
+             return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
+@@ -94,18 +122,24 @@ public sealed class PSMemory : IMemory
      public byte ReadU8(uint address)
      {
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 1, out int fo)) return _ram[fo];
          TrackRead(phys, 1);
          if (_cd != null && IsCd(phys)) return _cd.Read(phys);
++        if (Sio.InRange(phys)) return (byte)_sio.Read(phys, 1);
          return Resolve(address, 1)[0];
-@@ -102,6 +126,9 @@ public sealed class PSMemory : IMemory
+     }
+ 
      public ushort ReadU16(uint address)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -859,7 +1294,12 @@ index 8cae036..a4dd5bf 100644
          TrackRead(phys, 2);
          if (_cd != null && IsCd(phys)) return _cd.Read(phys);
          if (IsSpu(phys)) return _spu.ReadReg16(phys);
-@@ -113,6 +140,9 @@ public sealed class PSMemory : IMemory
+         if (Timers.InRange(phys) && _timers.TryRead(phys, out uint tv)) return (ushort)tv;
++        if (Sio.InRange(phys)) return (ushort)_sio.Read(phys, 2);
+         var s = Resolve(address, 2);
+         return (ushort)(s[0] | (s[1] << 8));
+     }
+@@ -113,15 +147,22 @@ public sealed class PSMemory : IMemory
      public uint ReadU32(uint address)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -869,7 +1309,20 @@ index 8cae036..a4dd5bf 100644
          TrackRead(phys, 4);
          if (phys == 0x1F801810u) return _gpu.ReadData();
          if (phys == 0x1F801814u) return _gpu.ReadStat();
-@@ -129,6 +159,12 @@ public sealed class PSMemory : IMemory
+         if (phys == 0x1F801820u) return _mdec.ReadData();
+         if (phys == 0x1F801824u) return _mdec.ReadStatus();
+         if (phys == 0x1F8010F4u) return _dma.ReadDicr();
++        // [jetmoto-fork] the controller acknowledge shows up as I_STAT bit 7
++        if (phys == 0x1F801070u)
++            return Hw32(phys) | (_sio.IrqPending ? 0x80u : 0u);
+         if (_cd != null && IsCd(phys)) return _cd.Read(phys);
+         if (IsSpu(phys)) return (uint)(_spu.ReadReg16(phys) | (_spu.ReadReg16(phys + 2) << 16));
+         if (Timers.InRange(phys) && _timers.TryRead(phys, out uint tv)) return tv;
++        if (Sio.InRange(phys)) return _sio.Read(phys, 4);
+         var s = Resolve(address, 4);
+         return (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
+     }
+@@ -129,8 +170,15 @@ public sealed class PSMemory : IMemory
      public void WriteU8(uint address, byte value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -881,8 +1334,11 @@ index 8cae036..a4dd5bf 100644
 +        }
          TrackWrite(phys, 1);
          if (_cd != null && IsCd(phys)) { _cd.Write(phys, value); return; }
++        if (Sio.InRange(phys)) { _sio.Write(phys, value, 1); return; }
  
-@@ -139,6 +175,13 @@ public sealed class PSMemory : IMemory
+         if (_frozenCount > 0 && phys < MemoryMap.RamWindow && _frozen[phys % (uint)_ram.Length]) return;
+         Resolve(address, 1)[0] = value;
+@@ -139,9 +187,17 @@ public sealed class PSMemory : IMemory
      public void WriteU16(uint address, ushort value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -896,7 +1352,11 @@ index 8cae036..a4dd5bf 100644
          TrackWrite(phys, 2);
          if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
          if (IsSpu(phys)) { _spu.WriteReg16(phys, value); return; }
-@@ -159,6 +202,13 @@ public sealed class PSMemory : IMemory
++        if (Sio.InRange(phys)) { _sio.Write(phys, value, 2); return; }
+         if (_timers.TryWrite(phys, value)) return;
+         var s = Resolve(address, 2);
+ 
+@@ -159,12 +215,20 @@ public sealed class PSMemory : IMemory
      public void WriteU32(uint address, uint value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -910,6 +1370,21 @@ index 8cae036..a4dd5bf 100644
          TrackWrite(phys, 4);
          if (phys == 0x1F801810u) { _gpu.WriteGp0(value); return; }
          if (phys == 0x1F801814u) { _gpu.WriteGp1(value); return; }
+         if (phys == 0x1F801820u) { _mdec.Write0(value); return; }
+         if (phys == 0x1F801824u) { _mdec.WriteControl(value); return; }
+         if (phys == 0x1F8010F4u) { _dma.WriteDicr(value); return; }
++        if (phys == 0x1F801070u && (value & 0x80u) == 0u) _sio.AckIrq();
+         if (IsDmaChcr(phys) && (value & 0x01000000u) != 0)
+         {
+             Hw32(phys, value & ~0x01000000u);
+@@ -173,6 +237,7 @@ public sealed class PSMemory : IMemory
+         }
+         if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
+         if (IsSpu(phys)) { _spu.WriteReg16(phys, (ushort)value); _spu.WriteReg16(phys + 2, (ushort)(value >> 16)); return; }
++        if (Sio.InRange(phys)) { _sio.Write(phys, value, 4); return; }
+         if (_timers.TryWrite(phys, value)) return;
+         var s = Resolve(address, 4);
+         if (_frozenCount > 0 && phys < MemoryMap.RamWindow)
 diff --git a/RecompOne.Runtime/Memory/RamLogger.cs b/RecompOne.Runtime/Memory/RamLogger.cs
 index a46e7eb..348766c 100644
 --- a/RecompOne.Runtime/Memory/RamLogger.cs
@@ -927,10 +1402,19 @@ index a46e7eb..348766c 100644
      public Vector4 BackdropColor = new(0.25f, 0.15f, 0.15f, 1f);
      public Vector4 WriteColor = new(1f, 0f, 0f, 0.75f);
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..5d2f09e 100644
+index fdf7b6b..1805ffe 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
-@@ -49,7 +49,19 @@ public static class Runtime
+@@ -14,6 +14,8 @@ public static class Runtime
+     public static Gpu? Gpu;
+     public static Spu? Spu;
+     public static Cdrom.CdController? Cd;
++    // [jetmoto-fork] controller port, so interrupt delivery can pump it
++    public static Hardware.Sio? Sio;
+ 
+     public static RunMode Mode { get; private set; } = RunMode.Retail;
+     public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
+@@ -49,7 +51,19 @@ public static class Runtime
          HostWindow.Initialize(title);
          LoadMemoryCards();
          Audio.Initialize();
@@ -951,7 +1435,7 @@ index fdf7b6b..5d2f09e 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -87,6 +99,11 @@ public static class Runtime
+@@ -87,6 +101,11 @@ public static class Runtime
          Audio.Attach(Spu);
          FrameClock.Throttle();
          Sdk.LibCd.Tick();
@@ -964,10 +1448,15 @@ index fdf7b6b..5d2f09e 100644
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
      }
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..300a160 100644
+index 6432fa4..280ef1c 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
-@@ -38,6 +38,10 @@ public static class LibCd
+@@ -1,3 +1,4 @@
++using System.Linq;
+ using RecompOne.Runtime.Context;
+ using RecompOne.Runtime.Dispatch;
+ using RecompOne.Runtime.Memory;
+@@ -38,6 +39,14 @@ public static class LibCd
      const byte StatRead = 0x20;
      const byte StatSeek = 0x40;
      const byte StatPlay = 0x80;
@@ -975,10 +1464,14 @@ index 6432fa4..300a160 100644
 +    static readonly int TrapCdRead =
 +        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_CDREAD"), out var _t) ? _t : -1;
 +
++    static int _seekHits;
++    static readonly int TrapSeekLba =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_SEEK"), out var _ts) ? _ts : -1;
++
      static byte _status;
      static byte _mode;
      static byte _com;
-@@ -72,7 +76,11 @@ public static class LibCd
+@@ -72,7 +81,11 @@ public static class LibCd
      public static void CdInit(CpuContext c, IMemory m)
      {
          CdResetState();
@@ -991,7 +1484,7 @@ index 6432fa4..300a160 100644
      }
  
      public static void CdReset(CpuContext c, IMemory m)
-@@ -113,6 +121,11 @@ public static class LibCd
+@@ -113,6 +126,11 @@ public static class LibCd
              return;
          }
          int size = SectorSize(_mode);
@@ -1003,7 +1496,7 @@ index 6432fa4..300a160 100644
          Dispatcher.LoadByLba(lba);
          Log.Sdk($"CdRead sectors={sectors} buf=0x{buf:X8} mode=0x{_mode:X2} lba={lba} size={size}");
  
-@@ -125,6 +138,13 @@ public static class LibCd
+@@ -125,6 +143,13 @@ public static class LibCd
                  m.WriteU8(buf + (uint)(i * size + j), data[j]);
          }
          _lastIntr = Complete;
@@ -1017,7 +1510,71 @@ index 6432fa4..300a160 100644
          c.V0 = 1;
      }
  
-@@ -252,10 +272,14 @@ public static class LibCd
+@@ -143,13 +168,39 @@ public static class LibCd
+         if (c == null || m == null) return;
+ 
+         var snap = c.Snapshot();
+-        while (_cbData != 0)
++        // [jetmoto-fork] Bounded, and paced like the drive. This was
++        // `while (_cbData != 0)`, which only ends if the callback unregisters
++        // itself; Jet Moto 2 keeps its data callback installed, so the loop ran
++        // away, advancing the head past the end of the disc and producing
++        // millions of out-of-range reads. A 2x drive delivers ~150 sectors a
++        // second, so a field is worth about 2-3.
++        int budget = Math.Max(1, (int)(SectorsPerSecond / 60.0) + 1);
++        while (_cbData != 0 && budget-- > 0)
+         {
+             _lastIntr = DataReady;
++
++            // [jetmoto-fork] Stage the sector into the CD controller's FIFO
++            // before notifying. Routing CdControl to this HLE puts the read
++            // state here, but a game that fetches with its own CdGetSector
++            // DMAs from CdController -- a separate model that never saw the
++            // read command, so it returned zeros. Jet Moto 2 does exactly that:
++            // it misparsed the ISO, seeked to a nonsense LBA and retried
++            // forever. Same split-state trap as routing half a library.
++            if (Runtime.Cd != null)
++            {
++                try
++                {
++                    byte[] sec;
++                    lock (DiscLock) sec = Runtime.Cd.ReadSectorData(CurrentLba, SectorSize(_mode));
++                    Runtime.Cd.LoadSectorToFifo(sec);
++                }
++                catch { /* off the end of the disc; leave the FIFO alone */ }
++            }
++
+             if (_cbReady != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbReady); }
++            if (_cbData != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbData); }
+             AdvancePos(1);
+             Dispatcher.LoadByLba(CurrentLba);
+-            if (_cbData != 0) { c.A0 = DataReady; c.A1 = 0; Dispatcher.Call(c, m, _cbData); }
+         }
+         c.Restore(snap);
+     }
+@@ -212,8 +263,20 @@ public static class LibCd
+         int words = (int)c.A1;
+         int lba = CurrentLba;
+         byte[] data;
+-        lock (DiscLock) data = Runtime.Cd!.ReadSectorData(lba);
++        // [jetmoto-fork] Honour the current mode's sector size. This read a
++        // fixed 2048-byte cooked sector (payload at offset 24), but a game that
++        // set CdlModeSize1 expects a 2340-byte raw sector starting at the
++        // header (offset 12). Jet Moto 2 reads with mode 0xA0, so every sector
++        // arrived shifted by 12 bytes; it misparsed the ISO and then seeked to
++        // a nonsense LBA and retried forever.
++        int secSize = SectorSize(_mode);
++        lock (DiscLock) data = Runtime.Cd!.ReadSectorData(lba, secSize);
+         int bytes = Math.Min(data.Length, words * 4);
++        if (Log.SdkOn)
++        {
++            var head = string.Join(" ", data.Take(Math.Min(16, data.Length)).Select(b => b.ToString("X2")));
++            Log.Sdk($"CdGetSector lba={lba} words={words} size={secSize} -> {head}");
++        }
+         for (int j = 0; j < bytes; j++)
+             m.WriteU8(madr + (uint)j, data[j]);
+         c.V0 = 1;
+@@ -252,10 +315,14 @@ public static class LibCd
          c.V0 = fp;
      }
  
@@ -1036,7 +1593,15 @@ index 6432fa4..300a160 100644
  
      public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
      public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
-@@ -315,6 +339,8 @@ public static class LibCd
+@@ -312,9 +379,16 @@ public static class LibCd
+                 if (param != 0)
+                     lock (_posGate)
+                         for (int i = 0; i < 4; i++) _pos[i] = m.ReadU8(param + (uint)i);
++                // [jetmoto-fork] RECOMPONE_TRAP_SEEK=<lba> throws when the game
++                // seeks there, so the caller that computed a bad target shows up
++                // in the stack.
++                if (TrapSeekLba >= 0 && CurrentLba == TrapSeekLba && ++_seekHits >= 2)
++                    throw new InvalidOperationException($"[trap] Setloc lba={CurrentLba}");
                  break;
              case Setmode:
                  if (param != 0) _mode = m.ReadU8(param);
@@ -1084,10 +1649,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..5965ee2 100644
+index a036512..a6e151f 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,173 @@ public static class LibEtc
+@@ -9,15 +9,195 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -1182,6 +1747,26 @@ index a036512..5965ee2 100644
 +        }
 +    }
 +
++    // [jetmoto-fork] Nothing in the runtime drove CdController.AdvanceStreaming,
++    // so a game that talks to the CD hardware directly -- rather than through the
++    // libcd HLE -- got exactly one sector per ReadN and then stalled forever.
++    // Jet Moto 2 does precisely that: its own libcd is left recompiled, it issues
++    // Setloc/Setmode/ReadN, collects the first sector, waits for the second,
++    // times out, and reissues the whole sequence. That is the boot read loop.
++    //
++    // AdvanceStreaming is self-pacing -- it refuses to deliver while an interrupt
++    // is still outstanding -- so calling it from the poll path simply hands over
++    // the next sector as soon as the game acknowledges the previous one.
++    internal static void PumpCdStreaming()
++    {
++        try
++        {
++            Runtime.Cd?.AdvanceStreaming();
++            Runtime.Cd?.ServiceInterrupt();
++        }
++        catch { }
++    }
++
 +    static void MaybeVBlank(int now)
 +    {
 +        if (_inVbl || now == _lastVbl) return;
@@ -1239,6 +1824,7 @@ index a036512..5965ee2 100644
 +                _lastCdPump = tnow;
 +                LibCd.Tick();
 +            }
++            PumpCdStreaming();
 +
 +            Peek(m, _vcount);
 +            c.V0 = (uint)_vcount;
@@ -1256,6 +1842,7 @@ index a036512..5965ee2 100644
 +            MaybeVBlank(_vcount);
 +        }
          _vcount++;
++        PumpCdStreaming();
 +        _pollsSinceTick = 0;
 +        _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
 +        MaybeVBlank(_vcount);
