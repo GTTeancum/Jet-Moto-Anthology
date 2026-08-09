@@ -233,3 +233,24 @@ The test now waits for the array to read all-zero, which is an unambiguous
 race-start marker, and measures from there. **The general lesson: anchor a
 measurement on an event the program actually produces, not on a wall-clock
 guess about when it will be ready.**
+
+### 2026-08-09 — Goal reached, and what actually got it there
+
+A full 3-lap race was played end to end with working controls, no crashes and no
+unmapped calls. That is the definition of done set at the start.
+
+The last blocker was not a deep one. The pad buffer's two button bytes were
+swapped, so every button arrived 8 bits from where it belonged and Square acted
+as Left. It was found in seconds by a person pressing keys and describing the
+symptom, after hours of instrumentation had produced four confident and wrong
+diagnoses in a row: a stuck debounce counter, dead-code consumers, a
+state-machine dispatch failure, and the wrong title function.
+
+The pattern in every one of those: inferring across separate runs instead of
+running one cheap end-to-end test. The byte order had even been "verified" once
+by reading the game's own parser arithmetic, which is exactly the kind of
+careful reasoning that feels conclusive and is not.
+
+**Rule for next time: when something has an observable end-to-end symptom, get
+the symptom first.** Instrumentation is for narrowing a search once the
+behaviour is known, not for establishing what the behaviour is.
