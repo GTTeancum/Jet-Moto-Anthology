@@ -209,6 +209,12 @@ def main():
     if out.exists() and any(out.iterdir()) and not args.force:
         print(f"{out} is not empty; pass --force to overwrite", file=sys.stderr)
         return 1
+    # --force has to clear, not just overwrite. A previous run's output is not a
+    # subset of this one's -- an entry can stop being extracted between runs (the
+    # .DA files became CD-DA references) and would otherwise survive as a stale
+    # zero-byte file in a tree that is meant to be browsable.
+    for stale in ("files", "cdaudio"):
+        shutil.rmtree(out / stale, ignore_errors=True)
     (out / "files").mkdir(parents=True, exist_ok=True)
     (out / "cdaudio").mkdir(parents=True, exist_ok=True)
 
