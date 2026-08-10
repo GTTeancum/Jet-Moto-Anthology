@@ -14,63 +14,64 @@ redbook audio at all.
 | **Jet Moto** | Complete — a full 3-lap race played end to end |
 | **Jet Moto 2** | Playable — boots, menus, controls, races |
 
-## You need your own disc
+## Get it
 
-This repository contains **no game data**. Not the executable, not the assets,
-not the recompiled code. It is the port scaffolding — configuration, runtime
-patches, tooling — and it does nothing until you point it at a disc image you
-own.
+Download the [latest release](https://github.com/GTTeancum/Jet-Moto-Anthology/releases),
+unzip, and point it at a disc you own:
 
-The build recompiles your copy locally. Nothing derived from the game is
-distributed here or in the releases.
-
-## Requirements
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- Python 3.10+ (for the disc tooling)
-- `ffmpeg` on PATH (only if you want the ogg soundtrack)
-- A bin/cue rip of your own disc
-
-## Build
-
-```bash
-git clone https://github.com/GTTeancum/Jet-Moto-Anthology.git
-cd Jet-Moto-Anthology
-./build.sh --game jm1 --cue "/path/to/Jet Moto (USA).cue"
+```
+JetMoto --disc "D:\rips\Jet Moto (USA).cue"
 ```
 
-PowerShell:
+Or drop the `.cue` beside `JetMoto` and just run it — the launcher looks next to
+itself, in the working directory, and one level up. One executable covers both
+games; which port to build is read off the disc.
 
-```powershell
-.\build.ps1 -Game jm1 -Cue "D:\rips\Jet Moto (USA).cue"
+The first launch takes 10–15 seconds while it translates your disc's executable,
+and caches the result in `cache/`. Every launch after that is instant.
+
+The release is self-contained: no .NET install, no SDK, no build step.
+
+### You supply the game
+
+The release contains **no game code and no game data** — not the executable, not
+the assets, not the recompiled output. The recompiler runs on your machine,
+against your disc. Without one, the program does nothing but say so.
+
+That is not a formality. A prebuilt port binary would have the game's entire
+executable compiled into it, translated line for line; that artifact is the game
+and is not ours to hand out. Doing the translation at first launch is what makes
+a real release possible.
+
+### Options
+
+```
+JetMoto [--disc <path>] [--game jm1|jm2] [--extract [folder]] [--rebuild]
 ```
 
-That clones RecompOne, applies the fork patch, recompiles your disc's executable
-into C#, and builds the port. The result lands in
-`JetMoto/bin/Release/net10.0/`.
-
-Use `--game jm2` for Jet Moto 2.
-
-## Run
-
-```bash
-dotnet JetMoto/bin/Release/net10.0/JetMoto.dll "/path/to/Jet Moto (USA).cue"
-```
+| | |
+|---|---|
+| `--disc <path>` | a `.cue`, or a folder made by `--extract` |
+| `--game jm1\|jm2` | force the port; detected from the disc otherwise |
+| `--extract [folder]` | unpack the disc to loose files with an ogg soundtrack |
+| `--rebuild` | discard the cached recompilation and redo it |
 
 Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
 `Enter` Start, `Q`/`W` L1/R1.
 
 `RECOMPONE_FRAME_DIVIDER=2` gives the original's 30 Hz pacing. A log is written
 to `jetmoto.log` beside the binary, flushed per line so a crash still leaves a
-record.
+record; the previous run is kept as `jetmoto.prev.log`.
+
+`ffmpeg` on PATH is optional, and only used by `--extract` for the soundtrack.
 
 ## Loose files and the ogg soundtrack
 
 Either game will boot from an extracted tree of loose files instead of a
 bin/cue image, and prefers it when one is present:
 
-```bash
-python tools/extract-disc.py --cue "Jet Moto (USA).cue" --out JetMoto_loose
+```
+JetMoto --disc "Jet Moto (USA).cue" --extract JetMoto_loose
 ```
 
 The folder **is** the disc root — the executable and `SYSTEM.CNF` sit at the top
@@ -88,8 +89,9 @@ JetMoto_loose/
 Everything above the CD layer addresses the disc by **sector**, not by file —
 the game's own ISO reader, overlay loading, `CdSearchFile`, the recompiler
 config. So this is not merely a folder of files: the runtime rebuilds a
-byte-faithful view of the data track from it, at the original LBAs. `--verify`
-proves it, sector by sector:
+byte-faithful view of the data track from it, at the original LBAs.
+`tools/extract-disc.py` is the reference implementation of the same format and
+can prove that, sector by sector:
 
 ```bash
 python tools/extract-disc.py --cue "Jet Moto (USA).cue" --out JetMoto_loose --verify
@@ -103,6 +105,24 @@ rebuilt, which the tooling does not do.
 
 `RECOMPONE_DISC=<path>` forces a specific disc of either kind.
 `RECOMPONE_DISC_PREFER=cue` keeps the image even when loose files exist.
+
+## Build from source instead
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
+```bash
+git clone https://github.com/GTTeancum/Jet-Moto-Anthology.git
+cd Jet-Moto-Anthology
+./build.sh --game jm1 --cue "/path/to/Jet Moto (USA).cue"     # or build.ps1
+```
+
+That clones RecompOne, applies the fork patch, recompiles your disc's executable
+and builds the port into `JetMoto/bin/Release/net10.0/`. To build the launcher
+the release ships:
+
+```bash
+dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
+```
 
 ## What this took
 
@@ -132,9 +152,10 @@ exercised:
 ## Layout
 
 ```
+Launcher/               the shipped executable: recompiles on first run
 JetMoto/, JetMoto2/     port projects: entry point, config, funcmaps
 harness/                verification: frame capture, scripted input, disc tools
-tools/extract-disc.py   disc -> loose files + ogg soundtrack
+tools/extract-disc.py   disc -> loose files + ogg soundtrack, with --verify
 tools/recompone-fork.patch   runtime fixes, every hunk tagged [jetmoto-fork]
 tools/apply-fork.sh     re-create the fork from a clean upstream checkout
 DECISIONS.md            why things are the way they are
