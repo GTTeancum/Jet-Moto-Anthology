@@ -18,6 +18,7 @@ obj/
 harness/captures/
 harness/traces/
 *.png
+!docs/screenshots/*.png
 *.log
 
 # RecompOne runtime-generated files (written next to the working directory)
