@@ -29,7 +29,17 @@ if ! git cat-file -e "$UPSTREAM_REV^{commit}" 2>/dev/null; then
     git fetch --unshallow 2>/dev/null || git fetch
 fi
 
-git checkout -q "$UPSTREAM_REV"
+# Idempotent: a checkout that already carries the fork is left alone. Without
+# this, a second run dies on `git checkout` refusing to clobber local changes,
+# which is exactly the state anyone who has already built is in.
+if git apply --reverse --check "$PATCH" 2>/dev/null; then
+    echo "fork already applied"
+    cd "$REPO"
+    dotnet build tools/RecompOne -c Release
+    exit 0
+fi
+
+git checkout -q -f "$UPSTREAM_REV"
 git apply --check "$PATCH" || {
     echo "patch does not apply cleanly against $UPSTREAM_REV" >&2
     exit 1
