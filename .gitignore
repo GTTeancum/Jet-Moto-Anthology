@@ -42,3 +42,10 @@ harness/jm1new/
 harness/jm2new/
 harness/jm2mod/
 harness/jm2looserace/
+
+# RAM snapshots and frame captures from the harness. A 2 MB PS1 RAM dump is a
+# verbatim copy of the game's code and data, so these are disc content by the
+# rule above, not just scratch.
+harness/ram/
+harness/ram-race/
+harness/captures2/
