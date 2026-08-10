@@ -1,7 +1,7 @@
 # Disc image — user-provided, never committed (400+ MB, copyrighted game data)
 JetMotoPS1image/
-JetMoto/disc/
-JetMoto2/disc/
+JetMoto_loose/
+JetMoto2_loose/
 
 # Recompiler output — regenerated from the config + disc
 JetMoto/generated/
@@ -34,3 +34,11 @@ harness/jm2race/
 harness/jm2shots/
 harness/jm2loose/
 harness/jm1loose/
+
+# Harness frame dumps. These are scratch: every capture run writes thousands of
+# multi-megabyte PPMs, and one `git add -A` put 1554 of them into a commit.
+*.ppm
+harness/jm1new/
+harness/jm2new/
+harness/jm2mod/
+harness/jm2looserace/

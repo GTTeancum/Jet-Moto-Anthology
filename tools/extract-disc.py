@@ -6,13 +6,19 @@ The port prefers loose files when they are present. That makes the disc
 contents browsable and moddable, and it turns the redbook audio tracks into an
 ordinary .ogg soundtrack instead of hundreds of megabytes of raw PCM.
 
-Layout produced:
+Layout produced -- the folder *is* the disc root, so the executable and
+SYSTEM.CNF sit at the top exactly where the disc had them:
 
-    <out>/disc.json          manifest: tracks, files, sector map
-    <out>/files/...          the ISO9660 tree, ";1" version suffixes stripped
+    <out>/SCUS_943.09        the ISO9660 tree, ";1" version suffixes stripped,
+    <out>/SYSTEM.CNF         unwrapped at the root
+    <out>/STARTUP/...
     <out>/cdaudio/*.ogg      one per CD-DA track
-    <out>/structure.bin      the data-track sectors that belong to no file
+    <out>/.disc/disc.json    manifest: tracks, files, sector map
+    <out>/.disc/structure.bin  data-track sectors belonging to no file
                              (volume descriptors, path tables, directories)
+
+Bookkeeping lives under .disc/ rather than at the top so the root stays a
+faithful picture of the disc.
 
 Original LBAs are preserved. The runtime rebuilds a byte-faithful view of the
 data track from these pieces, so anything that addresses the disc by sector --
@@ -134,7 +140,7 @@ def verify(cue_path, out):
     return exactly what the image would. This rebuilds each sector the way the
     runtime does and compares the 2048-byte user area against the image.
     """
-    manifest = json.loads((out / "disc.json").read_text(encoding="utf-8"))
+    manifest = json.loads((out / ".disc" / "disc.json").read_text(encoding="utf-8"))
     tracks = parse_cue(cue_path)
     dt = next(t for t in tracks if t["mode"].startswith("MODE"))
     total = manifest["dataTrack"]["sectors"]
@@ -149,7 +155,7 @@ def verify(cue_path, out):
         off += count * RAW
 
     import bisect
-    struct_blob = open(out / "structure.bin", "rb")
+    struct_blob = open(out / ".disc" / "structure.bin", "rb")
     cache = {}
 
     def loose_user(lba):
@@ -164,7 +170,7 @@ def verify(cue_path, out):
             if e["lba"] <= lba < e["lba"] + nsec:
                 fh = cache.get(e["path"])
                 if fh is None:
-                    fh = cache[e["path"]] = open(out / "files" / e["path"], "rb")
+                    fh = cache[e["path"]] = open(out / e["path"], "rb")
                     if len(cache) > 64:
                         k, v = next(iter(cache.items()))
                         if k != e["path"]:
@@ -204,6 +210,7 @@ def main():
     args = ap.parse_args()
 
     out = Path(args.out)
+    meta = out / ".disc"
     if args.verify:
         return verify(args.cue, out)
     if out.exists() and any(out.iterdir()) and not args.force:
@@ -213,9 +220,18 @@ def main():
     # subset of this one's -- an entry can stop being extracted between runs (the
     # .DA files became CD-DA references) and would otherwise survive as a stale
     # zero-byte file in a tree that is meant to be browsable.
-    for stale in ("files", "cdaudio"):
-        shutil.rmtree(out / stale, ignore_errors=True)
-    (out / "files").mkdir(parents=True, exist_ok=True)
+    #
+    # Only ever wipe something this tool produced. The whole disc root gets
+    # removed here, so refusing to touch a directory with no .disc/disc.json in
+    # it is what keeps a mistyped --out from deleting someone's files.
+    if out.exists() and any(out.iterdir()):
+        if not (meta / "disc.json").exists():
+            print(f"{out} exists but is not a previous extraction "
+                  f"(no .disc/disc.json); refusing to overwrite", file=sys.stderr)
+            return 1
+        shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+    meta.mkdir(parents=True, exist_ok=True)
     (out / "cdaudio").mkdir(parents=True, exist_ok=True)
 
     tracks = parse_cue(args.cue)
@@ -262,7 +278,7 @@ def main():
                     "lba": lba, "size": size, "audio": True})
                 continue
 
-            dest = out / "files" / rel
+            dest = out / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             nsec = max(1, (size + USER - 1) // USER)
 
@@ -312,7 +328,7 @@ def main():
         if run_start is not None:
             ranges.append([run_start, len(run)]); blob.extend(run)
 
-        with open(out / "structure.bin", "wb") as w:
+        with open(meta / "structure.bin", "wb") as w:
             for sec in blob:
                 w.write(sec)
         manifest["structure"] = {"blob": "structure.bin", "ranges": ranges}
@@ -361,8 +377,8 @@ def main():
         print(f"track {t['number']:02d}: {secs:6.1f}s -> {name} "
               f"({dest.stat().st_size / 1e6:.1f} MB)")
 
-    (out / "disc.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
-    print(f"\nwrote {out / 'disc.json'}")
+    (meta / "disc.json").write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    print(f"\nwrote {meta / 'disc.json'}")
     return 0
 
 

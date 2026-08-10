@@ -436,10 +436,10 @@ index 0000000..0a23f54
 +}
 diff --git a/RecompOne.Runtime/Cdrom/LooseDisc.cs b/RecompOne.Runtime/Cdrom/LooseDisc.cs
 new file mode 100644
-index 0000000..9236a9b
+index 0000000..18909ba
 --- /dev/null
 +++ b/RecompOne.Runtime/Cdrom/LooseDisc.cs
-@@ -0,0 +1,272 @@
+@@ -0,0 +1,281 @@
 +using System.Text.Json;
 +
 +namespace RecompOne.Runtime.Cdrom;
@@ -453,7 +453,7 @@ index 0000000..9236a9b
 +/// simply be a folder of files. This rebuilds a byte-faithful view of the data
 +/// track: file contents come from the loose files at their original LBAs, the
 +/// sectors that belong to no file (volume descriptors, path tables, directory
-+/// records) come from structure.bin, and everything else is a synthesised blank
++/// records) come from .disc/structure.bin, and everything else is a synthesised blank
 +/// sector. Nothing upstream can tell the difference.
 +///
 +/// CD-DA tracks are .ogg files rather than raw PCM, which is the whole point of
@@ -481,16 +481,24 @@ index 0000000..9236a9b
 +    readonly Queue<string> _openOrder = new();
 +    const int MaxOpenFiles = 16;
 +
++    /// <summary>
++    /// The folder is the disc root, so the manifest cannot live in it without
++    /// looking like disc content; it sits under .disc/ instead.
++    /// </summary>
++    const string MetaDir = ".disc";
++
 +    public static bool Is(string path) =>
 +        !string.IsNullOrEmpty(path) &&
-+        Directory.Exists(path) && File.Exists(Path.Combine(path, "disc.json"));
++        Directory.Exists(path) &&
++        File.Exists(Path.Combine(path, MetaDir, "disc.json"));
 +
 +    public static LooseDisc Open(string dir) => new(dir);
 +
 +    LooseDisc(string dir)
 +    {
 +        _root = Path.GetFullPath(dir);
-+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(_root, "disc.json")));
++        using var doc = JsonDocument.Parse(
++            File.ReadAllText(Path.Combine(_root, MetaDir, "disc.json")));
 +        var r = doc.RootElement;
 +
 +        var extents = new List<Extent>();
@@ -577,7 +585,8 @@ index 0000000..9236a9b
 +        lock (_gate)
 +        {
 +            if (_open.TryGetValue(relative, out var have)) return have;
-+            var fs = new FileStream(Path.Combine(_root, "files", relative),
++            // relative paths are disc-root relative, and the folder is the root
++            var fs = new FileStream(Path.Combine(_root, relative),
 +                                    FileMode.Open, FileAccess.Read, FileShare.Read,
 +                                    1 << 16, FileOptions.RandomAccess);
 +            _open[relative] = fs;
@@ -663,7 +672,7 @@ index 0000000..9236a9b
 +    {
 +        lock (_gate)
 +        {
-+            _structureStream ??= new FileStream(Path.Combine(_root, "structure.bin"),
++            _structureStream ??= new FileStream(Path.Combine(_root, MetaDir, "structure.bin"),
 +                FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 16, FileOptions.RandomAccess);
 +            _structureStream.Position = offset;
 +            _structureStream.ReadExactly(dst);

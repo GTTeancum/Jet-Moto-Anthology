@@ -9,7 +9,7 @@ string repo = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
 string? disc = args.Length > 0
     ? args[0]
     : DiscSource.Resolve(
-        looseDir: Path.Combine(repo, "JetMoto", "disc"),
+        looseDir: Path.Combine(repo, "JetMoto_loose"),
         image: Environment.GetEnvironmentVariable("JETMOTO_CUE")
                ?? Path.Combine(repo, "JetMotoPS1image", "Jet Moto (USA).cue"));
 

@@ -13,16 +13,24 @@ Either game will boot from an extracted tree of loose files instead of a
 bin/cue image, and prefers it when one is present. Extract with:
 
 ```bash
-python tools/extract-disc.py --cue "JetMotoPS1image/Jet Moto (USA).cue" --out JetMoto/disc
+python tools/extract-disc.py --cue "JetMotoPS1image/Jet Moto (USA).cue" --out JetMoto_loose
 ```
 
+The folder *is* the disc root — the executable and `SYSTEM.CNF` sit at the top
+exactly where the disc had them, so it browses like the disc:
+
 ```
-JetMoto/disc/
-  disc.json        manifest: tracks, files, sector map
-  files/...        the ISO tree, ";1" suffixes stripped -- browsable, moddable
-  cdaudio/*.ogg    one per CD-DA track
-  structure.bin    the sectors belonging to no file (descriptors, directories)
+JetMoto_loose/
+  SCUS_943.09        the executable, at the root
+  SYSTEM.CNF
+  ALPINE1/ STARTUP/ MISC/ PICKTRAC/ ...
+  cdaudio/*.ogg      the soundtrack, one file per CD-DA track
+  .disc/disc.json    manifest: tracks, files, sector map
+  .disc/structure.bin  the sectors belonging to no file
 ```
+
+Bookkeeping lives under `.disc/` rather than at the top so nothing that is not
+disc content sits in the disc root.
 
 The disc is still addressed by sector everywhere above the CD layer -- by the
 game's own ISO reader, by overlay loading, by the recompiler config -- so the
@@ -31,7 +39,7 @@ the data track from it, at the original LBAs. `--verify` proves that, comparing
 every sector against the image:
 
 ```bash
-python tools/extract-disc.py --cue "JetMoto2_PS1image/Jet Moto 2 (v1.1).cue" --out JetMoto2/disc --verify
+python tools/extract-disc.py --cue "JetMoto2_PS1image/Jet Moto 2 (v1.1).cue" --out JetMoto2_loose --verify
 ```
 
 Both discs currently verify 100% identical (34186/34186 and 59103/59103).

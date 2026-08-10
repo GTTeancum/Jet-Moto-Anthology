@@ -22,8 +22,9 @@ Everything else is a means to it.
 
 ## Hard boundaries
 
-- **Never commit disc content.** `JetMotoPS1image/`, `JetMoto/disc/`, and every
-  extracted asset stay gitignored. The port is code; the user supplies the disc.
+- **Never commit disc content.** `JetMotoPS1image/`, `JetMoto2_PS1image/`,
+  `JetMoto_loose/`, `JetMoto2_loose/` and every extracted asset stay gitignored.
+  The port is code; the user supplies the disc.
 - **No upstream PRs to RecompOne.** The maintainer rejects AI-authored PRs
   outright. Runtime fixes live in our local checkout under `tools/RecompOne/`.
   If that checkout gets patched, record it in `DECISIONS.md` so it survives a
@@ -34,6 +35,9 @@ Everything else is a means to it.
 
 ```
 JetMotoPS1image/        user's disc dump (gitignored)
+JetMoto_loose/          disc extracted to loose files (gitignored)
+                          root = the disc root, cdaudio/ = ogg soundtrack,
+                          .disc/ = manifest + sector map
 JetMoto/
   config/jetmoto.json   RecompOne config
   config/funcmaps/      address -> name maps (the critical path)
