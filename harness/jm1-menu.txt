@@ -1,0 +1,7 @@
+# Jet Moto 1: walk the main menu to prove the pad works from a loose disc.
+1200:right
+1230:
+1350:right
+1380:
+1500:left
+1530:
