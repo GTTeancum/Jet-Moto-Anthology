@@ -23,7 +23,11 @@ static class Recompile
 {
     public static Assembly LoadOrBuild(string disc, GameProfile game, bool rebuild)
     {
-        string cacheDir = Path.Combine(AppContext.BaseDirectory, "cache");
+        // Beside the executable, not AppContext.BaseDirectory: in a
+        // single-file build that is a temp extraction directory, so the cache
+        // would live somewhere the player never sees and a temp sweep deletes.
+        string home = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        string cacheDir = Path.Combine(home, "cache");
         Directory.CreateDirectory(cacheDir);
         string key = CacheKey(disc, game);
         string cached = Path.Combine(cacheDir, $"{game.Key}-{key}.dll");

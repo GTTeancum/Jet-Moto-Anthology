@@ -8,6 +8,16 @@
     <AssemblyName>JetMoto</AssemblyName>
     <RootNamespace>JetMotoLauncher</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      One file, not a folder of 268. IncludeAllContentForSelfExtract matters
+      beyond tidiness: the launcher compiles the recompiled game with Roslyn at
+      runtime, and Roslyn needs real files on disk to reference. Assemblies left
+      bundled report an empty Location and cannot be referenced.
+    -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

@@ -13,17 +13,33 @@ sealed class GameProfile
     public required string Name { get; init; }
     public required string Resource { get; init; }   // embedded config
     public required string BootExe { get; init; }    // SCUS_943.09 etc.
+    public required string Exe { get; init; }        // the shipped executable name
 
     static readonly GameProfile[] All =
     [
-        new() { Key = "jm1", Name = "Jet Moto",   Resource = "jetmoto.json",  BootExe = "SCUS_943.09" },
-        new() { Key = "jm2", Name = "Jet Moto 2", Resource = "jetmoto2.json", BootExe = "SCUS_941.67" },
+        new() { Key = "jm1", Name = "Jet Moto",   Resource = "jetmoto.json",  BootExe = "SCUS_943.09", Exe = "JetMoto" },
+        new() { Key = "jm2", Name = "Jet Moto 2", Resource = "jetmoto2.json", BootExe = "SCUS_941.67", Exe = "JetMoto2" },
     ];
+
+    public static GameProfile? ForKey(string key) => All.FirstOrDefault(g => g.Key == key);
+
+    /// <summary>
+    /// Which game an executable is. Both games ship as their own exe -- one
+    /// binary pinned two ways -- so the file name is the pin. Without it a
+    /// single launcher would have to guess from whichever disc it found first,
+    /// which is how Jet Moto 2 became unreachable whenever both discs were
+    /// present.
+    /// </summary>
+    public static GameProfile? Pinned()
+    {
+        var exe = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "");
+        return All.FirstOrDefault(g => string.Equals(g.Exe, exe, StringComparison.OrdinalIgnoreCase));
+    }
 
     public static GameProfile? Detect(string disc, string? forced)
     {
         if (forced is not null)
-            return All.FirstOrDefault(g => g.Key == forced)
+            return ForKey(forced)
                    ?? throw new ArgumentException($"unknown --game: {forced}");
 
         // SYSTEM.CNF names the boot executable; that is the disc's own identity.

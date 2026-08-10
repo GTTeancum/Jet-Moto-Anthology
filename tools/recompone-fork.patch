@@ -1,3 +1,19 @@
+diff --git a/RecompOne.Recompiler/RecompOne.Recompiler.csproj b/RecompOne.Recompiler/RecompOne.Recompiler.csproj
+index c79184b..2be70bd 100644
+--- a/RecompOne.Recompiler/RecompOne.Recompiler.csproj
++++ b/RecompOne.Recompiler/RecompOne.Recompiler.csproj
+@@ -3,6 +3,11 @@
+     <PropertyGroup>
+         <OutputType>Exe</OutputType>
+         <TargetFramework>net10.0</TargetFramework>
++        <!-- [jetmoto-fork] The launcher references this project and publishes
++             self-contained; a self-contained app may not reference a
++             framework-dependent executable (NETSDK1150). Only applies when a
++             RID is being propagated, so a plain build is unchanged. -->
++        <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
+         <ImplicitUsings>enable</ImplicitUsings>
+         <Nullable>enable</Nullable>
+         <AssemblyName>recompone</AssemblyName>
 diff --git a/RecompOne.Runtime/Bios/BiosB.cs b/RecompOne.Runtime/Bios/BiosB.cs
 index f5935c8..09c2ca1 100644
 --- a/RecompOne.Runtime/Bios/BiosB.cs

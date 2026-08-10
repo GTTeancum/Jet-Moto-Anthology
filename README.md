@@ -16,43 +16,47 @@ redbook audio at all.
 
 ## Get it
 
-Download the [latest release](https://github.com/GTTeancum/Jet-Moto-Anthology/releases),
-unzip, and point it at a disc you own:
+Two downloads on the [releases page](https://github.com/GTTeancum/Jet-Moto-Anthology/releases),
+one per game. Each is a **single executable** — no .NET, no SDK, no build step,
+no loose DLLs.
+
+| | |
+|---|---|
+| `JetMoto.exe` | Jet Moto |
+| `JetMoto2.exe` | Jet Moto 2 |
+
+Put your disc rip in the same folder and double-click. If it cannot find a disc
+it opens a file picker and asks. Or point it straight at one:
 
 ```
-JetMoto --disc "D:\rips\Jet Moto (USA).cue"
+JetMoto2.exe --disc "D:\rips\Jet Moto 2 (v1.1).cue"
 ```
 
-Or drop the `.cue` beside `JetMoto` and just run it — the launcher looks next to
-itself, in the working directory, and one level up. One executable covers both
-games; which port to build is read off the disc.
+Install both side by side if you like — each looks for its own disc and keeps
+its own cache, so having both rips present is fine.
 
-The first launch takes 10–15 seconds while it translates your disc's executable,
-and caches the result in `cache/`. Every launch after that is instant.
-
-The release is self-contained: no .NET install, no SDK, no build step.
+The first launch spends 10–30 seconds translating your disc's executable and
+saves the result in `cache/`. Every launch after that starts immediately.
 
 ### You supply the game
 
-The release contains **no game code and no game data** — not the executable, not
-the assets, not the recompiled output. The recompiler runs on your machine,
+The downloads contain **no game code and no game data** — not the executable,
+not the assets, not the recompiled output. The recompiler runs on your machine,
 against your disc. Without one, the program does nothing but say so.
 
-That is not a formality. A prebuilt port binary would have the game's entire
-executable compiled into it, translated line for line; that artifact is the game
-and is not ours to hand out. Doing the translation at first launch is what makes
-a real release possible.
+A prebuilt port binary would have the game's entire executable compiled into it,
+translated line for line; that artifact is the game. Doing the translation at
+first launch is what makes a release possible.
 
 ### Options
 
 ```
-JetMoto [--disc <path>] [--game jm1|jm2] [--extract [folder]] [--rebuild]
+JetMoto.exe [--disc <path>] [--extract [folder]] [--rebuild]
 ```
 
 | | |
 |---|---|
 | `--disc <path>` | a `.cue`, or a folder made by `--extract` |
-| `--game jm1\|jm2` | force the port; detected from the disc otherwise |
 | `--extract [folder]` | unpack the disc to loose files with an ogg soundtrack |
 | `--rebuild` | discard the cached recompilation and redo it |
 
@@ -71,7 +75,7 @@ Either game will boot from an extracted tree of loose files instead of a
 bin/cue image, and prefers it when one is present:
 
 ```
-JetMoto --disc "Jet Moto (USA).cue" --extract JetMoto_loose
+JetMoto.exe --disc "Jet Moto (USA).cue" --extract JetMoto_loose
 ```
 
 The folder **is** the disc root — the executable and `SYSTEM.CNF` sit at the top
@@ -123,6 +127,10 @@ the release ships:
 ```bash
 dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
 ```
+
+That produces one `JetMoto.exe`. The two shipped executables are the same binary
+under two names — each reads its own file name to know which game it is, which
+is why `JetMoto2.exe` looks for the Jet Moto 2 disc and ignores the other.
 
 ## What this took
 
