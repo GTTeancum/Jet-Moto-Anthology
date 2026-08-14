@@ -963,6 +963,69 @@ index 24e34c6..a9cbb44 100644
          fn(c, m);
      }
  
+diff --git a/RecompOne.Runtime/GameQuirks.cs b/RecompOne.Runtime/GameQuirks.cs
+new file mode 100644
+index 0000000..558edd3
+--- /dev/null
++++ b/RecompOne.Runtime/GameQuirks.cs
+@@ -0,0 +1,57 @@
++namespace RecompOne.Runtime;
++
++/// <summary>
++/// [jetmoto-fork] Per-game runtime behaviour, off by default.
++///
++/// One runtime serves three ports, and they disagree about almost everything:
++/// how they reach the disc, whether they drive their own vblank, whether they
++/// display in 24-bit. Changes made for one game were landing on all three --
++/// which is how a vblank fix for Jet Moto 3 broke Jet Moto 1 outright.
++///
++/// Everything here defaults to false, so a port that sets nothing runs exactly
++/// the code it ran before this existed. Only Jet Moto 3 turns any of it on.
++/// </summary>
++public static class GameQuirks
++{
++    /// <summary>
++    /// Drive VBlank and presentation from a clock when the game is not calling
++    /// VSync. Needed by a game that spins on a flag its VBlank handler clears
++    /// while calling nothing; harmful to a game already driving its own vblank.
++    /// </summary>
++    public static bool VBlankRescue { get; set; }
++
++    /// <summary>
++    /// Present a 24-bit display from the software VRAM shadow instead of the GL
++    /// backend, and mirror CPU-to-VRAM uploads into that shadow so it has
++    /// something to show. The GL 24-bit path produces no picture.
++    /// </summary>
++    public static bool SoftwarePresent24 { get; set; }
++
++    /// <summary>
++    /// Let the stream feeder fill the ring as fast as slots free, rather than
++    /// pacing it to the drive's exact sector rate. The ring's busy flags are
++    /// already backpressure; the pacer leaves a movie player with no headroom.
++    /// </summary>
++    public static bool UnpacedStream { get; set; }
++
++    /// <summary>Apply a named preset. Unknown names are ignored.</summary>
++    public static void Apply(string game)
++    {
++        switch (game.ToLowerInvariant())
++        {
++            case "jm3":
++            case "jetmoto3":
++                VBlankRescue = true;
++                SoftwarePresent24 = true;
++                UnpacedStream = true;
++                break;
++        }
++    }
++
++    /// <summary>RECOMPONE_QUIRKS=jm3 applies a preset without a code change.</summary>
++    public static void ApplyFromEnvironment()
++    {
++        var q = Environment.GetEnvironmentVariable("RECOMPONE_QUIRKS");
++        if (!string.IsNullOrWhiteSpace(q)) Apply(q);
++    }
++}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
 index 8b55b53..767516e 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
@@ -983,21 +1046,20 @@ index 8b55b53..767516e 100644
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..ba679ab 100644
+index 9900095..c6c8d4c 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
-@@ -133,7 +133,13 @@ public sealed partial class Gpu
+@@ -133,7 +133,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
          ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
 -        if (!HleOn)   // gl mode uploads to gl vram via HleLoadPut
 +        // [jetmoto-fork] Mirror CPU uploads into the software VRAM even under
-+        // the GL backend. A 24-bit display is presented from this shadow rather
-+        // than through the GL path, and a movie player uploads its frames this
-+        // way -- Jet Moto 3 decoded every frame of its intro, blitted all 20
-+        // strips into VRAM, and showed none of it because the shadow was empty
-+        // and the 24-bit shader never produced a picture. One array write per
-+        // halfword on image uploads only; drawing is untouched.
++        // the GL backend, when a port asks for 24-bit output from that shadow.
++        // Jet Moto 3 decoded every frame of its intro, blitted all 20 strips
++        // into VRAM, and showed none of it because the shadow was empty and the
++        // GL 24-bit shader produces no picture.
++        if (!HleOn || GameQuirks.SoftwarePresent24)
          {
              int x = (_loadX + (_loadPx % _loadW)) & (VramWidth - 1);
              int y = (_loadY + (_loadPx / _loadW)) & (VramHeight - 1);
@@ -1729,7 +1791,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..7cafc30 100644
+index 8a62627..22a2b6c 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -1858,7 +1920,7 @@ index 8a62627..7cafc30 100644
 +                // movie player fills, and the GL 24-bit path never produced a
 +                // picture. PresentDisplay still runs, because it is what
 +                // flushes the backend's queued work.
-+                if (gpu.Display24Bit) UploadDisplayTexture(gl, gpu);
++                if (gpu.Display24Bit && GameQuirks.SoftwarePresent24) UploadDisplayTexture(gl, gpu);
 +                else if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
@@ -1930,7 +1992,7 @@ index c376f15..8f95516 100644
          _dicr |= 1u << (24 + channel);
          _raiseIrq();
 diff --git a/RecompOne.Runtime/Memory/PSMemory.cs b/RecompOne.Runtime/Memory/PSMemory.cs
-index 8cae036..98517f5 100644
+index 8cae036..7fa9e30 100644
 --- a/RecompOne.Runtime/Memory/PSMemory.cs
 +++ b/RecompOne.Runtime/Memory/PSMemory.cs
 @@ -15,6 +15,8 @@ public sealed class PSMemory : IMemory
@@ -1971,7 +2033,7 @@ index 8cae036..98517f5 100644
              Dispatcher.NotifyWrite(off);
          }
  
-@@ -66,7 +75,38 @@ public sealed class PSMemory : IMemory
+@@ -66,7 +75,39 @@ public sealed class PSMemory : IMemory
      private void TrackRead(uint phys, int size)
      {
          if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
@@ -2007,11 +2069,12 @@ index 8cae036..98517f5 100644
 +        System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
 +    private static void TickVBlank()
 +    {
++        if (!GameQuirks.VBlankRescue) return;
 +        if ((++_vblTick & 0x3FF) == 0) Sdk.LibEtc.PumpVBlank();
      }
  
      private Span<byte> Resolve(uint address, int size)
-@@ -80,7 +120,9 @@ public sealed class PSMemory : IMemory
+@@ -80,7 +121,9 @@ public sealed class PSMemory : IMemory
              return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
  
          if (phys >= MemoryMap.HwRegsBase && phys < MemoryMap.HwRegsBase + MemoryMap.HwRegsSize)
@@ -2021,7 +2084,7 @@ index 8cae036..98517f5 100644
  
          if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
              return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
-@@ -93,35 +135,51 @@ public sealed class PSMemory : IMemory
+@@ -93,35 +136,51 @@ public sealed class PSMemory : IMemory
  
      public byte ReadU8(uint address)
      {
@@ -2073,7 +2136,7 @@ index 8cae036..98517f5 100644
          var s = Resolve(address, 4);
          return (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
      }
-@@ -129,8 +187,15 @@ public sealed class PSMemory : IMemory
+@@ -129,8 +188,15 @@ public sealed class PSMemory : IMemory
      public void WriteU8(uint address, byte value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2089,7 +2152,7 @@ index 8cae036..98517f5 100644
  
          if (_frozenCount > 0 && phys < MemoryMap.RamWindow && _frozen[phys % (uint)_ram.Length]) return;
          Resolve(address, 1)[0] = value;
-@@ -139,9 +204,17 @@ public sealed class PSMemory : IMemory
+@@ -139,9 +205,17 @@ public sealed class PSMemory : IMemory
      public void WriteU16(uint address, ushort value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2107,7 +2170,7 @@ index 8cae036..98517f5 100644
          if (_timers.TryWrite(phys, value)) return;
          var s = Resolve(address, 2);
  
-@@ -159,12 +232,20 @@ public sealed class PSMemory : IMemory
+@@ -159,12 +233,20 @@ public sealed class PSMemory : IMemory
      public void WriteU32(uint address, uint value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2128,7 +2191,7 @@ index 8cae036..98517f5 100644
          if (IsDmaChcr(phys) && (value & 0x01000000u) != 0)
          {
              Hw32(phys, value & ~0x01000000u);
-@@ -173,6 +254,7 @@ public sealed class PSMemory : IMemory
+@@ -173,6 +255,7 @@ public sealed class PSMemory : IMemory
          }
          if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
          if (IsSpu(phys)) { _spu.WriteReg16(phys, (ushort)value); _spu.WriteReg16(phys + 2, (ushort)(value >> 16)); return; }
@@ -2448,7 +2511,7 @@ index 6432fa4..4264e39 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..728dede 100644
+index ad79811..533df4b 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2486,7 +2549,7 @@ index ad79811..728dede 100644
          if (!_active) { c.V0 = 1; return; }
  
          lock (_lock)
-@@ -159,14 +178,41 @@ public static class LibCdStream
+@@ -159,14 +178,42 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -2517,24 +2580,25 @@ index ad79811..728dede 100644
  
 -            double delivered = _clock.Elapsed.TotalSeconds * LibCd.SectorsPerSecond;
 -            if ((_streamLba - _streamStartLba) + n > delivered) { Thread.Sleep(1); continue; }
-+            // [jetmoto-fork] The feeder used to be paced to the drive's exact
-+            // sector rate. A 320x240 movie needs about 150 sectors a second and
-+            // a 2x drive delivers exactly that, so there was no headroom at all:
-+            // any jitter left the ring empty, and Jet Moto 3's player then burnt
-+            // its entire eight-million-iteration stall timeout before each
-+            // frame, which is why its intro ran at two frames a second.
-+            //
-+            // The ring is its own backpressure -- the feeder blocks below when
-+            // no slot is free -- so pacing on top of it bought nothing. Display
-+            // timing still comes from the game's own vblank.
++            // [jetmoto-fork] Pacing the feeder to the drive's exact sector rate
++            // leaves a movie player no headroom: a 320x240 movie needs about 150
++            // sectors a second and a 2x drive delivers exactly 150, so any
++            // jitter empties the ring and the player burns its stall timeout.
++            // The ring's busy flags are already backpressure, so under
++            // UnpacedStream the pacer is skipped entirely.
++            if (!GameQuirks.UnpacedStream)
++            {
++                double delivered = _clock.Elapsed.TotalSeconds * LibCd.SectorsPerSecond;
++                if ((_streamLba - _streamStartLba) + n > delivered) { Thread.Sleep(1); continue; }
++            }
  
              int start;
              lock (_lock)
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..cb6949c 100644
+index a036512..808992e 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,244 @@ public static class LibEtc
+@@ -9,15 +9,245 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2666,6 +2730,7 @@ index a036512..cb6949c 100644
 +
 +    public static void PumpVBlank()
 +    {
++        if (!GameQuirks.VBlankRescue) return;
 +        long now = System.Diagnostics.Stopwatch.GetTimestamp();
 +
 +        // Only rescue a starved loop. A game calling VSync is driving its own
