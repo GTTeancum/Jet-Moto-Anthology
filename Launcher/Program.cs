@@ -59,6 +59,10 @@ try
     var run = entry.GetMethod("Run", BindingFlags.Public | BindingFlags.Static)
               ?? throw new InvalidOperationException("Recompiled.Entry has no Run method");
 
+    // Per-game runtime behaviour, off for anything that does not ask. Must run
+    // before PSMemory is constructed: the memory path reads these flags.
+    RecompOne.Runtime.GameQuirks.Apply(title.Key);
+
     var mem = new PSMemory();
     run.Invoke(null, [mem, disc, title.Name]);
     return 0;

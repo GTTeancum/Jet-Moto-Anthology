@@ -9,7 +9,7 @@ namespace JetMotoLauncher;
 /// </summary>
 sealed class GameProfile
 {
-    public required string Key { get; init; }        // jm1 / jm2
+    public required string Key { get; init; }        // jm1 / jm2 / jm3
     public required string Name { get; init; }
     public required string Resource { get; init; }   // embedded config
     public required string BootExe { get; init; }    // SCUS_943.09 etc.
@@ -19,6 +19,7 @@ sealed class GameProfile
     [
         new() { Key = "jm1", Name = "Jet Moto",   Resource = "jetmoto.json",  BootExe = "SCUS_943.09", Exe = "JetMoto" },
         new() { Key = "jm2", Name = "Jet Moto 2", Resource = "jetmoto2.json", BootExe = "SCUS_941.67", Exe = "JetMoto2" },
+        new() { Key = "jm3", Name = "Jet Moto 3", Resource = "jetmoto3.json", BootExe = "SCUS_945.55", Exe = "JetMoto3" },
     ];
 
     public static GameProfile? ForKey(string key) => All.FirstOrDefault(g => g.Key == key);

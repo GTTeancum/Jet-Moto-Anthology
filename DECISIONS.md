@@ -520,3 +520,64 @@ all, which says the movie has side effects the rest of the boot depends on.
 What is left is real work on the movie pipeline itself: where MDEC decode and the
 twenty-strip VRAM blit actually spend their time. I did not isolate that, and
 without it the rest -- menus, controls, racing, packaging -- cannot start.
+
+
+### 2026-08-14 (later) — Jet Moto 3 was never a movie-decode problem
+
+The previous entry concluded that the intro was too slow to decode and that the
+movie pipeline needed real work. That was wrong, and it was wrong because the
+measurements were taken from outside. Three bugs, all interrupt timing, all
+found by asking the program what it was waiting on:
+
+**A hang trap.** `RECOMPONE_TRAP_STALL=<seconds>` throws from the memory path
+once the game has gone that long without calling `VSync`. The exception unwinds
+the recompiled call stack, so a hang arrives named instead of guessed at. It
+carries a one-in-64 sample of recently-read addresses, which is what turned
+"stuck somewhere in the shell" into "spinning on `JOY_STAT` bit 1". Everything
+below came from that one instrument; none of it was reachable by reading code.
+
+**Interrupts nested.** Hardware masks interrupts while an exception handler
+runs. Nothing here did, and it mattered because the vblank rescue fires from
+the memory path — so a handler that reads memory could take a second vblank
+inside the first one. Jet Moto 3's pad driver runs in the vblank chain and walks
+the SIO port a byte at a time; the nested copy consumed the byte and the outer
+copy spun on a receive flag that would never be set again. That was the stall
+that made every run look nondeterministic: it fired at a different point each
+time, sometimes before the first movie, sometimes after the second. Nested
+requests are now recorded and taken as the handler unwinds, which is what the
+hardware does with an interrupt that arrives while masked. IRQ 7 stays exempt —
+the controller acknowledge is drained a byte at a time from inside the call, and
+that nesting is deliberate.
+
+**The GPU DMA interrupt fired inside the write that started the transfer.**
+Real transfers take microseconds; the handler runs long after the code that
+kicked it has returned. Raising it inline re-entered libgpu before the request
+it had just started was marked in flight, so the handler started the same
+ordering table again — and again, until the stack ran out.
+
+**Even deferred, the libgpu queue desynchronised.** It is drained from two
+places: after every enqueue, and from the DMA-done handler. When the transfer
+completes inside the register write, both drains can run over the same entry,
+and the read index walks past the write index into slots nobody filled — a call
+through a null function pointer. Suppressing the interrupt for the GPU channel
+leaves one drain, which is correct here precisely because the transfer really is
+already finished.
+
+With those three, the intro plays to the end, the legal screen renders, and the
+game loads its shell and starts the attract movie.
+
+**A fourth, cheaper one:** `LibCdStream.Streaming` was `_active`, which a game
+sets once and need never clear. Jet Moto 3 leaves the ring configured for the
+whole session, so the reduced streaming vblank rate applied to the menus and to
+racing as well — the game ran at a few frames a second everywhere, which is what
+"the port is slow" had actually been measuring. It is `_active && _reading` now.
+
+**Process note, learned the hard way:** `tools/apply-fork.sh` resets the
+`tools/RecompOne/` checkout to the pinned upstream commit and re-applies the
+committed patch. Running it with uncommitted runtime work in the tree destroys
+that work. Regenerate the patch instead, and stage untracked files first or the
+new files are silently missing from it:
+
+```bash
+cd tools/RecompOne && git add -A -- . && git diff --cached HEAD > ../recompone-fork.patch && git reset -q
+```

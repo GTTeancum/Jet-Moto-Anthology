@@ -33,6 +33,7 @@
   <ItemGroup>
     <EmbeddedResource Include="..\JetMoto\config\jetmoto.json" LogicalName="jetmoto.json" />
     <EmbeddedResource Include="..\JetMoto2\config\jetmoto2.json" LogicalName="jetmoto2.json" />
+    <EmbeddedResource Include="..\JetMoto3\config\jetmoto3.json" LogicalName="jetmoto3.json" />
   </ItemGroup>
 
 </Project>

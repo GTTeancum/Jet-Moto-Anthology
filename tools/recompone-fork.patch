@@ -1254,10 +1254,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..154dc84 100644
+index 6027c49..b889f8e 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -7,13 +7,206 @@ namespace RecompOne.Runtime;
+@@ -7,13 +7,234 @@ namespace RecompOne.Runtime;
  
  public static class Interrupts
  {
@@ -1424,7 +1424,35 @@ index 6027c49..154dc84 100644
 +        finally { _depth--; }
 +    }
 +
++    // [jetmoto-fork] An interrupt handler needs a stack of its own. The BIOS
++    // switches to one; this called the handler on whatever stack pointer the
++    // interrupted code happened to have. Jet Moto 3 parks SP at the scratchpad
++    // base (0x1F800000) and indexes upward through it for a hot routine -- and
++    // an interrupt taken there pushed its frame *below* the scratchpad, into
++    // nothing. On hardware that never happens because the handler is not on the
++    // game's stack at all.
++    //
++    // The substitute is the last stack pointer seen in main RAM. The routine
++    // that switched to the scratchpad saved its RAM stack pointer and will
++    // restore it, so everything below that address is free -- which is exactly
++    // where a handler's frame belongs. A game whose SP is always in RAM never
++    // reaches this.
++    static uint _lastRamSp;
++    static bool SpInRam(uint sp) => (sp & 0x1FFFFFFFu) < 0x00200000u;
++
 +    static void DeliverOne(int irq, CpuContext cpu, IMemory mem)
++    {
++        uint savedSp = cpu.SP;
++        if (SpInRam(cpu.SP)) _lastRamSp = cpu.SP;
++        else if (_lastRamSp != 0) cpu.SP = _lastRamSp - 0x40u;
++        try
++        {
++            DeliverDispatch(irq, cpu, mem);
++        }
++        finally { cpu.SP = savedSp; }
++    }
++
++    static void DeliverDispatch(int irq, CpuContext cpu, IMemory mem)
 +    {
 +
 +        // I_STAT has to stay raised for the whole dispatch, not just the chain
@@ -2671,7 +2699,7 @@ index 6432fa4..fe3cd70 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..3c89a3c 100644
+index ad79811..c5bd883 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2682,15 +2710,21 @@ index ad79811..3c89a3c 100644
      static int _streamStartLba;
      static readonly Stopwatch _clock = new();
  
-@@ -74,8 +75,29 @@ public static class LibCdStream
+@@ -74,8 +75,35 @@ public static class LibCdStream
  
      public static void StSetMask(CpuContext c, IMemory m) { c.V0 = 0; Log.Sdk("StSetMask"); }
  
 +    static readonly bool SkipFmv =
 +        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
 +
-+    /// <summary>True while a movie stream is set up and feeding.</summary>
-+    public static bool Streaming => _active;
++    /// <summary>
++    /// True only while a movie is actually being fed. [jetmoto-fork] This used
++    /// to be just _active, which a game sets once and may never clear -- Jet
++    /// Moto 3 leaves the ring configured for the whole session, so the reduced
++    /// streaming vblank rate applied to the menus and to racing as well as to
++    /// the movies, and the game ran at a few frames a second everywhere.
++    /// </summary>
++    public static bool Streaming => _active && _reading;
 +
      public static void StGetNext(CpuContext c, IMemory m)
      {
@@ -2712,7 +2746,7 @@ index ad79811..3c89a3c 100644
          if (!_active) { c.V0 = 1; return; }
  
          lock (_lock)
-@@ -86,7 +108,7 @@ public static class LibCdStream
+@@ -86,7 +114,7 @@ public static class LibCdStream
                  _prevStart = -1;
              }
  
@@ -2721,7 +2755,7 @@ index ad79811..3c89a3c 100644
  
              var (start, n) = _ready.Dequeue();
              uint dataPtr = _dataBase + (uint)(start * SlotData);
-@@ -95,6 +117,7 @@ public static class LibCdStream
+@@ -95,6 +123,7 @@ public static class LibCdStream
              m.WriteU32(c.A1, hdrPtr);
              _prevStart = start;
              _prevN = n;
@@ -2729,7 +2763,7 @@ index ad79811..3c89a3c 100644
              c.V0 = 0;
          }
      }
-@@ -104,6 +127,14 @@ public static class LibCdStream
+@@ -104,6 +133,14 @@ public static class LibCdStream
      public static void StGetBackloc(CpuContext c, IMemory m) { c.V0 = 0xFFFFFFFFu; Log.Sdk("StGetBackloc"); }
  
  
@@ -2744,7 +2778,7 @@ index ad79811..3c89a3c 100644
      internal static void OnReadStream(int lba)
      {
          if (!InUse) return;
-@@ -112,9 +143,21 @@ public static class LibCdStream
+@@ -112,9 +149,21 @@ public static class LibCdStream
          EnsureThread();
      }
  
@@ -2767,7 +2801,7 @@ index ad79811..3c89a3c 100644
      }
  
      static void ResetRing(IMemory m)
-@@ -152,6 +195,9 @@ public static class LibCdStream
+@@ -152,6 +201,9 @@ public static class LibCdStream
              {
                  _streamLba = _pendingLba >= 0 ? _pendingLba : LibCd.CurrentLba;
                  _streamStartLba = _streamLba;
@@ -2777,7 +2811,7 @@ index ad79811..3c89a3c 100644
                  _clock.Restart();
              }
  
-@@ -159,14 +205,43 @@ public static class LibCdStream
+@@ -159,14 +211,43 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -2825,7 +2859,7 @@ index ad79811..3c89a3c 100644
  
              int start;
              lock (_lock)
-@@ -183,7 +258,7 @@ public static class LibCdStream
+@@ -183,7 +264,7 @@ public static class LibCdStream
              lock (_lock)
              {
                  for (int i = 0; i < n; i++) _busy[start + i] = true;
@@ -2835,10 +2869,10 @@ index ad79811..3c89a3c 100644
              }
          }
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..93ce519 100644
+index a036512..91ed109 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,277 @@ public static class LibEtc
+@@ -9,15 +9,286 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2968,6 +3002,15 @@ index a036512..93ce519 100644
 +
 +    static long _lastVSyncCall = System.Diagnostics.Stopwatch.GetTimestamp();
 +
++    // Fields to wait between rescued vblanks while a movie is streaming. The
++    // player swaps display buffers on its vblank and cannot fill one every
++    // field, so running the rescue flat out shows buffers with nothing in them.
++    // RECOMPONE_STREAM_FIELD exists to find the value that matches a given
++    // player's decode rate.
++    static readonly int StreamFieldDivider = Math.Clamp(
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_STREAM_FIELD"), out var _sfd) ? _sfd : 8,
++        1, 64);
++
 +    // [jetmoto-fork] RECOMPONE_TRAP_STALL=<seconds> throws from the memory path
 +    // once the game has gone that long without calling VSync. It unwinds the
 +    // recompiled call stack, so a hang is named rather than guessed at, and the
@@ -3012,7 +3055,7 @@ index a036512..93ce519 100644
 +        // that had nothing in them yet and the screen stayed black, while at
 +        // roughly a quarter of that the picture is there. Outside a movie the
 +        // full field rate applies.
-+        long field = LibCdStream.Streaming ? TicksPerFrame * 16 : TicksPerFrame;
++        long field = LibCdStream.Streaming ? TicksPerFrame * StreamFieldDivider : TicksPerFrame;
 +        if (now - _lastForcedVbl < field) return;
 +        _lastForcedVbl = now;
 +        _vcount++;

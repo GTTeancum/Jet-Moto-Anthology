@@ -46,6 +46,23 @@
   // the sector it is waiting for until it returns and acknowledges. Routing
   // libcd removes the interrupt from the loop entirely.
   "functions": [
+
+    // Branch targets the detector never made functions of: the game tail-jumps
+    // into the middle of a neighbour, and an inter-function branch is emitted as
+    // a dispatch through the address. With no entry registered there the call is
+    // "unmapped" and the run dies -- 0x80042A5C killed the bike-select screen.
+    // Naming them here makes the recompiler emit an entry at each.
+    { "address": "0x8001B8D8", "name": "func_8001B8D8" },
+    { "address": "0x80042A5C", "name": "func_80042A5C" },
+    { "address": "0x800433E4", "name": "func_800433E4" },
+    { "address": "0x8006A8F8", "name": "func_8006A8F8" },
+    { "address": "0x8006A988", "name": "func_8006A988" },
+    { "address": "0x8006AB54", "name": "func_8006AB54" },
+    { "address": "0x8006AC54", "name": "func_8006AC54" },
+    { "address": "0x8006AC70", "name": "func_8006AC70" },
+    { "address": "0x8006AC9C", "name": "func_8006AC9C" },
+    { "address": "0x8006A7EC", "name": "func_8006A7EC" },
+
     { "address": "0x8007E498", "name": "CdInit" },
     { "address": "0x8007E73C", "name": "CdSync" },
     { "address": "0x8007E75C", "name": "CdReady" },

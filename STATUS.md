@@ -6,7 +6,7 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 |------|-------|
 | **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
-| **Jet Moto 3** (SCUS-94555) | **not playable** — its intro movie now renders, but at ~2 fps, and the game will not start without it |
+| **Jet Moto 3** (SCUS-94555) | **boots and plays its intro** — both logos, the legal screen and the attract movie; menus next |
 
 ## Jet Moto 3
 
@@ -19,32 +19,33 @@ Working:
   address recovered by scoring candidates against the 14 calls the resident
   executable makes above its own end and against the overlay's own string pool.
   The game confirmed it by passing exactly that address as its load buffer.
-- Boots, loads the shell, streams `/DATA/FMV/989LOGO.STR`, decodes it, and
-  **displays it** — the Pacific Coast Power & Light logo renders correctly.
+- Boots, loads the shell, and plays its intro **through to the end**: both logo
+  movies complete (77 and 165 frames, essentially every frame in the files), the
+  legal screen renders in 24-bit, the shell loads its sound banks and textures,
+  and `JET.STR` — the 11400-sector attract movie — starts.
 - libcd and libstr routed. Jet Moto 3 wants the opposite treatment to Jet Moto 2:
   it uses the bulk `CdRead` API and its `CD_ready` re-enters itself from inside
   the interrupt, which deadlocks on the hardware path.
+- Its own SIO pad driver, which runs inside the vblank interrupt chain, now
+  completes a packet.
 
-**Blocked on the movie pipeline.** The intro decodes and displays at two to
-three frames a second against the fifteen the player expects, and Jet Moto 3
-will not reach its menus until the movies finish. Everything tried and measured:
+The previous entry here said this was blocked on movie decode speed. That was
+wrong. It was three interrupt-timing bugs, and `DECISIONS.md` has the full
+account; the short version:
 
-| Attempt | Result |
+| Bug | Symptom it produced |
 |---|---|
-| GL 24-bit present | never produces a picture; bypassed, not fixed |
-| Software 24-bit from the VRAM shadow | **works** — the first logo renders |
-| Vblank rescue at 60 Hz | 300 → 5900 vblanks, and the boot reaches the *second* movie |
-| Unpaced stream feeder | 77 → 242 movie frames, but nothing renders at all |
-| Vblank slowed to 1/4 and 1/16 during streaming | still black once unpaced |
-| Mashing Start to skip | the player ignores it |
-| Reporting the ring empty and the `.STR` files absent | the game retries rather than moving on |
-| Stubbing the movie player (config patch) | skips the movie and the game then renders nothing |
+| Interrupts nested — hardware masks them inside a handler, this did not | a vblank fired inside the pad driver, the nested copy took the SIO byte, the outer copy spun forever. Every run hung at a different point, so it read as flakiness |
+| The GPU DMA completion interrupt fired inside the write that started the transfer | libgpu's handler restarted the same ordering table until the stack ran out |
+| Both the enqueue path and the DMA handler drained libgpu's command queue | the read index walked past the write index into unfilled slots — a call through a null pointer |
+| `LibCdStream.Streaming` was "a ring is configured", not "a movie is playing" | the reduced streaming vblank rate applied to *everything*, so the whole game ran at a few frames a second |
 
-The shipped configuration is the best of these: pacer on, software 24-bit,
-vblank rescue. The first logo is visible; the second movie does not complete.
-A visible slow intro beat an invisible faster one, so `UnpacedStream` is off.
+What made them findable: `RECOMPONE_TRAP_STALL=<seconds>` throws from the memory
+path once the game has gone that long without calling `VSync`, unwinding the
+recompiled stack with a sample of the addresses the spin was reading. Every one
+of the above arrived through it.
 
-Not yet attempted: menus, controls, gameplay, loose-file extraction, launcher
+Not yet done: menus, controls, gameplay, loose-file extraction, launcher
 integration, release.
 
 ---
