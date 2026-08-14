@@ -6,47 +6,67 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 |------|-------|
 | **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
-| **Jet Moto 3** (SCUS-94555) | **boots and plays its intro** — both logos, the legal screen and the attract movie; menus next |
+| **Jet Moto 3** (SCUS-94555) | **playable** — boots, menus, controls, races; 2026-08-14 |
 
 ## Jet Moto 3
 
-A different studio and a different engine, and it needs more of the runtime than
-either predecessor.
+A different studio and a different engine, and it needed more of the runtime
+than either predecessor. It boots through both logo movies, the legal screen and
+the attract movie, into the shell; the menus respond to the pad; a race loads
+and runs at 35–60 fps with the rider, the bike, the track, the gates, the
+banners, a live lap timer, lap counter, position, minimap and speedometer.
 
-Working:
+```bash
+dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll "Jet Moto 3 (USA).cue"
+```
 
-- Recompiles: 1527 functions plus `SHELL.BIN` as an overlay at 0x800DBB28, an
+- Recompiles: 1534 functions plus `SHELL.BIN` as an overlay at 0x800DBB28, an
   address recovered by scoring candidates against the 14 calls the resident
   executable makes above its own end and against the overlay's own string pool.
   The game confirmed it by passing exactly that address as its load buffer.
-- Boots, loads the shell, and plays its intro **through to the end**: both logo
-  movies complete (77 and 165 frames, essentially every frame in the files), the
-  legal screen renders in 24-bit, the shell loads its sound banks and textures,
-  and `JET.STR` — the 11400-sector attract movie — starts.
 - libcd and libstr routed. Jet Moto 3 wants the opposite treatment to Jet Moto 2:
   it uses the bulk `CdRead` API and its `CD_ready` re-enters itself from inside
   the interrupt, which deadlocks on the hardware path.
-- Its own SIO pad driver, which runs inside the vblank interrupt chain, now
-  completes a packet.
+- Its own SIO pad driver runs inside the vblank interrupt chain.
 
-The previous entry here said this was blocked on movie decode speed. That was
-wrong. It was three interrupt-timing bugs, and `DECISIONS.md` has the full
-account; the short version:
+### What it took, and what was wrong before
 
-| Bug | Symptom it produced |
+The previous version of this file said Jet Moto 3 was blocked on movie decode
+speed. That was wrong. Five bugs, all interrupt or presentation timing; the full
+account is in `DECISIONS.md`.
+
+| Bug | What it looked like |
 |---|---|
-| Interrupts nested — hardware masks them inside a handler, this did not | a vblank fired inside the pad driver, the nested copy took the SIO byte, the outer copy spun forever. Every run hung at a different point, so it read as flakiness |
-| The GPU DMA completion interrupt fired inside the write that started the transfer | libgpu's handler restarted the same ordering table until the stack ran out |
-| Both the enqueue path and the DMA handler drained libgpu's command queue | the read index walked past the write index into unfilled slots — a call through a null pointer |
-| `LibCdStream.Streaming` was "a ring is configured", not "a movie is playing" | the reduced streaming vblank rate applied to *everything*, so the whole game ran at a few frames a second |
+| Interrupts nested — hardware masks them inside a handler, this did not | a vblank fired inside the pad driver, the nested copy took the SIO byte, the outer copy spun forever. It hung at a different point every run, so it read as flakiness |
+| Interrupt handlers had no stack of their own | Jet Moto 3 parks SP at the scratchpad base for a hot routine; a handler taken there pushed below the scratchpad, into nothing |
+| The GPU DMA completion interrupt fired inside the write that started the transfer | libgpu restarted the same ordering table until the stack ran out |
+| Both the enqueue path and the DMA handler drained libgpu's queue | the read index walked past the write index into unfilled slots — a call through a null pointer |
+| `LibCdStream.Streaming` meant "a ring is configured", and the vblank rescue presented one frame in four | the whole game ran at a few frames a second. This is what the old entry was measuring and calling a decode problem |
 
-What made them findable: `RECOMPONE_TRAP_STALL=<seconds>` throws from the memory
-path once the game has gone that long without calling `VSync`, unwinding the
-recompiled stack with a sample of the addresses the spin was reading. Every one
-of the above arrived through it.
+Ten branch targets also had to be named in the config: the game tail-jumps into
+the middle of neighbouring functions and the detector does not make those
+addresses functions, so the dispatch landed on nothing.
 
-Not yet done: menus, controls, gameplay, loose-file extraction, launcher
-integration, release.
+Two instruments did all the work and are worth keeping:
+
+- `RECOMPONE_TRAP_STALL=<seconds>` throws from the memory path once the game has
+  gone that long without calling `VSync`, unwinding the recompiled stack with a
+  sample of the addresses the spin was reading. `RECOMPONE_TRAP_AFTER=<seconds>`
+  is the same thing on a timer, for a hang that keeps calling `VSync`.
+- `RECOMPONE_FPS=1` reports presented frames, time spent presenting, and what
+  the GPU was asked to draw. "Nothing is on screen" has two very different
+  causes, and a primitive count separates them in one run.
+
+### Known issues
+
+- **Water renders as flat opaque navy**, most likely a dropped semi-transparency
+  or a missing texture on the water plane. Cosmetic; everything else in the
+  scene is correct.
+- **A strip at the top of the screen** occasionally shows geometry from
+  elsewhere in VRAM, which points at the display window rather than at drawing.
+- Not machine-verified: a completed lap. The harness can hold the throttle but
+  cannot follow a racing line, the same limitation the other two ports have.
+- The intro runs about 90 seconds before the shell. Start skips the logos.
 
 ---
 

@@ -12,9 +12,12 @@ translates the executable off your disc into C#, and builds the port.
 
 .EXAMPLE
 .\build.ps1 -Game jm2 -Cue "D:\rips\Jet Moto 2 (v1.1).cue" -Loose
+
+.EXAMPLE
+.\build.ps1 -Game jm3 -Cue "D:\rips\Jet Moto 3 (USA).cue"
 #>
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('jm1', 'jm2')][string]$Game,
+    [Parameter(Mandatory = $true)][ValidateSet('jm1', 'jm2', 'jm3')][string]$Game,
     [Parameter(Mandatory = $true)][string]$Cue,
     [switch]$Loose
 )
@@ -24,8 +27,10 @@ $repo = $PSScriptRoot
 
 if ($Game -eq 'jm1') {
     $proj = 'JetMoto'; $config = 'JetMoto/config/jetmoto.json'; $looseDir = 'JetMoto_loose'
-} else {
+} elseif ($Game -eq 'jm2') {
     $proj = 'JetMoto2'; $config = 'JetMoto2/config/jetmoto2.json'; $looseDir = 'JetMoto2_loose'
+} else {
+    $proj = 'JetMoto3'; $config = 'JetMoto3/config/jetmoto3.json'; $looseDir = 'JetMoto3_loose'
 }
 
 if (-not (Test-Path $Cue)) {

@@ -7,6 +7,7 @@
 #
 #   ./build.sh --game jm1 --cue "/path/to/Jet Moto (USA).cue"
 #   ./build.sh --game jm2 --cue "/path/to/Jet Moto 2 (v1.1).cue"
+#   ./build.sh --game jm3 --cue "/path/to/Jet Moto 3 (USA).cue"
 #
 # Add --loose to also extract the disc to a loose-file tree with an ogg
 # soundtrack, which the port will then prefer.
@@ -30,7 +31,8 @@ done
 case "$GAME" in
     jm1) PROJ="JetMoto";  CONFIG="JetMoto/config/jetmoto.json";   LOOSEDIR="JetMoto_loose" ;;
     jm2) PROJ="JetMoto2"; CONFIG="JetMoto2/config/jetmoto2.json"; LOOSEDIR="JetMoto2_loose" ;;
-    *) echo "usage: $0 --game jm1|jm2 --cue <path to .cue> [--loose]" >&2; exit 2 ;;
+    jm3) PROJ="JetMoto3"; CONFIG="JetMoto3/config/jetmoto3.json"; LOOSEDIR="JetMoto3_loose" ;;
+    *) echo "usage: $0 --game jm1|jm2|jm3 --cue <path to .cue> [--loose]" >&2; exit 2 ;;
 esac
 
 if [ -z "$CUE" ] || [ ! -f "$CUE" ]; then

@@ -1,18 +1,19 @@
 # Jet Moto Anthology
 
-Native PC ports of **Jet Moto** (SCUS-94309) and **Jet Moto 2: Championship
-Edition** (SCUS-94167), produced by static recompilation with
-[RecompOne](https://github.com/BlackLabelHQ/RecompOne).
+Native PC ports of **Jet Moto** (SCUS-94309), **Jet Moto 2: Championship
+Edition** (SCUS-94167) and **Jet Moto 3** (SCUS-94555), produced by static
+recompilation with [RecompOne](https://github.com/BlackLabelHQ/RecompOne).
 
-Both games boot, render, take controller input and race. Dithering is removed
-outright, the frame pacing matches the original 30 Hz, and the CD soundtrack
-plays — which it never did on either port before, because the runtime had no
+All three boot, render, take controller input and race. Dithering is removed
+outright, the frame pacing matches the original, and the CD soundtrack plays —
+which it never did on any of these ports before, because the runtime had no
 redbook audio at all.
 
 | Game | State |
 |------|-------|
 | **Jet Moto** | Complete — a full 3-lap race played end to end |
 | **Jet Moto 2** | Playable — boots, menus, controls, races |
+| **Jet Moto 3** | Playable — boots, menus, controls, races |
 
 ## Screenshots
 
@@ -32,9 +33,16 @@ Captured from these ports, not from an emulator.
 | ![Jet Moto 2 title screen](docs/screenshots/jetmoto2-title.png) | ![The Choose Race Type menu](docs/screenshots/jetmoto2-racetype.png) |
 | ![Riders lined up at the start](docs/screenshots/jetmoto2-start.png) | ![Racing through Slickrock Gorge](docs/screenshots/jetmoto2-race.png) |
 
+**Jet Moto 3**
+
+| | |
+|---|---|
+| ![Jet Moto 3 title screen](docs/screenshots/jetmoto3-title.png) | ![The Race Mode menu](docs/screenshots/jetmoto3-racemode.png) |
+| ![Racing under the start gantry](docs/screenshots/jetmoto3-start.png) | ![Riding the canyon course past the pylons](docs/screenshots/jetmoto3-canyon.png) |
+
 ## Get it
 
-Two downloads on the [releases page](https://github.com/GTTeancum/Jet-Moto-Anthology/releases),
+Three downloads on the [releases page](https://github.com/GTTeancum/Jet-Moto-Anthology/releases),
 one per game. Each is a **single executable** — no .NET, no SDK, no build step,
 no loose DLLs.
 
@@ -42,6 +50,7 @@ no loose DLLs.
 |---|---|
 | `JetMoto.exe` | Jet Moto |
 | `JetMoto2.exe` | Jet Moto 2 |
+| `JetMoto3.exe` | Jet Moto 3 |
 
 Put your disc rip in the same folder and double-click. If it cannot find a disc
 it opens a file picker and asks. Or point it straight at one:
@@ -50,8 +59,8 @@ it opens a file picker and asks. Or point it straight at one:
 JetMoto2.exe --disc "D:\rips\Jet Moto 2 (v1.1).cue"
 ```
 
-Install both side by side if you like — each looks for its own disc and keeps
-its own cache, so having both rips present is fine.
+Install all three side by side if you like — each looks for its own disc and
+keeps its own cache, so having every rip present is fine.
 
 The first launch spends 10–30 seconds translating your disc's executable and
 saves the result in `cache/`. Every launch after that starts immediately.
@@ -146,9 +155,10 @@ the release ships:
 dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
 ```
 
-That produces one `JetMoto.exe`. The two shipped executables are the same binary
-under two names — each reads its own file name to know which game it is, which
-is why `JetMoto2.exe` looks for the Jet Moto 2 disc and ignores the other.
+That produces one `JetMoto.exe`. The three shipped executables are the same
+binary under three names — each reads its own file name to know which game it
+is, which is why `JetMoto2.exe` looks for the Jet Moto 2 disc and ignores the
+others.
 
 ## What this took
 
@@ -158,7 +168,7 @@ strings. With no decompilation to work from, every function starts as
 whole critical path. They were recovered from the PSYQ debug string pool, which
 both retail builds kept.
 
-The two games then diverged completely. Jet Moto reaches the disc through the
+The three games then diverged completely. Jet Moto reaches the disc through the
 libcd HLE and the controller through the BIOS pad calls. **Jet Moto 2 reaches
 both through the hardware**, which meant the parts of the runtime nobody had
 exercised:
@@ -173,13 +183,30 @@ exercised:
   registered through `SysEnqIntRP` were stored and never walked. Jet Moto 2
   ships its own pad driver and needs both.
 
-`DECISIONS.md` records the reasoning, including the wrong turns.
+**Jet Moto 3 is a different studio and a different engine**, and what it needed
+was interrupt timing rather than devices:
+
+- Interrupts nested. Hardware masks them for the duration of a handler; nothing
+  here did, and Jet Moto 3's pad driver runs inside the vblank chain and walks
+  the SIO port a byte at a time. A vblank fired inside it, the nested copy took
+  the byte, and the outer copy spun forever.
+- Handlers ran on whatever stack the interrupted code had. Jet Moto 3 parks its
+  stack pointer at the scratchpad base for a hot routine, so a handler taken
+  there pushed its frame off the end of the scratchpad.
+- The GPU DMA completion interrupt was raised from inside the register write
+  that started the transfer, which re-entered libgpu before the request it had
+  just started was marked in flight. It restarted the same ordering table until
+  the stack ran out.
+
+`DECISIONS.md` records the reasoning, including the wrong turns — of which the
+largest was three sessions spent treating Jet Moto 3 as a movie-decode problem
+when the movies were never the problem.
 
 ## Layout
 
 ```
 Launcher/               the shipped executable: recompiles on first run
-JetMoto/, JetMoto2/     port projects: entry point, config, funcmaps
+JetMoto/, JetMoto2/, JetMoto3/   port projects: entry point, config, funcmaps
 harness/                verification: frame capture, scripted input, disc tools
 tools/extract-disc.py   disc -> loose files + ogg soundtrack, with --verify
 tools/recompone-fork.patch   runtime fixes, every hunk tagged [jetmoto-fork]
@@ -197,9 +224,9 @@ entirely in the patch so it survives a re-clone.
   runtime fixes in `tools/recompone-fork.patch` are modifications to it and
   carry the same licence. They are **not** submitted upstream: the maintainer
   does not accept AI-authored contributions.
-- Jet Moto and Jet Moto 2 are © Sony Interactive Entertainment. This project
-  ships none of their code or data and is not affiliated with or endorsed by
-  them.
+- Jet Moto, Jet Moto 2 and Jet Moto 3 are © Sony Interactive Entertainment.
+  This project ships none of their code or data and is not affiliated with or
+  endorsed by them.
 - The port work in this repository was written with Claude (Anthropic).
 
 Everything here that is ours is MIT licensed. See `LICENSE`.
