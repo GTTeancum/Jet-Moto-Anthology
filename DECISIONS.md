@@ -581,3 +581,27 @@ new files are silently missing from it:
 ```bash
 cd tools/RecompOne && git add -A -- . && git diff --cached HEAD > ../recompone-fork.patch && git reset -q
 ```
+
+
+### 2026-08-14 (later still) — present on the game's swap, and a camera that fooled me
+
+Two things after Jet Moto 3 reached its first race.
+
+**Presenting on a clock shows half-drawn frames.** The vblank rescue presented
+on a timer, because Jet Moto 3 never calls `VSync(0)` and there was nothing else
+to hang presentation off. A timer slow enough not to tear held the game to 15
+fps; a timer fast enough for 60 sometimes caught a frame mid-draw, which showed
+as a band of the other buffer along the top of the screen. The display origin
+moving is the buffer swap, so that is the moment a finished frame exists: the
+presenter now watches for it, and falls back to a timer only for a screen that
+never swaps.
+
+**A fixed camera is not a rendering bug.** Most of a session went into "the bike
+and the near track are not drawn", from screenshots that showed only distant
+scenery with a live HUD. They were the out-of-bounds camera: the scripted input
+can hold the throttle but cannot follow a racing line, so it drove into the
+water within seconds every time, and the game showed a static scenic view while
+the rider respawned. The GPU primitive counter added to `RECOMPONE_FPS` is what
+settled it — a hundred polygons a frame in that state, twelve hundred once the
+bike was actually on the track. The lesson is the one already in STATUS.md and
+it still had to be relearned: measure the thing, do not infer it from a picture.

@@ -1083,7 +1083,7 @@ index 0000000..c44cfc8
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..767516e 100644
+index 8b55b53..8e4cac0 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1101,6 +1101,65 @@ index 8b55b53..767516e 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
+@@ -50,6 +58,9 @@ public sealed partial class Gpu
+     public bool Display24Bit => _disp24;
+     public bool Pal => _pal;
+ 
++    /// <summary>[jetmoto-fork] Counts display-origin changes, i.e. buffer swaps.</summary>
++    public int DisplayFlips { get; private set; }
++
+     int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
+ 
+     public int DisplayWidth
+@@ -145,6 +156,7 @@ public sealed partial class Gpu
+             case >= 0x05 and <= 0x08:
+                 WriteGp1Display(op, p);
+                 GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
++                TraceDisplay();
+                 return;
+             case 0x00: Reset(); break;
+             case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
+@@ -155,11 +167,39 @@ public sealed partial class Gpu
+         }
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_LOG_DISPLAY=1 reports the display window whenever
++    // it changes. A band of unrelated VRAM along an edge is a display-window
++    // question, not a drawing one, and this is the cheapest way to tell.
++    static readonly bool TraceDisp =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_DISPLAY") is "1" or "true";
++    string _lastDisp = "";
++
++    void TraceDisplay()
++    {
++        if (!TraceDisp) return;
++        string now = $"vram=({_dispVramX},{_dispVramY}) {DisplayWidth}x{DisplayHeight} " +
++                     $"h={_hRange1}..{_hRange2} v={_vRange1}..{_vRange2} " +
++                     $"hres={_hres}{(_hres368 ? "/368" : "")} vres480={_vres480} 24bit={_disp24}";
++        if (now == _lastDisp) return;
++        _lastDisp = now;
++        Console.Error.WriteLine($"[disp] {now}");
++    }
++
+     void WriteGp1Display(uint op, uint p)
+     {
+         switch (op)
+         {
+-            case 0x05: _dispVramX = (int)(p & 0x3FF); _dispVramY = (int)((p >> 10) & 0x1FF); break;
++            case 0x05:
++            {
++                int nx = (int)(p & 0x3FF), ny = (int)((p >> 10) & 0x1FF);
++                // [jetmoto-fork] Moving the display origin is the game swapping
++                // buffers. It is the only moment at which a finished frame
++                // exists, so a presenter that runs on its own clock has to know
++                // when it happened or it shows half-drawn ones.
++                if (nx != _dispVramX || ny != _dispVramY) DisplayFlips++;
++                _dispVramX = nx; _dispVramY = ny;
++                break;
++            }
+             case 0x06: _hRange1 = (int)(p & 0xFFF); _hRange2 = (int)((p >> 12) & 0xFFF); break;
+             case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
+             case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
 index 9900095..e66d2d0 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
@@ -2940,10 +2999,10 @@ index ad79811..c5bd883 100644
              }
          }
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..e3dc505 100644
+index a036512..b95faa0 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,313 @@ public static class LibEtc
+@@ -9,15 +9,319 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -3070,6 +3129,7 @@ index a036512..e3dc505 100644
 +    // regardless of how fast the loop spins.
 +    static long _lastForcedVbl = System.Diagnostics.Stopwatch.GetTimestamp();
 +    static long _lastPresent = System.Diagnostics.Stopwatch.GetTimestamp();
++    static int _lastFlipSeen = -1;
 +
 +    static long _lastVSyncCall = System.Diagnostics.Stopwatch.GetTimestamp();
 +
@@ -3160,13 +3220,18 @@ index a036512..e3dc505 100644
 +        // through its VBlank handler instead, so the port drew every frame into
 +        // VRAM and showed none of them. Once the game has gone a few fields
 +        // without presenting, present for it.
-+        // One present per field, not one per four. The four-field version was
-+        // holding the whole game to 15 fps: Jet Moto 3 never calls VSync(0), it
-+        // syncs through its own vblank handler, so every frame it displayed came
-+        // from here. Presenting costs about a millisecond, so the rate this
-+        // allows is the rate the game can actually reach.
-+        if (now - _lastPresent >= TicksPerFrame)
++        // Present on the game's own buffer swap, not on a clock. The four-field
++        // version held the whole game to 15 fps -- Jet Moto 3 never calls
++        // VSync(0), it syncs through its own vblank handler, so every frame it
++        // displayed came from here -- and a timer fast enough to fix that
++        // sometimes caught a frame mid-draw, which showed as a band of the other
++        // buffer along the top. The display origin moving *is* the swap, so the
++        // finished frame is exactly what gets shown. A stale screen is still
++        // refreshed after a few fields, for anything that never swaps.
++        int flips = Runtime.Gpu?.DisplayFlips ?? 0;
++        if (flips != _lastFlipSeen || now - _lastPresent >= TicksPerFrame * 4)
 +        {
++            _lastFlipSeen = flips;
 +            _lastPresent = now;
 +            Runtime.PresentFrame();
 +        }

@@ -59,14 +59,21 @@ Two instruments did all the work and are worth keeping:
 
 ### Known issues
 
-- **Water renders as flat opaque navy**, most likely a dropped semi-transparency
-  or a missing texture on the water plane. Cosmetic; everything else in the
-  scene is correct.
-- **A strip at the top of the screen** occasionally shows geometry from
-  elsewhere in VRAM, which points at the display window rather than at drawing.
+- **A band of the other frame along the top of the screen**, seen occasionally
+  before the presenter was synchronised to the game's buffer swap. Jet Moto 3
+  does not call `VSync(0)`, so presentation ran on a timer and sometimes caught
+  a frame mid-draw. It now presents when the display origin moves, which is the
+  swap itself. Not seen since.
+- **Water reads as flat dark navy.** It may be correct for a deep canyon; it has
+  not been checked against the original and looks more like an untextured
+  polygon than water.
 - Not machine-verified: a completed lap. The harness can hold the throttle but
-  cannot follow a racing line, the same limitation the other two ports have.
+  cannot follow a racing line — it drives into the water, and the fixed camera
+  that shows while the rider is out of bounds was mistaken for a rendering bug
+  for most of a session. The same limitation applies to the other two ports.
 - The intro runs about 90 seconds before the shell. Start skips the logos.
+- Six branch targets past the end of the text segment are still unregistered.
+  They are linear sweep reading data as code and are unreachable.
 
 ---
 
