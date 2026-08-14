@@ -453,3 +453,41 @@ receives the blit. Worth noting for whoever picks this up: naming ResetGraph,
 LoadImage, ClearImage, StoreImage and MoveImage in the config does nothing.
 SdkPatches only reimplements DrawSync and VSync out of libgpu; Jet Moto 1's
 config names the others as documentation and they have never been routed.
+
+
+### 2026-08-14 — Jet Moto 3: a picture, but not a playable one
+
+The blocker from last session is solved. The movie was decoding into VRAM
+correctly all along -- all 20 strips of every frame -- and being thrown away,
+because the GL backend's 24-bit present path never produced a picture and the
+software VRAM shadow it could have fallen back to was deliberately not written
+under the HLE backend. Mirroring CPU-to-VRAM uploads into the shadow and
+presenting 24-bit from there put the Pacific Coast Power & Light logo on screen.
+The GL 24-bit path itself is still broken and is now bypassed rather than fixed.
+
+Then the frame rate. Profiling put 100% of samples inside `LibCdStream.StGetNext`:
+the movie player spins there up to eight million times waiting for a frame, and
+the stream feeder was paced to the drive's exact sector rate. A 320x240 movie
+needs about 150 sectors a second and a 2x drive delivers exactly 150, so there
+was no headroom at all -- any jitter left the ring empty and the player burnt its
+whole stall timeout before each frame. The ring's own busy flags are already
+backpressure, so the pacer bought nothing; removing it took delivered frames from
+77 to 242 in the same wall time and got the boot as far as the second movie.
+
+That was not enough. Presentation, not decoding, is now the limit at ~2 fps, and
+I did not isolate where the time goes. **Jet Moto 3 is not playable and I am not
+going to claim otherwise.** The game will not advance past its intro, and
+skipping the movie does not work either -- with the ring reported empty and the
+.STR files reported absent it retries rather than taking a missing-file path.
+
+Two things worth knowing for whoever continues:
+
+- A game can spin in a wait loop that touches no memory and calls nothing but a
+  routed SDK function. The vblank clock added last session hangs off memory
+  reads, which is useless there; it is now also pumped from `StGetNext`. Any
+  other spin of that shape will need the same treatment.
+- The vblank rescue must stay gated. Pumping it unconditionally broke Jet Moto 1
+  outright, and an eight-field gate throttled Jet Moto 3's intro to two frames a
+  second. It sits at two fields, which is narrow enough for a game that calls
+  VSync once a frame and wide enough that a game polling it several times a
+  frame never triggers it.

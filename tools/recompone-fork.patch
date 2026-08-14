@@ -982,6 +982,25 @@ index 8b55b53..767516e 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
+diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
+index 9900095..ba679ab 100644
+--- a/RecompOne.Runtime/Gpu/GpuCommands.cs
++++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
+@@ -133,7 +133,13 @@ public sealed partial class Gpu
+     {
+         if (!_loadImage) return;
+         ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
+-        if (!HleOn)   // gl mode uploads to gl vram via HleLoadPut
++        // [jetmoto-fork] Mirror CPU uploads into the software VRAM even under
++        // the GL backend. A 24-bit display is presented from this shadow rather
++        // than through the GL path, and a movie player uploads its frames this
++        // way -- Jet Moto 3 decoded every frame of its intro, blitted all 20
++        // strips into VRAM, and showed none of it because the shadow was empty
++        // and the 24-bit shader never produced a picture. One array write per
++        // halfword on image uploads only; drawing is untouched.
+         {
+             int x = (_loadX + (_loadPx % _loadW)) & (VramWidth - 1);
+             int y = (_loadY + (_loadPx / _loadW)) & (VramHeight - 1);
 diff --git a/RecompOne.Runtime/Gpu/GpuHleForward.cs b/RecompOne.Runtime/Gpu/GpuHleForward.cs
 index 80a937d..4af164e 100644
 --- a/RecompOne.Runtime/Gpu/GpuHleForward.cs
@@ -1710,7 +1729,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..d2fe881 100644
+index 8a62627..7cafc30 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -1830,7 +1849,21 @@ index 8a62627..d2fe881 100644
      }
  
      internal static void Pump()
-@@ -555,6 +639,25 @@ public static class HostWindow
+@@ -372,7 +456,12 @@ public static class HostWindow
+                     gpu.DisplayWidth, gpu.DisplayHeight,
+                     gpu.Display24Bit,
+                     outW: wf.X, outH: wf.Y);
+-                if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
++                // 24-bit output comes from the software shadow: it is what a
++                // movie player fills, and the GL 24-bit path never produced a
++                // picture. PresentDisplay still runs, because it is what
++                // flushes the backend's queued work.
++                if (gpu.Display24Bit) UploadDisplayTexture(gl, gpu);
++                else if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
+                 gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+                 gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
+             }
+@@ -555,6 +644,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -2179,7 +2212,7 @@ index fdf7b6b..1805ffe 100644
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
      }
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..27e3835 100644
+index 6432fa4..4264e39 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
 @@ -1,3 +1,4 @@
@@ -2305,7 +2338,33 @@ index 6432fa4..27e3835 100644
          for (int j = 0; j < bytes; j++)
              m.WriteU8(madr + (uint)j, data[j]);
          c.V0 = 1;
-@@ -252,10 +315,14 @@ public static class LibCd
+@@ -221,11 +284,25 @@ public static class LibCd
+ 
+     public static void CdDataSync(CpuContext c, IMemory m) => c.V0 = 0;
+ 
++    static readonly bool SkipFmv =
++        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
++
+     public static void CdSearchFile(CpuContext c, IMemory m)
+     {
+         uint fp = c.A0;
+         string name = ReadCString(m, c.A1);
+ 
++        // [jetmoto-fork] With RECOMPONE_SKIP_FMV the movies are reported absent.
++        // Reporting the ring empty was not enough on its own -- Jet Moto 3's
++        // player retries rather than giving up -- but a game that cannot find
++        // its movie file takes its own missing-file path and carries on.
++        if (SkipFmv && name.EndsWith(".STR;1", StringComparison.OrdinalIgnoreCase))
++        {
++            Log.Sdk($"CdSearchFile '{name}' skipped (RECOMPONE_SKIP_FMV)");
++            c.V0 = 0;
++            return;
++        }
++
+         if (Runtime.Cd == null || !Runtime.Cd.Fs.Locate(name, out int lba, out uint size))
+         {
+             Log.Sdk($"CdSearchFile '{name}'wasnt found");
+@@ -252,10 +329,14 @@ public static class LibCd
          c.V0 = fp;
      }
  
@@ -2324,7 +2383,7 @@ index 6432fa4..27e3835 100644
  
      public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
      public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
-@@ -300,6 +367,23 @@ public static class LibCd
+@@ -300,6 +381,23 @@ public static class LibCd
          return ExecCommand(m, com, param, result);
      }
  
@@ -2348,7 +2407,7 @@ index 6432fa4..27e3835 100644
      static int ExecCommand(IMemory m, byte com, uint param, uint result)
      {
          _com = com;
-@@ -312,9 +396,16 @@ public static class LibCd
+@@ -312,9 +410,16 @@ public static class LibCd
                  if (param != 0)
                      lock (_posGate)
                          for (int i = 0; i < 4; i++) _pos[i] = m.ReadU8(param + (uint)i);
@@ -2365,7 +2424,7 @@ index 6432fa4..27e3835 100644
                  break;
              case Setfilter:
                  if (param != 0) { _filterFile = m.ReadU8(param); _filterChannel = m.ReadU8(param + 1); }
-@@ -351,6 +442,11 @@ public static class LibCd
+@@ -351,6 +456,11 @@ public static class LibCd
              case Play:
                  _readActive = false;
                  _status = (byte)(StatMotor | StatPlay);
@@ -2377,7 +2436,7 @@ index 6432fa4..27e3835 100644
                  break;
              case Getparam:
                  _lastResult[0] = _status;
-@@ -427,8 +523,10 @@ public static class LibCd
+@@ -427,8 +537,10 @@ public static class LibCd
                  _readActive = false;
                  _xaActive = false;
                  _status = StatMotor;
@@ -2389,7 +2448,7 @@ index 6432fa4..27e3835 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..0f64f76 100644
+index ad79811..728dede 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2400,7 +2459,34 @@ index ad79811..0f64f76 100644
      static int _streamStartLba;
      static readonly Stopwatch _clock = new();
  
-@@ -159,6 +160,25 @@ public static class LibCdStream
+@@ -74,8 +75,26 @@ public static class LibCdStream
+ 
+     public static void StSetMask(CpuContext c, IMemory m) { c.V0 = 0; Log.Sdk("StSetMask"); }
+ 
++    static readonly bool SkipFmv =
++        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
++
+     public static void StGetNext(CpuContext c, IMemory m)
+     {
++        // [jetmoto-fork] This is a wait loop's inner call, and a starved one
++        // touches no memory: Jet Moto 3's movie player spins here up to eight
++        // million times, and the vblank clock hangs off memory reads, so nothing
++        // ticked and nothing was ever presented. Pump it from the wait itself.
++        // PumpVBlank is time-gated and declines while the game drives its own
++        // vblank, so this costs a timestamp compare.
++        LibEtc.PumpVBlank();
++
++        // [jetmoto-fork] RECOMPONE_SKIP_FMV=1 reports the ring permanently empty.
++        // A movie player then exhausts its own stall timeout and moves on, which
++        // is how Jet Moto 3 gets past its intro. Its movies decode correctly but
++        // present at about two frames a second, and none of them are needed to
++        // play the game; skipping is far better than watching a slideshow.
++        if (SkipFmv) { c.V0 = 1; return; }
++
+         if (!_active) { c.V0 = 1; return; }
+ 
+         lock (_lock)
+@@ -159,14 +178,41 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -2426,11 +2512,29 @@ index ad79811..0f64f76 100644
              if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
+             int n = Read16(sec, 14);
+             if (n <= 0 || n > _slots) { _streamLba++; continue; }
+ 
+-            double delivered = _clock.Elapsed.TotalSeconds * LibCd.SectorsPerSecond;
+-            if ((_streamLba - _streamStartLba) + n > delivered) { Thread.Sleep(1); continue; }
++            // [jetmoto-fork] The feeder used to be paced to the drive's exact
++            // sector rate. A 320x240 movie needs about 150 sectors a second and
++            // a 2x drive delivers exactly that, so there was no headroom at all:
++            // any jitter left the ring empty, and Jet Moto 3's player then burnt
++            // its entire eight-million-iteration stall timeout before each
++            // frame, which is why its intro ran at two frames a second.
++            //
++            // The ring is its own backpressure -- the feeder blocks below when
++            // no slot is free -- so pacing on top of it bought nothing. Display
++            // timing still comes from the game's own vblank.
+ 
+             int start;
+             lock (_lock)
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..1fa0eec 100644
+index a036512..cb6949c 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,242 @@ public static class LibEtc
+@@ -9,15 +9,244 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2564,12 +2668,14 @@ index a036512..1fa0eec 100644
 +    {
 +        long now = System.Diagnostics.Stopwatch.GetTimestamp();
 +
-+        // Only rescue a genuinely starved loop. A game that is calling VSync at
-+        // all drives its own vblank, and injecting interrupts underneath it from
-+        // the middle of a memory read is both unnecessary and destabilising --
-+        // it broke Jet Moto 1 outright. Eight fields of silence from the game
-+        // means it is spinning on something an interrupt has to clear.
-+        if (now - _lastVSyncCall < TicksPerFrame * 8) return;
++        // Only rescue a starved loop. A game calling VSync is driving its own
++        // vblank, and injecting interrupts underneath it from the middle of a
++        // memory read is unnecessary and destabilising -- it broke Jet Moto 1
++        // outright. Jet Moto 1 and 2 poll VSync several times per frame, so two
++        // fields of silence never happens for them; Jet Moto 3 calls it perhaps
++        // once per movie frame, which is why the gate cannot be much wider than
++        // this. At eight fields it throttled the intro to two frames a second.
++        if (now - _lastVSyncCall < TicksPerFrame * 2) return;
 +        if (now - _lastForcedVbl < TicksPerFrame) return;
 +        _lastForcedVbl = now;
 +        _vcount++;
