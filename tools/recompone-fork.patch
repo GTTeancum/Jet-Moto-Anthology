@@ -965,10 +965,10 @@ index 24e34c6..a9cbb44 100644
  
 diff --git a/RecompOne.Runtime/GameQuirks.cs b/RecompOne.Runtime/GameQuirks.cs
 new file mode 100644
-index 0000000..761cbc8
+index 0000000..edce29a
 --- /dev/null
 +++ b/RecompOne.Runtime/GameQuirks.cs
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,88 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1005,6 +1005,29 @@ index 0000000..761cbc8
 +    /// </summary>
 +    public static bool UnpacedStream { get; set; }
 +
++    /// <summary>
++    /// Hold a DMA completion interrupt back for a short run of memory accesses
++    /// instead of raising it from inside the register write that started the
++    /// transfer. On hardware the transfer takes microseconds and the handler
++    /// runs long after the code that kicked it has returned; raising it inline
++    /// re-enters libgpu's queue before the request it just started has been
++    /// marked in flight, so the handler starts the same ordering table again,
++    /// for ever -- until the stack runs out.
++    /// </summary>
++    public static bool DeferredDmaIrq { get; set; }
++
++    /// <summary>
++    /// Never raise the completion interrupt for the GPU DMA channel. libgpu
++    /// keeps a 64-entry command queue and drains it from two places: after every
++    /// enqueue, and from the DMA-done handler. Here the transfer finishes inside
++    /// the register write that started it, so both drains can run over the same
++    /// entry and the read index walks past the write index into slots that were
++    /// never filled -- which surfaces as a call through a null function pointer.
++    /// With the interrupt suppressed the queue is driven by the enqueue path
++    /// alone, which is coherent, because the transfer really is already done.
++    /// </summary>
++    public static bool NoGpuDmaIrq { get; set; }
++
 +    /// <summary>Apply a named preset. Unknown names are ignored.</summary>
 +    public static void Apply(string game)
 +    {
@@ -1014,6 +1037,10 @@ index 0000000..761cbc8
 +            case "jetmoto3":
 +                VBlankRescue = true;
 +                SoftwarePresent24 = true;
++                DeferredDmaIrq =
++                    Environment.GetEnvironmentVariable("RECOMPONE_DEFER_DMA") is not ("0" or "false");
++                NoGpuDmaIrq =
++                    Environment.GetEnvironmentVariable("RECOMPONE_GPU_DMA_IRQ") is not ("1" or "true");
 +                // UnpacedStream is deliberately off. Removing the pacer does let
 +                // the boot sequence reach the second movie, but nothing renders
 +                // at all once it does; with the pacer the first logo displays.
@@ -1227,10 +1254,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..be4f497 100644
+index 6027c49..154dc84 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -7,13 +7,118 @@ namespace RecompOne.Runtime;
+@@ -7,13 +7,206 @@ namespace RecompOne.Runtime;
  
  public static class Interrupts
  {
@@ -1310,8 +1337,96 @@ index 6027c49..be4f497 100644
 +            Deliver(7, cpu, mem);
 +    }
 +
++    // [jetmoto-fork] A DMA completion interrupt raised from inside the write
++    // that started the transfer arrives impossibly early: the code that kicked
++    // the DMA has not returned yet, so libgpu's handler finds its own request
++    // still queued and starts it again -- Jet Moto 3 recursed on one ordering
++    // table until the stack ran out. Hold the interrupt for a short run of
++    // memory accesses instead, which is the closest thing available here to
++    // "the transfer took a while". Off unless a game asks for it.
++    static int _deferMask;
++    static int _deferDelay;
++    static bool _draining;
++
++    /// <summary>Accesses to let pass before a held DMA interrupt is delivered.</summary>
++    const int DeferAccesses = 96;
++
++    /// <summary>True while an interrupt is held; polled per memory access, so kept trivial.</summary>
++    public static bool DeferPending => _deferMask != 0;
++
++    public static void RaiseDma(int irq)
++    {
++        if (!GameQuirks.DeferredDmaIrq) { Runtime.DispatchIrq(irq); return; }
++        _deferMask |= 1 << irq;
++        _deferDelay = DeferAccesses;
++    }
++
++    /// <summary>Called from the memory accessors while an interrupt is held.</summary>
++    public static void TickDeferred()
++    {
++        if (_draining || _deferMask == 0) return;
++        if (--_deferDelay > 0) return;
++        _draining = true;
++        try
++        {
++            // The handler runs game code, which can start further transfers;
++            // those land back in the mask and are taken on the next pass rather
++            // than nesting.
++            for (int guard = 0; guard < 16 && _deferMask != 0; guard++)
++            {
++                int mask = _deferMask;
++                _deferMask = 0;
++                for (int i = 0; i < 7; i++)
++                    if ((mask & (1 << i)) != 0) Runtime.DispatchIrq(i);
++            }
++        }
++        finally
++        {
++            _deferDelay = DeferAccesses;
++            _draining = false;
++        }
++    }
++
++    // [jetmoto-fork] Hardware masks interrupts for the duration of an exception
++    // handler; nothing here did. A handler runs recompiled game code, that code
++    // reads memory, and the vblank rescue hangs off the memory path -- so a
++    // second vblank could fire from inside the first one's handler. Jet Moto 3
++    // hung there every few seconds: its pad driver runs in the vblank chain and
++    // walks the SIO port byte by byte, so a nested vblank re-entered the driver,
++    // the inner copy took the byte, and the outer copy spun on a receive flag
++    // that was never going to be set again.
++    //
++    // A nested request is recorded and taken once the handler unwinds, which is
++    // what hardware does with an interrupt that arrives while masked. IRQ7 is
++    // exempt: the controller acknowledge is drained from inside this call by
++    // PumpSio, one byte at a time, and that nesting is deliberate.
++    static int _depth;
++    static int _repend;
++
      public static void Deliver(int irq, CpuContext cpu, IMemory mem)
      {
++        if (_depth > 0 && irq != 7) { _repend |= 1 << irq; return; }
++
++        _depth++;
++        try
++        {
++            DeliverOne(irq, cpu, mem);
++            if (irq == 7) return;
++
++            for (int guard = 0; guard < 32 && _repend != 0; guard++)
++            {
++                int mask = _repend;
++                _repend = 0;
++                for (int i = 0; i < 11; i++)
++                    if ((mask & (1 << i)) != 0) DeliverOne(i, cpu, mem);
++            }
++        }
++        finally { _depth--; }
++    }
++
++    static void DeliverOne(int irq, CpuContext cpu, IMemory mem)
++    {
++
 +        // I_STAT has to stay raised for the whole dispatch, not just the chain
 +        // walk. Handlers decide whether an interrupt is theirs by testing their
 +        // bit, and that is as true of libcd's handler in the callback table as
@@ -1353,10 +1468,10 @@ index 6027c49..be4f497 100644
          var snap = cpu.Snapshot();
 diff --git a/RecompOne.Runtime/Hardware/Sio.cs b/RecompOne.Runtime/Hardware/Sio.cs
 new file mode 100644
-index 0000000..6565866
+index 0000000..0ea7b76
 --- /dev/null
 +++ b/RecompOne.Runtime/Hardware/Sio.cs
-@@ -0,0 +1,163 @@
+@@ -0,0 +1,175 @@
 +namespace RecompOne.Runtime.Hardware;
 +
 +/// <summary>
@@ -1416,6 +1531,15 @@ index 0000000..6565866
 +
 +    public static bool InRange(uint phys) => phys >= Base && phys <= End;
 +
++    // [jetmoto-fork] RECOMPONE_LOG_SIO=1 traces the port. A pad driver that
++    // stalls does so waiting on one bit, and the register order says which.
++    static readonly bool Trace =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_SIO") is "1" or "true";
++    static void T(string what)
++    {
++        if (Trace) Console.Error.WriteLine($"[sio] {what}");
++    }
++
 +    /// <summary>The five-byte reply a digital pad gives to 01 42 00 00 00.</summary>
 +    byte Respond(byte tx)
 +    {
@@ -1451,6 +1575,7 @@ index 0000000..6565866
 +        switch (phys & 0xFu)
 +        {
 +            case 0x0:                                  // JOY_TX_DATA
++                T($"tx {value:X2} step={_step} ctrl={_ctrl:X4}");
 +                if (_step >= 0)
 +                {
 +                    _rx = Respond((byte)value);
@@ -1464,6 +1589,7 @@ index 0000000..6565866
 +                _mode = (ushort)value;
 +                break;
 +            case 0xA:
++                T($"ctrl<-{value:X4}");
 +                SetCtrl((ushort)value);
 +                break;
 +            case 0xE:
@@ -1502,6 +1628,7 @@ index 0000000..6565866
 +        switch (phys & 0xFu)
 +        {
 +            case 0x0:                                  // JOY_RX_DATA
++                T($"rx {_rx:X2}");
 +                _rxFull = false;
 +                return _rx;
 +            case 0x4:                                  // JOY_STAT
@@ -1984,19 +2111,22 @@ index ebd353f..d4a1d87 100644
      {
          if (MdecOn) Console.WriteLine($"[MDEC] {m}");
 diff --git a/RecompOne.Runtime/Memory/Dma.cs b/RecompOne.Runtime/Memory/Dma.cs
-index c376f15..8f95516 100644
+index c376f15..b9285d3 100644
 --- a/RecompOne.Runtime/Memory/Dma.cs
 +++ b/RecompOne.Runtime/Memory/Dma.cs
-@@ -131,6 +131,7 @@ public sealed class Dma
+@@ -131,7 +131,10 @@ public sealed class Dma
      {
          bool master = (_dicr & (1u << 23)) != 0;
          bool enabled = (_dicr & (1u << (16 + channel))) != 0;
 +        Log.Dma($"complete ch{channel} dicr=0x{_dicr:X8} master={master} enabled={enabled}");
          if (!master || !enabled) return;
++        // [jetmoto-fork] see GameQuirks.NoGpuDmaIrq
++        if (channel == 2 && GameQuirks.NoGpuDmaIrq) return;
          _dicr |= 1u << (24 + channel);
          _raiseIrq();
+     }
 diff --git a/RecompOne.Runtime/Memory/PSMemory.cs b/RecompOne.Runtime/Memory/PSMemory.cs
-index 8cae036..7fa9e30 100644
+index 8cae036..946db20 100644
 --- a/RecompOne.Runtime/Memory/PSMemory.cs
 +++ b/RecompOne.Runtime/Memory/PSMemory.cs
 @@ -15,6 +15,8 @@ public sealed class PSMemory : IMemory
@@ -2008,9 +2138,12 @@ index 8cae036..7fa9e30 100644
      private readonly Dma _dma;
      private CdController? _cd;
  
-@@ -29,6 +31,7 @@ public sealed class PSMemory : IMemory
+@@ -27,8 +29,9 @@ public sealed class PSMemory : IMemory
+ 
+     public PSMemory()
      {
-         _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
+-        _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
++        _dma = new Dma(this, _gpu, _spu, _mdec, () => Interrupts.RaiseDma(3));
          Runtime.Gpu = _gpu;
 +        Runtime.Sio = _sio;
          Runtime.Spu = _spu;
@@ -2037,7 +2170,7 @@ index 8cae036..7fa9e30 100644
              Dispatcher.NotifyWrite(off);
          }
  
-@@ -66,7 +75,39 @@ public sealed class PSMemory : IMemory
+@@ -66,7 +75,48 @@ public sealed class PSMemory : IMemory
      private void TrackRead(uint phys, int size)
      {
          if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
@@ -2069,16 +2202,25 @@ index 8cae036..7fa9e30 100644
 +    // time-gated, so the cost is a counter increment on the hot path.
 +    private static int _vblTick;
 +
++    // [jetmoto-fork] A one-in-64 sample of the addresses the game is touching.
++    // When RECOMPONE_TRAP_STALL fires, this ring says what the spin was reading,
++    // which is the only clue a hang inside generated code gives up.
++    internal const int TrailLen = 128;
++    internal static readonly uint[] AddrTrail = new uint[TrailLen];
++
 +    [System.Runtime.CompilerServices.MethodImpl(
 +        System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-+    private static void TickVBlank()
++    private static void TickVBlank(uint addr)
 +    {
++        int t = ++_vblTick;
++        if ((t & 0x3F) == 0) AddrTrail[(t >> 6) & (TrailLen - 1)] = addr;
++        if (Interrupts.DeferPending) Interrupts.TickDeferred();
 +        if (!GameQuirks.VBlankRescue) return;
-+        if ((++_vblTick & 0x3FF) == 0) Sdk.LibEtc.PumpVBlank();
++        if ((t & 0x3FF) == 0) Sdk.LibEtc.PumpVBlank();
      }
  
      private Span<byte> Resolve(uint address, int size)
-@@ -80,7 +121,9 @@ public sealed class PSMemory : IMemory
+@@ -80,7 +130,9 @@ public sealed class PSMemory : IMemory
              return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
  
          if (phys >= MemoryMap.HwRegsBase && phys < MemoryMap.HwRegsBase + MemoryMap.HwRegsSize)
@@ -2088,11 +2230,11 @@ index 8cae036..7fa9e30 100644
  
          if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
              return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
-@@ -93,35 +136,51 @@ public sealed class PSMemory : IMemory
+@@ -93,35 +145,51 @@ public sealed class PSMemory : IMemory
  
      public byte ReadU8(uint address)
      {
-+        TickVBlank();
++        TickVBlank(address);
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 1, out int fo)) return _ram[fo];
          TrackRead(phys, 1);
@@ -2103,7 +2245,7 @@ index 8cae036..7fa9e30 100644
  
      public ushort ReadU16(uint address)
      {
-+        TickVBlank();
++        TickVBlank(address);
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 2, out int fo))
 +            return System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(
@@ -2119,7 +2261,7 @@ index 8cae036..7fa9e30 100644
  
      public uint ReadU32(uint address)
      {
-+        TickVBlank();
++        TickVBlank(address);
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 4, out int fo))
 +            return System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
@@ -2140,7 +2282,7 @@ index 8cae036..7fa9e30 100644
          var s = Resolve(address, 4);
          return (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
      }
-@@ -129,8 +188,15 @@ public sealed class PSMemory : IMemory
+@@ -129,8 +197,15 @@ public sealed class PSMemory : IMemory
      public void WriteU8(uint address, byte value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2156,7 +2298,7 @@ index 8cae036..7fa9e30 100644
  
          if (_frozenCount > 0 && phys < MemoryMap.RamWindow && _frozen[phys % (uint)_ram.Length]) return;
          Resolve(address, 1)[0] = value;
-@@ -139,9 +205,17 @@ public sealed class PSMemory : IMemory
+@@ -139,9 +214,17 @@ public sealed class PSMemory : IMemory
      public void WriteU16(uint address, ushort value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2174,7 +2316,7 @@ index 8cae036..7fa9e30 100644
          if (_timers.TryWrite(phys, value)) return;
          var s = Resolve(address, 2);
  
-@@ -159,12 +233,20 @@ public sealed class PSMemory : IMemory
+@@ -159,12 +242,20 @@ public sealed class PSMemory : IMemory
      public void WriteU32(uint address, uint value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2195,7 +2337,7 @@ index 8cae036..7fa9e30 100644
          if (IsDmaChcr(phys) && (value & 0x01000000u) != 0)
          {
              Hw32(phys, value & ~0x01000000u);
-@@ -173,6 +255,7 @@ public sealed class PSMemory : IMemory
+@@ -173,6 +264,7 @@ public sealed class PSMemory : IMemory
          }
          if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
          if (IsSpu(phys)) { _spu.WriteReg16(phys, (ushort)value); _spu.WriteReg16(phys + 2, (ushort)(value >> 16)); return; }
@@ -2279,7 +2421,7 @@ index fdf7b6b..1805ffe 100644
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
      }
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..4264e39 100644
+index 6432fa4..fe3cd70 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
 @@ -1,3 +1,4 @@
@@ -2450,6 +2592,15 @@ index 6432fa4..4264e39 100644
  
      public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
      public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
+@@ -271,7 +352,7 @@ public static class LibCd
+ 
+     static void CdResetState()
+     {
+-        LibCdStream.OnStopStream();
++        LibCdStream.OnStopStream("reset");
+         _status = StatMotor; //drive aways spin
+         _mode = 0;
+         _com = 0;
 @@ -300,6 +381,23 @@ public static class LibCd
          return ExecCommand(m, com, param, result);
      }
@@ -2503,7 +2654,12 @@ index 6432fa4..4264e39 100644
                  break;
              case Getparam:
                  _lastResult[0] = _status;
-@@ -427,8 +537,10 @@ public static class LibCd
+@@ -423,12 +533,14 @@ public static class LibCd
+                 return 0;
+             }
+             case Pause: case Stop: case Init:
+-                LibCdStream.OnStopStream();
++                LibCdStream.OnStopStream($"com=0x{com:X2}");
                  _readActive = false;
                  _xaActive = false;
                  _status = StatMotor;
@@ -2515,7 +2671,7 @@ index 6432fa4..4264e39 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..21a4597 100644
+index ad79811..3c89a3c 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2556,10 +2712,77 @@ index ad79811..21a4597 100644
          if (!_active) { c.V0 = 1; return; }
  
          lock (_lock)
-@@ -159,14 +181,42 @@ public static class LibCdStream
+@@ -86,7 +108,7 @@ public static class LibCdStream
+                 _prevStart = -1;
+             }
+ 
+-            if (_ready.Count == 0) { c.V0 = 1; return; }
++            if (_ready.Count == 0) { _dbgEmpty++; c.V0 = 1; return; }
+ 
+             var (start, n) = _ready.Dequeue();
+             uint dataPtr = _dataBase + (uint)(start * SlotData);
+@@ -95,6 +117,7 @@ public static class LibCdStream
+             m.WriteU32(c.A1, hdrPtr);
+             _prevStart = start;
+             _prevN = n;
++            _dbgTook++;
+             c.V0 = 0;
+         }
+     }
+@@ -104,6 +127,14 @@ public static class LibCdStream
+     public static void StGetBackloc(CpuContext c, IMemory m) { c.V0 = 0xFFFFFFFFu; Log.Sdk("StGetBackloc"); }
+ 
+ 
++    // [jetmoto-fork] RECOMPONE_LOG_STREAM=1 reports, per movie, how much of the
++    // file the feeder walked and how much of it the player took. It is the only
++    // way to tell "the feeder stalled" from "the player stopped asking", and
++    // the two look identical from outside.
++    static readonly bool TraceFeed =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_STREAM") is "1" or "true";
++    static int _dbgScan, _dbgAudio, _dbgNotVid, _dbgQueued, _dbgTook, _dbgEmpty;
++
+     internal static void OnReadStream(int lba)
+     {
+         if (!InUse) return;
+@@ -112,9 +143,21 @@ public static class LibCdStream
+         EnsureThread();
+     }
+ 
+-    internal static void OnStopStream()
++    internal static void OnStopStream(string why = "?")
+     {
++        if (TraceFeed && _reading)
++            Console.Error.WriteLine(
++                $"[feed] stop({why}) lba={_streamLba} scanned={_dbgScan} audio={_dbgAudio} " +
++                $"notVideo={_dbgNotVid} queued={_dbgQueued} took={_dbgTook} empty={_dbgEmpty}");
+         _reading = false;
++        // [jetmoto-fork] Forget where the finished stream was reading. The
++        // feeder thread runs continuously, and StSetStream for the next movie
++        // lands before that movie seeks -- so a surviving pending LBA let the
++        // feeder restart on the previous movie and the new player waited for
++        // frames that were never going to match. Cleared, the feeder waits for
++        // this stream to tell it where to start.
++        _pendingLba = -1;
++        _streamLba = -1;
+     }
+ 
+     static void ResetRing(IMemory m)
+@@ -152,6 +195,9 @@ public static class LibCdStream
+             {
+                 _streamLba = _pendingLba >= 0 ? _pendingLba : LibCd.CurrentLba;
+                 _streamStartLba = _streamLba;
++                _dbgScan = _dbgAudio = _dbgNotVid = _dbgQueued = _dbgTook = _dbgEmpty = 0;
++                if (TraceFeed)
++                    Console.Error.WriteLine($"[feed] start lba={_streamLba} pending={_pendingLba}");
+                 _clock.Restart();
+             }
+ 
+@@ -159,14 +205,43 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
+-            if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
+-            if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
 +            // [jetmoto-fork] Nothing bounded this walk. Past the end of the data
 +            // track every read returns zeros, no branch below matches, and the
 +            // thread spins _streamLba++ at full speed off the end of the disc
@@ -2579,8 +2802,9 @@ index ad79811..21a4597 100644
 +            }
 +            else _emptyRun = 0;
 +
-             if ((sec[2] & 0x04) != 0) { XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
-             if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
++            _dbgScan++;
++            if ((sec[2] & 0x04) != 0) { _dbgAudio++; XaAudio.DecodeSector(sec, 8, sec[3]); _streamLba++; continue; }
++            if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _dbgNotVid++; _streamLba++; continue; }
  
              int n = Read16(sec, 14);
              if (n <= 0 || n > _slots) { _streamLba++; continue; }
@@ -2601,11 +2825,20 @@ index ad79811..21a4597 100644
  
              int start;
              lock (_lock)
+@@ -183,7 +258,7 @@ public static class LibCdStream
+             lock (_lock)
+             {
+                 for (int i = 0; i < n; i++) _busy[start + i] = true;
+-                _ready.Enqueue((start, n));
++                _ready.Enqueue((start, n)); _dbgQueued++;
+                 _writeIdx = start + n;
+             }
+         }
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..6b930bb 100644
+index a036512..93ce519 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,255 @@ public static class LibEtc
+@@ -9,15 +9,277 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2735,8 +2968,30 @@ index a036512..6b930bb 100644
 +
 +    static long _lastVSyncCall = System.Diagnostics.Stopwatch.GetTimestamp();
 +
++    // [jetmoto-fork] RECOMPONE_TRAP_STALL=<seconds> throws from the memory path
++    // once the game has gone that long without calling VSync. It unwinds the
++    // recompiled call stack, so a hang is named rather than guessed at, and the
++    // sampled address trail says which flag the spin was waiting on.
++    static readonly double TrapStallSeconds =
++        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_STALL"), out var _tsl) ? _tsl : 0;
++
 +    public static void PumpVBlank()
 +    {
++        if (TrapStallSeconds > 0)
++        {
++            long t = System.Diagnostics.Stopwatch.GetTimestamp();
++            if (t - _lastVSyncCall > TrapStallSeconds * System.Diagnostics.Stopwatch.Frequency)
++            {
++                _lastVSyncCall = t;
++                var seen = Memory.PSMemory.AddrTrail
++                    .Where(a => a != 0).GroupBy(a => a)
++                    .OrderByDescending(g => g.Count()).Take(12)
++                    .Select(g => $"0x{g.Key:X8}x{g.Count()}");
++                throw new InvalidOperationException(
++                    $"[trap] no VSync for {TrapStallSeconds}s; gp=0x{Runtime.Cpu?.GP:X8} " +
++                    $"reading {string.Join(" ", seen)}");
++            }
++        }
 +        if (!GameQuirks.VBlankRescue) return;
 +        long now = System.Diagnostics.Stopwatch.GetTimestamp();
 +
