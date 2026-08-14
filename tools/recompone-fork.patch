@@ -1057,6 +1057,31 @@ index 0000000..edce29a
 +        if (!string.IsNullOrWhiteSpace(q)) Apply(q);
 +    }
 +}
+diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
+new file mode 100644
+index 0000000..c44cfc8
+--- /dev/null
++++ b/RecompOne.Runtime/Gpu/Counters.cs
+@@ -0,0 +1,19 @@
++namespace RecompOne.Runtime;
++
++/// <summary>
++/// [jetmoto-fork] What the GPU was actually asked to draw. Reported with the
++/// RECOMPONE_FPS line. "Nothing is on screen" has two very different causes --
++/// the primitives never arrived, or they arrived and went somewhere invisible --
++/// and a per-frame count separates them in one run.
++/// </summary>
++public static class GpuCounters
++{
++    public static long Polys, Lines, Rects, Loads;
++
++    public static string TakeSummary()
++    {
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads}";
++        Polys = Lines = Rects = Loads = 0;
++        return s;
++    }
++}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
 index 8b55b53..767516e 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
@@ -1077,9 +1102,25 @@ index 8b55b53..767516e 100644
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..c6c8d4c 100644
+index 9900095..e66d2d0 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
+@@ -44,11 +44,11 @@ public sealed partial class Gpu
+         switch (op)
+         {
+             case 0x02: FillRect(); break;
+-            case >= 0x20 and <= 0x3F: DrawPolygon(); break;
+-            case >= 0x40 and <= 0x5F: DrawLine(); break;
+-            case >= 0x60 and <= 0x7F: DrawRectangle(); break;
++            case >= 0x20 and <= 0x3F: GpuCounters.Polys++; DrawPolygon(); break;
++            case >= 0x40 and <= 0x5F: GpuCounters.Lines++; DrawLine(); break;
++            case >= 0x60 and <= 0x7F: GpuCounters.Rects++; DrawRectangle(); break;
+             case >= 0x80 and <= 0x9F: CopyVramToVram(); break;
+-            case >= 0xA0 and <= 0xBF: BeginImageLoad(); break;
++            case >= 0xA0 and <= 0xBF: GpuCounters.Loads++; BeginImageLoad(); break;
+             case >= 0xC0 and <= 0xDF: BeginImageRead(); break;
+             case 0xE1: SetDrawMode(word); break;
+             case 0xE2: SetTextureWindow(word); break;
 @@ -133,7 +133,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
@@ -1254,10 +1295,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..b889f8e 100644
+index 6027c49..ab245c0 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -7,13 +7,234 @@ namespace RecompOne.Runtime;
+@@ -7,13 +7,236 @@ namespace RecompOne.Runtime;
  
  public static class Interrupts
  {
@@ -1427,24 +1468,26 @@ index 6027c49..b889f8e 100644
 +    // [jetmoto-fork] An interrupt handler needs a stack of its own. The BIOS
 +    // switches to one; this called the handler on whatever stack pointer the
 +    // interrupted code happened to have. Jet Moto 3 parks SP at the scratchpad
-+    // base (0x1F800000) and indexes upward through it for a hot routine -- and
-+    // an interrupt taken there pushed its frame *below* the scratchpad, into
-+    // nothing. On hardware that never happens because the handler is not on the
++    // base (0x1F800000) and indexes upward through it for a hot routine -- so an
++    // interrupt taken there pushed its frame *below* the scratchpad, into
++    // nothing. On hardware that never happens, because the handler is not on the
 +    // game's stack at all.
 +    //
-+    // The substitute is the last stack pointer seen in main RAM. The routine
-+    // that switched to the scratchpad saved its RAM stack pointer and will
-+    // restore it, so everything below that address is free -- which is exactly
-+    // where a handler's frame belongs. A game whose SP is always in RAM never
-+    // reaches this.
-+    static uint _lastRamSp;
++    // The substitute is kernel RAM, which is where the real exception handler
++    // keeps its stack: the first 64 KB is the BIOS's, a game loads above it, and
++    // nothing in the port allocates there. A first attempt reused the last stack
++    // pointer seen in main RAM, which is free space only until the game unwinds
++    // past it and descends a different call chain -- that smashed a live frame
++    // and surfaced minutes later as a read through a corrupt pointer.
++    //
++    // A game whose SP is always in RAM never reaches this at all.
++    const uint InterruptStackTop = 0x8000FF00u;
 +    static bool SpInRam(uint sp) => (sp & 0x1FFFFFFFu) < 0x00200000u;
 +
 +    static void DeliverOne(int irq, CpuContext cpu, IMemory mem)
 +    {
 +        uint savedSp = cpu.SP;
-+        if (SpInRam(cpu.SP)) _lastRamSp = cpu.SP;
-+        else if (_lastRamSp != 0) cpu.SP = _lastRamSp - 0x40u;
++        if (!SpInRam(cpu.SP)) cpu.SP = InterruptStackTop;
 +        try
 +        {
 +            DeliverDispatch(irq, cpu, mem);
@@ -2403,7 +2446,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..629b739 100644
+index fdf7b6b..586cadb 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -2471,7 +2514,7 @@ index fdf7b6b..629b739 100644
 +        long freq = System.Diagnostics.Stopwatch.Frequency;
 +        if (now - _fpsMark < freq) return;
 +        Console.Error.WriteLine(
-+            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present");
++            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present, {GpuCounters.TakeSummary()}");
 +        _fpsMark = now; _presentTicks = 0; _presents = 0;
      }
  
@@ -2897,10 +2940,10 @@ index ad79811..c5bd883 100644
              }
          }
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..027dbaa 100644
+index a036512..e3dc505 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,291 @@ public static class LibEtc
+@@ -9,15 +9,313 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -3046,8 +3089,30 @@ index a036512..027dbaa 100644
 +    static readonly double TrapStallSeconds =
 +        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_STALL"), out var _tsl) ? _tsl : 0;
 +
++    // [jetmoto-fork] RECOMPONE_TRAP_AFTER=<seconds> throws once, that far into
++    // the run, from wherever the game happens to be. For a hang that keeps
++    // calling VSync -- a frozen race with a live clock, say -- the stall trap
++    // never fires and this is the only way to see the stack.
++    static readonly double TrapAfterSeconds =
++        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_AFTER"), out var _tas) ? _tas : 0;
++    static readonly long _startStamp = System.Diagnostics.Stopwatch.GetTimestamp();
++    static bool _trappedAfter;
++
 +    public static void PumpVBlank()
 +    {
++        if (TrapAfterSeconds > 0 && !_trappedAfter &&
++            System.Diagnostics.Stopwatch.GetTimestamp() - _startStamp
++              > TrapAfterSeconds * System.Diagnostics.Stopwatch.Frequency)
++        {
++            _trappedAfter = true;
++            var busy = Memory.PSMemory.AddrTrail
++                .Where(a => a != 0).GroupBy(a => a)
++                .OrderByDescending(g => g.Count()).Take(12)
++                .Select(g => $"0x{g.Key:X8}x{g.Count()}");
++            throw new InvalidOperationException(
++                $"[trap] {TrapAfterSeconds}s elapsed; gp=0x{Runtime.Cpu?.GP:X8} " +
++                $"reading {string.Join(" ", busy)}");
++        }
 +        if (TrapStallSeconds > 0)
 +        {
 +            long t = System.Diagnostics.Stopwatch.GetTimestamp();
