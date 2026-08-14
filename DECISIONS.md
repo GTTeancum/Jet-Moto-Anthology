@@ -491,3 +491,32 @@ Two things worth knowing for whoever continues:
   second. It sits at two fields, which is narrow enough for a game that calls
   VSync once a frame and wide enough that a game polling it several times a
   frame never triggers it.
+
+
+### 2026-08-14 — Siloing, and the limit of the movie work
+
+The first thing this session should have had, and did not: **per-game
+isolation**. Changes made for Jet Moto 3 were landing on all three ports, which
+is exactly how a vblank fix broke Jet Moto 1 outright. `GameQuirks` now holds the
+three behaviours Jet Moto 3 needs -- a vblank clock for loops that call nothing,
+24-bit output from the software VRAM shadow, and an unpaced stream feeder -- all
+defaulting to false. Jet Moto 1 and 2 opt into none of them and run the code they
+ran before any of this existed. That should have been the shape from the start;
+a shared runtime with three disagreeing consumers needs it.
+
+Siloing immediately paid for itself. The vblank rescue had been gated on "the
+game has not called VSync for two fields" purely to protect the other two ports.
+Once the quirk made that protection unnecessary the gate came off, and vblanks
+went from 300 to 5900 in the same wall time -- the boot sequence then reached the
+second movie for the first time.
+
+It still is not playable, and the table in STATUS.md lists every avenue tried.
+The short version: decode and blit manage two or three frames a second against
+the fifteen the player wants, and every attempt to close that gap either broke
+rendering or was ignored by the game. Skipping does not work either -- the player
+retries when starved, and stubbing it out leaves the game rendering nothing at
+all, which says the movie has side effects the rest of the boot depends on.
+
+What is left is real work on the movie pipeline itself: where MDEC decode and the
+twenty-strip VRAM blit actually spend their time. I did not isolate that, and
+without it the rest -- menus, controls, racing, packaging -- cannot start.

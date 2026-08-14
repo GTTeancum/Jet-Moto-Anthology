@@ -25,15 +25,24 @@ Working:
   it uses the bulk `CdRead` API and its `CD_ready` re-enters itself from inside
   the interrupt, which deadlocks on the hardware path.
 
-**Blocked on frame rate.** The intro presents at roughly 2 fps, so it is a
-slideshow, and the game will not proceed to its menus until the movie finishes.
-The stream feeder was the first culprit and is fixed — removing its redundant
-rate limiter took delivered movie frames from 77 to 242 in the same wall time
-and got the boot sequence as far as the *second* movie — but presentation is now
-the limit, not decoding. Where the remaining time goes has not been isolated.
+**Blocked on the movie pipeline.** The intro decodes and displays at two to
+three frames a second against the fifteen the player expects, and Jet Moto 3
+will not reach its menus until the movies finish. Everything tried and measured:
 
-Skipping the movies does not help: `RECOMPONE_SKIP_FMV=1` reports the ring empty
-and the `.STR` files absent, and Jet Moto 3 simply retries rather than moving on.
+| Attempt | Result |
+|---|---|
+| GL 24-bit present | never produces a picture; bypassed, not fixed |
+| Software 24-bit from the VRAM shadow | **works** — the first logo renders |
+| Vblank rescue at 60 Hz | 300 → 5900 vblanks, and the boot reaches the *second* movie |
+| Unpaced stream feeder | 77 → 242 movie frames, but nothing renders at all |
+| Vblank slowed to 1/4 and 1/16 during streaming | still black once unpaced |
+| Mashing Start to skip | the player ignores it |
+| Reporting the ring empty and the `.STR` files absent | the game retries rather than moving on |
+| Stubbing the movie player (config patch) | skips the movie and the game then renders nothing |
+
+The shipped configuration is the best of these: pacer on, software 24-bit,
+vblank rescue. The first logo is visible; the second movie does not complete.
+A visible slow intro beat an invisible faster one, so `UnpacedStream` is off.
 
 Not yet attempted: menus, controls, gameplay, loose-file extraction, launcher
 integration, release.

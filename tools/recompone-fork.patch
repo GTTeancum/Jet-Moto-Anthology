@@ -965,10 +965,10 @@ index 24e34c6..a9cbb44 100644
  
 diff --git a/RecompOne.Runtime/GameQuirks.cs b/RecompOne.Runtime/GameQuirks.cs
 new file mode 100644
-index 0000000..558edd3
+index 0000000..761cbc8
 --- /dev/null
 +++ b/RecompOne.Runtime/GameQuirks.cs
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,61 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1014,7 +1014,11 @@ index 0000000..558edd3
 +            case "jetmoto3":
 +                VBlankRescue = true;
 +                SoftwarePresent24 = true;
-+                UnpacedStream = true;
++                // UnpacedStream is deliberately off. Removing the pacer does let
++                // the boot sequence reach the second movie, but nothing renders
++                // at all once it does; with the pacer the first logo displays.
++                // A visible slow intro beats an invisible faster one.
++                UnpacedStream = false;
 +                break;
 +        }
 +    }
@@ -2511,7 +2515,7 @@ index 6432fa4..4264e39 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..533df4b 100644
+index ad79811..21a4597 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2522,12 +2526,15 @@ index ad79811..533df4b 100644
      static int _streamStartLba;
      static readonly Stopwatch _clock = new();
  
-@@ -74,8 +75,26 @@ public static class LibCdStream
+@@ -74,8 +75,29 @@ public static class LibCdStream
  
      public static void StSetMask(CpuContext c, IMemory m) { c.V0 = 0; Log.Sdk("StSetMask"); }
  
 +    static readonly bool SkipFmv =
 +        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
++
++    /// <summary>True while a movie stream is set up and feeding.</summary>
++    public static bool Streaming => _active;
 +
      public static void StGetNext(CpuContext c, IMemory m)
      {
@@ -2549,7 +2556,7 @@ index ad79811..533df4b 100644
          if (!_active) { c.V0 = 1; return; }
  
          lock (_lock)
-@@ -159,14 +178,42 @@ public static class LibCdStream
+@@ -159,14 +181,42 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -2595,10 +2602,10 @@ index ad79811..533df4b 100644
              int start;
              lock (_lock)
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..808992e 100644
+index a036512..6b930bb 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,245 @@ public static class LibEtc
+@@ -9,15 +9,255 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2740,8 +2747,18 @@ index a036512..808992e 100644
 +        // fields of silence never happens for them; Jet Moto 3 calls it perhaps
 +        // once per movie frame, which is why the gate cannot be much wider than
 +        // this. At eight fields it throttled the intro to two frames a second.
-+        if (now - _lastVSyncCall < TicksPerFrame * 2) return;
-+        if (now - _lastForcedVbl < TicksPerFrame) return;
++        // The rescue is per-game now (GameQuirks), so it does not need to
++        // defend itself against a game that drives its own vblank -- that game
++        // simply never turns it on.
++        //
++        // While a movie is streaming the field rate is quartered. Jet Moto 3's
++        // player swaps display buffers on its vblank, and the decode and blit
++        // cannot fill one every field: at a true 60 Hz it swapped to buffers
++        // that had nothing in them yet and the screen stayed black, while at
++        // roughly a quarter of that the picture is there. Outside a movie the
++        // full field rate applies.
++        long field = LibCdStream.Streaming ? TicksPerFrame * 16 : TicksPerFrame;
++        if (now - _lastForcedVbl < field) return;
 +        _lastForcedVbl = now;
 +        _vcount++;
 +        MaybeVBlank(_vcount);
