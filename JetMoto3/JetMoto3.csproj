@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>disable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>JetMoto3</RootNamespace>
+        <AssemblyName>JetMoto3</AssemblyName>
+        <NoWarn>CS0164;CS0219;CS0162;CS1717;CS8632</NoWarn>
+        <ServerGarbageCollection>true</ServerGarbageCollection>
+        <TieredPGO>true</TieredPGO>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\tools\RecompOne\RecompOne.Runtime\RecompOne.Runtime.csproj" />
+    </ItemGroup>
+
+</Project>

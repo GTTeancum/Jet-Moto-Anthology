@@ -1,11 +1,41 @@
 # Status
 
-Two ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
+Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 
 | Game | State |
 |------|-------|
 | **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
+| **Jet Moto 3** (SCUS-94555) | **not playable** — boots and decodes its intro movie, but nothing reaches the screen |
+
+## Jet Moto 3
+
+Started 2026-08-13. A different studio and a different engine to the first two,
+and it needs more of the runtime than either.
+
+Working:
+
+- Recompiles: 1527 functions, plus `SHELL.BIN` as an overlay. That overlay is
+  headerless, so its base was recovered by scoring candidates against the 14
+  addresses the resident executable calls above its own end and against the
+  overlay's own string pool — 0x800DBB28, where 31 of those calls land on a
+  prologue and all 500 string references resolve. The game then confirmed it by
+  passing exactly that address as its own load buffer.
+- Boots, loads the shell, finds and streams `/DATA/FMV/989LOGO.STR`, and decodes
+  it: ~4800 MDEC transfers and ~5600 GPU transfers in a 45-second run.
+- libcd and libstr routed. Jet Moto 3 wants the opposite treatment to Jet Moto
+  2: it uses the bulk `CdRead` API and its `CD_ready` re-enters itself from
+  inside the interrupt, which deadlocks on the hardware path.
+
+**Blocked on:** the decoded movie never appears. Display geometry is correct
+(320x240 at VRAM y=256, 24-bit, display enabled) and the HLE GPU backend is
+active, but its VRAM texture never receives the blit, so every frame is decoded
+and dropped. This is GPU-backend work in RecompOne, not port configuration.
+
+Not yet attempted: menus, controls, gameplay, loose-file extraction, launcher
+integration.
+
+---
 
 ## Loose files
 

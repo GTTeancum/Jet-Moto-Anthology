@@ -50,3 +50,11 @@ harness/jm2looserace/
 harness/ram/
 harness/ram-race/
 harness/captures2/
+
+# Jet Moto 3 disc dump, dropped in the repo root
+/Jet Moto 3 (USA).bin
+/Jet Moto 3 (USA).cue
+/*.bin
+/*.cue
+JetMoto3_loose/
+JetMoto3/generated/

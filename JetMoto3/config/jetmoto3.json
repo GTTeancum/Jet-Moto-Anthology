@@ -1,0 +1,98 @@
+{
+  "game": {
+    "id": "SCUS-94555",
+    "name": "JetMoto3",
+    "output": "../generated"
+  },
+  "cue": "../../Jet Moto 3 (USA).cue",
+
+  // Jet Moto 3 is a different studio and a different engine to the first two
+  // (Pacific Coast Power & Light rather than SingleTrac), so none of their
+  // layout carries over. What does carry over is PSYQ: the retail build kept
+  // the debug string pool, so the SDK entry points are recoverable the same way.
+  //
+  // SCUS_945.55: 550 KB of text at 0x80010000, entry 0x800836B8. That is far
+  // lower than either predecessor, which leaves the top of RAM free for
+  // SHELL.BIN -- a headerless overlay, as in Jet Moto 2.
+  // SHELL.BIN is a headerless overlay, so its load address had to be recovered
+  // rather than read. Scoring candidates against the 14 addresses the resident
+  // executable calls above its own end, and against the overlay's own string
+  // pool, agrees on 0x800DBB28: 31 of those calls land on a function prologue
+  // there and all 500 string references resolve. No other candidate scores a
+  // single prologue.
+  "overlays": [
+    {
+      "name": "shell",
+      "lba": 300,
+      "size": 198224,
+      "base": "0x800DBB28",
+      "linearSweep": true
+    }
+  ],
+
+  // Entry-point scanning alone misses functions only reached through pointers.
+  "linearSweep": true,
+  "addressComments": true,
+
+  // Recovered from the PSYQ debug string pool: each library function prints a
+  // string bearing its own name, so the internal that prints it is known and the
+  // public entry is the small function the game calls.
+  //
+  // Jet Moto 3 wants the opposite treatment to Jet Moto 2. Jet Moto 2 drives the
+  // CD hardware itself and routing libcd left the drive in two half-states; Jet
+  // Moto 3 uses the bulk CdRead API, the same shape as Jet Moto 1, and its
+  // CD_ready re-enters itself from inside the interrupt while waiting for the
+  // next sector. On the hardware path that deadlocks: the handler cannot receive
+  // the sector it is waiting for until it returns and acknowledges. Routing
+  // libcd removes the interrupt from the loop entirely.
+  "functions": [
+    { "address": "0x8007E498", "name": "CdInit" },
+    { "address": "0x8007E73C", "name": "CdSync" },
+    { "address": "0x8007E75C", "name": "CdReady" },
+    { "address": "0x8007EBE4", "name": "CdDataSync" },
+
+    // Three siblings funnelling into CD_cw (0x8007F6B4). Same usage profile as
+    // the first two games: the most-called is CdControl, and the one that also
+    // calls CdSync is CdControlB.
+    { "address": "0x8007E8E0", "name": "CdControl" },
+    { "address": "0x8007E7A4", "name": "CdControlF" },
+    { "address": "0x8007EA14", "name": "CdControlB" },
+
+    // Only two functions in the read path are called from game code; the rest
+    // are libcd talking to itself. 0x800810C0 prints "CdRead: retry" but is the
+    // internal CD_read -- routing it handed the HLE the internal's arguments and
+    // it read a sector count of zero, so SHELL.BIN never loaded and the shell's
+    // jump tables were still zeroed RAM.
+    { "address": "0x80081448", "name": "CdRead" },
+    { "address": "0x800815E4", "name": "CdReadSync" },
+    { "address": "0x800803D8", "name": "CdSearchFile" },
+
+    // libstr, which drives the .STR movies. Identified by argument shape at the
+    // call sites rather than by name: StSetRing takes a base and a ring size
+    // (the shell passes 50 sectors), StGetNext takes two out-pointers, and
+    // StSetStream takes four. The shell spins up to eight million times waiting
+    // on StGetNext, so with these unrouted the game hangs before its first
+    // movie frame.
+    { "address": "0x800817C8", "name": "StSetRing" },
+    { "address": "0x80081998", "name": "StSetStream" },
+    { "address": "0x80081A28", "name": "StFreeRing" },
+    { "address": "0x80081B18", "name": "StGetNext" },
+
+    { "address": "0x80082928", "name": "VSync" },
+    { "address": "0x800769B4", "name": "DrawSync" },
+
+    // libgpu's image calls, the same set Jet Moto 1 routes. With the HLE GPU
+    // backend the framebuffer lives in a GL texture rather than the software
+    // VRAM shadow, so a CPU-to-VRAM upload has to go through the HLE to land
+    // anywhere visible. Jet Moto 3 decodes its movies to RAM and blits them
+    // with LoadImage; unrouted, every frame was decoded and then dropped.
+    { "address": "0x80076638", "name": "ResetGraph" },
+    { "address": "0x80076B38", "name": "ClearImage" },
+    { "address": "0x80076C60", "name": "LoadImage" },
+    { "address": "0x80076CC0", "name": "StoreImage" },
+    { "address": "0x80076D20", "name": "MoveImage" },
+    { "address": "0x800768BC", "name": "DrawSyncCallback" }
+  ],
+
+  "patches": []
+}

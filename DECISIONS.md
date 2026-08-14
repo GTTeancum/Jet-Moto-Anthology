@@ -394,3 +394,62 @@ accepted `CdlPlay` and produced no samples, so both games had always run without
 music. It needed wiring in two places, because the two games reach the drive
 differently — `CdController` for Jet Moto 2's hardware path, and the libcd HLE
 for Jet Moto 1's.
+
+
+---
+
+## Jet Moto 3 (SCUS-94555)
+
+### 2026-08-13 — A third engine, and four more runtime gaps
+
+Pacific Coast Power & Light rather than SingleTrac, so nothing about the first
+two games' layout carried over. What carried over was the method: the retail
+build kept the PSYQ debug string pool, so the SDK entry points fell out of it
+again.
+
+**Route the public entry, not the printer.** 0x800810C0 prints "CdRead: retry"
+and is *not* CdRead -- it is the internal CD_read. Routing it handed the HLE the
+internal's arguments, which read a sector count of zero, so SHELL.BIN never
+loaded and the shell's jump tables were still zeroed RAM. The two functions game
+code actually calls are 0x80081448 and 0x800815E4. The old lesson, relearned:
+the string tells you which function prints it, never which one is public.
+
+**Jet Moto 3 wants the opposite of Jet Moto 2.** Jet Moto 2 drives the CD
+hardware and routing libcd broke it. Jet Moto 3 uses the bulk CdRead API and its
+CD_ready re-enters itself from inside the interrupt while waiting for the next
+sector -- which on the hardware path cannot arrive until the handler returns and
+acknowledges. Routing libcd takes the interrupt out of the loop entirely. There
+is no single right answer for a game; there is only what its libcd does.
+
+Four gaps in the runtime, all of them things neither earlier game exercised:
+
+1. **Sector filtering was stored and never applied.** Setfilter's file and
+   channel were recorded and reported but every sector still went to the CPU,
+   including XA audio. Fatal for a game streaming .STR movies.
+2. **I_STAT was raised only around the interrupt-chain walk**, then dropped
+   before the callback-table handler ran -- so libcd saw no CD interrupt
+   pending, never acknowledged it, and the drive stalled with the flag stuck
+   set. My own regression from the Jet Moto 2 pad work.
+3. **VBlank only fired when the game called VSync.** Both earlier games poll
+   VSync(-1) constantly so this was invisible. Jet Moto 3's boot loop spins on a
+   byte its VBlank handler clears and calls nothing at all while waiting.
+4. **The display only updated on VSync(0).** A PS1 scans VRAM out continuously
+   and a game need never call it; Jet Moto 3's movie player syncs through its
+   VBlank handler instead.
+
+Gaps 3 and 4 are pumped from the memory path, because reads are the only thing
+such a loop does. The first attempt did that unconditionally and **broke Jet
+Moto 1** -- injecting interrupts underneath a game that is driving its own
+vblank is both unnecessary and destabilising. It is now gated on eight fields of
+silence from the game, so it is a rescue for starved loops and invisible to
+everything else. Both earlier ports were re-verified rendering correctly
+afterwards.
+
+### Still blocked
+
+The movie decodes and never appears. Geometry is right, the display is enabled
+and in 24-bit mode, the HLE GPU backend is active -- but its VRAM texture never
+receives the blit. Worth noting for whoever picks this up: naming ResetGraph,
+LoadImage, ClearImage, StoreImage and MoveImage in the config does nothing.
+SdkPatches only reimplements DrawSync and VSync out of libgpu; Jet Moto 1's
+config names the others as documentation and they have never been routed.

@@ -97,7 +97,7 @@ index f5935c8..09c2ca1 100644
          m.WriteU32(struc, _intChain[priority]);
          _intChain[priority] = struc;
 diff --git a/RecompOne.Runtime/Cdrom/CdController.cs b/RecompOne.Runtime/Cdrom/CdController.cs
-index 7af9864..ce70565 100644
+index 7af9864..a5050d4 100644
 --- a/RecompOne.Runtime/Cdrom/CdController.cs
 +++ b/RecompOne.Runtime/Cdrom/CdController.cs
 @@ -205,7 +205,14 @@ public sealed class CdController
@@ -229,7 +229,7 @@ index 7af9864..ce70565 100644
          for (uint i = 0; i < byteCount; i++)
              m.WriteU8(addr + i, _dataFifoPos < _dataBuf.Length ? _dataBuf[_dataFifoPos++] : (byte)0);
          if (_dataFifoPos >= _dataBuf.Length) _dataReady = false;
-@@ -454,12 +512,37 @@ public sealed class CdController
+@@ -454,20 +512,85 @@ public sealed class CdController
              _m.WriteU16(BiosB.IntrEnvInInterruptAddr, 0);
      }
  
@@ -252,22 +252,75 @@ index 7af9864..ce70565 100644
 +
      private void ReadNextSector()
      {
-         try
+-        try
++        // [jetmoto-fork] Sector filtering and XA routing. The filter set by
++        // Setfilter was stored and reported but never applied, so every sector
++        // went to the CPU -- including the XA audio ones. That is invisible to a
++        // game whose data is plain form 1, and fatal to one streaming .STR
++        // movies: Jet Moto 3's player got audio frames where it expected video,
++        // stopped asking for more, and hung with a full ring buffer.
++        //
++        // On hardware, in XA mode the drive sends audio sectors to the SPU and
++        // never to the CPU, and drops anything the filter excludes. Skipped
++        // sectors still advance the head, so the read continues past them.
++        for (int guard = 0; guard < 128; guard++)
          {
 -            _dataBuf = _fs.ReadSector(_seekLba);
-+            // [jetmoto-fork] Honour the drive mode's sector size. ReadSector
-+            // always returned the 2048-byte user area, but Setmode bit 5 asks
-+            // for the whole 2340-byte sector -- header and subheader included --
-+            // and Jet Moto 2 boots in exactly that mode. Handing it user data
-+            // shifted every field 12 bytes, so the game's own ISO reader never
-+            // found "CD001" in the volume descriptor and re-read LBA 16 forever.
-+            _dataBuf = _fs.ReadSectorData(_seekLba, ModeSectorSize());
++            byte[] v;
++            try
++            {
++                // one read, sliced two ways: this view starts at the header, so
++                // the subheader is at +4 and the user data at +12
++                v = _fs.ReadSectorData(_seekLba, 2340);
++            }
++            catch
++            {
++                Array.Clear(_dataBuf);
++                return;
++            }
++
++            byte file = v[4], chan = v[5], sub = v[6], coding = v[7];
++            bool audio = (sub & 0x04) != 0;
++            bool filtering = (_mode & 0x08) != 0;          // CdlModeSF
++            bool realtime = (_mode & 0x40) != 0;           // CdlModeRT
++            bool matches = !filtering || (file == _filterFile && chan == _filterChannel);
++
++            if (audio && realtime)
++            {
++                if (matches) XaAudio.DecodeSector(v, 12, coding);
++                SkipSector();
++                continue;
++            }
++            if (filtering && !matches) { SkipSector(); continue; }
++
++            // Honour the drive mode's sector size. Setmode bit 5 asks for the
++            // whole 2340-byte sector, header included, and Jet Moto 2 boots in
++            // exactly that mode; handing it the user area shifted every field
++            // by 12 and its ISO reader never found "CD001".
++            _dataBuf = ModeSectorSize() >= 2340 ? v : v[12..(12 + 2048)];
 +            _dataFifoPos = 0;
              DbgReadRun("read", _seekLba);
 +            RecompOne.Runtime.Log.Cd($"read lba={_seekLba} size={_dataBuf.Length}");
              _lastReadLba = _seekLba;
              _sectorsRead++;
              _seekLba++;
++            return;
+         }
+-        catch
+-        {
+-            Array.Clear(_dataBuf);
+-        }
++    }
++
++    /// <summary>A sector the CPU never sees still moves the head past it.</summary>
++    private void SkipSector()
++    {
++        _lastReadLba = _seekLba;
++        _sectorsRead++;
++        _seekLba++;
+     }
+ 
+     public CueFs Fs => _fs;
 diff --git a/RecompOne.Runtime/Cdrom/CueBin.cs b/RecompOne.Runtime/Cdrom/CueBin.cs
 index adb02c5..03d8b5c 100644
 --- a/RecompOne.Runtime/Cdrom/CueBin.cs
@@ -1089,10 +1142,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..e3ac519 100644
+index 6027c49..be4f497 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -7,13 +7,104 @@ namespace RecompOne.Runtime;
+@@ -7,13 +7,118 @@ namespace RecompOne.Runtime;
  
  public static class Interrupts
  {
@@ -1122,17 +1175,6 @@ index 6027c49..e3ac519 100644
 +        bool any = false;
 +        for (int p = 0; p < chains.Length; p++) any |= chains[p] != 0u;
 +        if (!any) return;
-+
-+        // A verifier's whole job is to test its bit in I_STAT, so the bit has
-+        // to be raised before the walk and dropped afterwards -- otherwise
-+        // every verifier declines and the handler never runs.
-+        //
-+        // IRQ7 is the exception: the controller acknowledge latches in the SIO
-+        // device and the game clears it itself, one byte at a time. Synthesising
-+        // and then dropping the bit here acknowledged the transfer on the game's
-+        // behalf and restarted every packet at its first byte.
-+        bool ownStat = irq != 7;
-+        if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) | (1u << irq));
 +
 +        _chainDepth++;
 +        try
@@ -1166,7 +1208,6 @@ index 6027c49..e3ac519 100644
 +        finally
 +        {
 +            _chainDepth--;
-+            if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) & ~(1u << irq));
 +        }
 +    }
 +
@@ -1186,6 +1227,32 @@ index 6027c49..e3ac519 100644
 +
      public static void Deliver(int irq, CpuContext cpu, IMemory mem)
      {
++        // I_STAT has to stay raised for the whole dispatch, not just the chain
++        // walk. Handlers decide whether an interrupt is theirs by testing their
++        // bit, and that is as true of libcd's handler in the callback table as
++        // of a verifier in the chain. Raising the bit for RunChains and dropping
++        // it before the table handler ran meant Jet Moto 3's libcd saw no CD
++        // interrupt pending, never acknowledged it, and the drive stalled
++        // mid-movie with the flag stuck set.
++        //
++        // IRQ7 is the exception: the controller acknowledge latches in the SIO
++        // device and the game clears it itself, one byte at a time.
++        bool ownStat = irq != 7;
++        if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) | (1u << irq));
++        try
++        {
++            DeliverInner(irq, cpu, mem);
++        }
++        finally
++        {
++            if (ownStat) mem.WriteU32(IStat, mem.ReadU32(IStat) & ~(1u << irq));
++        }
++
++        if (irq != 7) PumpSio(cpu, mem);
++    }
++
++    static void DeliverInner(int irq, CpuContext cpu, IMemory mem)
++    {
 +        RunChains(irq, cpu, mem);
 +
          uint intrEnv = BiosB.IntrEnvInInterruptAddr;
@@ -1199,14 +1266,6 @@ index 6027c49..e3ac519 100644
  
          //takes a snap, apparently interrupt callbacks dont operate at the same context? could be wrong in mips3000, need to check furter TODO, seens to be accurate
          var snap = cpu.Snapshot();
-@@ -21,5 +112,7 @@ public static class Interrupts
-         Dispatcher.Call(cpu, mem, handler);
-         mem.WriteU16(intrEnv, 0);
-         cpu.Restore(snap);
-+
-+        if (irq != 7) PumpSio(cpu, mem);
-     }
- }
 diff --git a/RecompOne.Runtime/Hardware/Sio.cs b/RecompOne.Runtime/Hardware/Sio.cs
 new file mode 100644
 index 0000000..6565866
@@ -1838,7 +1897,7 @@ index c376f15..8f95516 100644
          _dicr |= 1u << (24 + channel);
          _raiseIrq();
 diff --git a/RecompOne.Runtime/Memory/PSMemory.cs b/RecompOne.Runtime/Memory/PSMemory.cs
-index 8cae036..80728a3 100644
+index 8cae036..98517f5 100644
 --- a/RecompOne.Runtime/Memory/PSMemory.cs
 +++ b/RecompOne.Runtime/Memory/PSMemory.cs
 @@ -15,6 +15,8 @@ public sealed class PSMemory : IMemory
@@ -1879,7 +1938,7 @@ index 8cae036..80728a3 100644
              Dispatcher.NotifyWrite(off);
          }
  
-@@ -66,7 +75,24 @@ public sealed class PSMemory : IMemory
+@@ -66,7 +75,38 @@ public sealed class PSMemory : IMemory
      private void TrackRead(uint phys, int size)
      {
          if (RamLogger.TrackReads && phys < MemoryMap.RamWindow)
@@ -1902,10 +1961,24 @@ index 8cae036..80728a3 100644
 +        }
 +        off = 0;
 +        return false;
++    }
++
++    // [jetmoto-fork] A game can spin on a flag its VBlank handler clears while
++    // calling nothing -- Jet Moto 3's boot loop does exactly that. Reads are the
++    // only thing such a loop does, so the vblank clock is pumped from here. The
++    // mask keeps it to once every 1024 accesses and PumpVBlank itself is
++    // time-gated, so the cost is a counter increment on the hot path.
++    private static int _vblTick;
++
++    [System.Runtime.CompilerServices.MethodImpl(
++        System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
++    private static void TickVBlank()
++    {
++        if ((++_vblTick & 0x3FF) == 0) Sdk.LibEtc.PumpVBlank();
      }
  
      private Span<byte> Resolve(uint address, int size)
-@@ -80,7 +106,9 @@ public sealed class PSMemory : IMemory
+@@ -80,7 +120,9 @@ public sealed class PSMemory : IMemory
              return _scratchpad.AsSpan((int)(phys - MemoryMap.ScratchpadBase), size);
  
          if (phys >= MemoryMap.HwRegsBase && phys < MemoryMap.HwRegsBase + MemoryMap.HwRegsSize)
@@ -1915,9 +1988,11 @@ index 8cae036..80728a3 100644
  
          if (phys >= MemoryMap.BiosBase && phys < MemoryMap.BiosBase + MemoryMap.BiosSize)
              return _bios.AsSpan((int)(phys - MemoryMap.BiosBase), size);
-@@ -94,18 +122,24 @@ public sealed class PSMemory : IMemory
+@@ -93,35 +135,51 @@ public sealed class PSMemory : IMemory
+ 
      public byte ReadU8(uint address)
      {
++        TickVBlank();
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 1, out int fo)) return _ram[fo];
          TrackRead(phys, 1);
@@ -1928,6 +2003,7 @@ index 8cae036..80728a3 100644
  
      public ushort ReadU16(uint address)
      {
++        TickVBlank();
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 2, out int fo))
 +            return System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(
@@ -1940,9 +2016,10 @@ index 8cae036..80728a3 100644
          var s = Resolve(address, 2);
          return (ushort)(s[0] | (s[1] << 8));
      }
-@@ -113,15 +147,22 @@ public sealed class PSMemory : IMemory
+ 
      public uint ReadU32(uint address)
      {
++        TickVBlank();
          uint phys = MemoryMap.ToPhysical(address);
 +        if (!RamLogger.TrackReads && FastRam(phys, 4, out int fo))
 +            return System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(
@@ -1963,7 +2040,7 @@ index 8cae036..80728a3 100644
          var s = Resolve(address, 4);
          return (uint)(s[0] | (s[1] << 8) | (s[2] << 16) | (s[3] << 24));
      }
-@@ -129,8 +170,15 @@ public sealed class PSMemory : IMemory
+@@ -129,8 +187,15 @@ public sealed class PSMemory : IMemory
      public void WriteU8(uint address, byte value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -1979,7 +2056,7 @@ index 8cae036..80728a3 100644
  
          if (_frozenCount > 0 && phys < MemoryMap.RamWindow && _frozen[phys % (uint)_ram.Length]) return;
          Resolve(address, 1)[0] = value;
-@@ -139,9 +187,17 @@ public sealed class PSMemory : IMemory
+@@ -139,9 +204,17 @@ public sealed class PSMemory : IMemory
      public void WriteU16(uint address, ushort value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -1997,7 +2074,7 @@ index 8cae036..80728a3 100644
          if (_timers.TryWrite(phys, value)) return;
          var s = Resolve(address, 2);
  
-@@ -159,12 +215,20 @@ public sealed class PSMemory : IMemory
+@@ -159,12 +232,20 @@ public sealed class PSMemory : IMemory
      public void WriteU32(uint address, uint value)
      {
          uint phys = MemoryMap.ToPhysical(address);
@@ -2018,7 +2095,7 @@ index 8cae036..80728a3 100644
          if (IsDmaChcr(phys) && (value & 0x01000000u) != 0)
          {
              Hw32(phys, value & ~0x01000000u);
-@@ -173,6 +237,7 @@ public sealed class PSMemory : IMemory
+@@ -173,6 +254,7 @@ public sealed class PSMemory : IMemory
          }
          if (_cd != null && IsCd(phys)) { _cd.Write(phys, (byte)value); return; }
          if (IsSpu(phys)) { _spu.WriteReg16(phys, (ushort)value); _spu.WriteReg16(phys + 2, (ushort)(value >> 16)); return; }
@@ -2350,10 +2427,10 @@ index ad79811..0f64f76 100644
              if (Read16(sec, 8) != VideoMagic || Read16(sec, 12) != 0) { _streamLba++; continue; }
  
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..a6e151f 100644
+index a036512..1fa0eec 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,195 @@ public static class LibEtc
+@@ -9,15 +9,242 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -2468,6 +2545,49 @@ index a036512..a6e151f 100644
 +        catch { }
 +    }
 +
++    // [jetmoto-fork] VBlank has to fire on a clock, not only when the game asks
++    // for it. Both earlier games poll VSync(-1) constantly, so driving the
++    // interrupt from VSync was enough for them. Jet Moto 3's boot loop spins on
++    // a byte that only its VBlank handler clears, and calls nothing at all while
++    // it waits -- so the interrupt that would release it never fired, and the
++    // game crawled forward only when some unrelated VSync happened to occur.
++    //
++    // The only thing that loop does is read memory, so the memory path is where
++    // this gets pumped from. It is gated on elapsed time, so it fires at 60 Hz
++    // regardless of how fast the loop spins.
++    static long _lastForcedVbl = System.Diagnostics.Stopwatch.GetTimestamp();
++    static long _lastPresent = System.Diagnostics.Stopwatch.GetTimestamp();
++
++    static long _lastVSyncCall = System.Diagnostics.Stopwatch.GetTimestamp();
++
++    public static void PumpVBlank()
++    {
++        long now = System.Diagnostics.Stopwatch.GetTimestamp();
++
++        // Only rescue a genuinely starved loop. A game that is calling VSync at
++        // all drives its own vblank, and injecting interrupts underneath it from
++        // the middle of a memory read is both unnecessary and destabilising --
++        // it broke Jet Moto 1 outright. Eight fields of silence from the game
++        // means it is spinning on something an interrupt has to clear.
++        if (now - _lastVSyncCall < TicksPerFrame * 8) return;
++        if (now - _lastForcedVbl < TicksPerFrame) return;
++        _lastForcedVbl = now;
++        _vcount++;
++        MaybeVBlank(_vcount);
++
++        // The display is tied to VSync(0) here, but a PS1 scans VRAM out
++        // continuously and a game is free never to call it. Jet Moto 3's movie
++        // player does exactly that: it decodes and blits at full speed and syncs
++        // through its VBlank handler instead, so the port drew every frame into
++        // VRAM and showed none of them. Once the game has gone a few fields
++        // without presenting, present for it.
++        if (now - _lastPresent >= TicksPerFrame * 4)
++        {
++            _lastPresent = now;
++            Runtime.PresentFrame();
++        }
++    }
++
 +    static void MaybeVBlank(int now)
 +    {
 +        if (_inVbl || now == _lastVbl) return;
@@ -2487,10 +2607,12 @@ index a036512..a6e151f 100644
      public static void VSync(CpuContext c, IMemory m)
      {
          int mode = (int)c.A0;
++        _lastVSyncCall = System.Diagnostics.Stopwatch.GetTimestamp();
 +        if (++_vsyncCalls == TrapVSync)
 +            throw new InvalidOperationException($"[trap] VSync #{_vsyncCalls} mode={mode}");
          Log.Sdk($"VSync({mode})");
 -        if (mode < 0) { c.V0 = (uint)_vcount; return; }
++
 +        if (mode < 0)
 +        {
 +            // Polling without presenting: on hardware a VBlank would still be
@@ -2534,6 +2656,7 @@ index a036512..a6e151f 100644
          if (mode == 1) { c.V0 = 0; return; }
  
          Runtime.PresentFrame();
++        _lastPresent = System.Diagnostics.Stopwatch.GetTimestamp();
 +        // A divider of n means n vblanks elapsed, so the counter advances by n
 +        // and the extra fields are actually waited out.
 +        for (int extra = 1; extra < FrameDivider; extra++)
@@ -2546,6 +2669,7 @@ index a036512..a6e151f 100644
 +        PumpCdStreaming();
 +        _pollsSinceTick = 0;
 +        _lastTickStamp = System.Diagnostics.Stopwatch.GetTimestamp();
++        _lastForcedVbl = _lastTickStamp;
 +        MaybeVBlank(_vcount);
  
          if (Event.HasAnyListeners<VSyncEvent>())
