@@ -58,3 +58,4 @@ harness/captures2/
 /*.cue
 JetMoto3_loose/
 JetMoto3/generated/
+dist/
