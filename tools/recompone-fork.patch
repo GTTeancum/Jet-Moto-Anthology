@@ -965,10 +965,10 @@ index 24e34c6..a9cbb44 100644
  
 diff --git a/RecompOne.Runtime/GameQuirks.cs b/RecompOne.Runtime/GameQuirks.cs
 new file mode 100644
-index 0000000..edce29a
+index 0000000..6783801
 --- /dev/null
 +++ b/RecompOne.Runtime/GameQuirks.cs
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,108 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1028,6 +1028,24 @@ index 0000000..edce29a
 +    /// </summary>
 +    public static bool NoGpuDmaIrq { get; set; }
 +
++    /// <summary>
++    /// Model an interrupt the way the hardware does: masked for the duration of
++    /// a handler, and running on a stack of its own rather than the interrupted
++    /// code's. Both are more faithful than what came before, and both change the
++    /// order in which a game sees its interrupts -- so a game that already works
++    /// without them keeps running the code it was verified on. Jet Moto 1 takes
++    /// 2812 nested interrupts through its boot; Jet Moto 2 takes none.
++    /// </summary>
++    public static bool MaskNestedInterrupts { get; set; }
++
++    /// <summary>
++    /// Forget the stream position when the drive is stopped, so the feeder waits
++    /// for the next stream's own read to say where to start. Needed by a game
++    /// that plays movies back to back and calls StSetStream before it seeks;
++    /// harmful to one that stops and resumes the same stream.
++    /// </summary>
++    public static bool ResetStreamOnStop { get; set; }
++
 +    /// <summary>Apply a named preset. Unknown names are ignored.</summary>
 +    public static void Apply(string game)
 +    {
@@ -1037,6 +1055,8 @@ index 0000000..edce29a
 +            case "jetmoto3":
 +                VBlankRescue = true;
 +                SoftwarePresent24 = true;
++                MaskNestedInterrupts = true;
++                ResetStreamOnStop = true;
 +                DeferredDmaIrq =
 +                    Environment.GetEnvironmentVariable("RECOMPONE_DEFER_DMA") is not ("0" or "false");
 +                NoGpuDmaIrq =
@@ -1354,10 +1374,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
-index 6027c49..ab245c0 100644
+index 6027c49..50aedfc 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
 +++ b/RecompOne.Runtime/Hardware/Interrupts.cs
-@@ -7,13 +7,236 @@ namespace RecompOne.Runtime;
+@@ -7,13 +7,249 @@ namespace RecompOne.Runtime;
  
  public static class Interrupts
  {
@@ -1503,9 +1523,17 @@ index 6027c49..ab245c0 100644
 +    static int _depth;
 +    static int _repend;
 +
++    // [jetmoto-fork] How often the two ungated changes in this file actually
++    // change anything. Both are meant to be inert for a game that never nests
++    // an interrupt and never leaves its stack in main RAM, and "meant to be" is
++    // not evidence -- RECOMPONE_LOG_IRQ=1 turns it into a number.
++    public static long NestDeferrals, StackSwaps;
++    public static uint LastOffStackSp;
++
      public static void Deliver(int irq, CpuContext cpu, IMemory mem)
      {
-+        if (_depth > 0 && irq != 7) { _repend |= 1 << irq; return; }
++        if (GameQuirks.MaskNestedInterrupts && _depth > 0 && irq != 7)
++        { NestDeferrals++; _repend |= 1 << irq; return; }
 +
 +        _depth++;
 +        try
@@ -1541,12 +1569,17 @@ index 6027c49..ab245c0 100644
 +    //
 +    // A game whose SP is always in RAM never reaches this at all.
 +    const uint InterruptStackTop = 0x8000FF00u;
-+    static bool SpInRam(uint sp) => (sp & 0x1FFFFFFFu) < 0x00200000u;
++    // The bound is the RAM *window*, not the retail 2 MB. Jet Moto 2 runs its
++    // stack at 0x807FFF58 -- the top of the 8 MB window -- so a 2 MB test called
++    // its perfectly good stack "not RAM" and relocated every interrupt it took.
++    static bool SpInRam(uint sp) =>
++        Memory.MemoryMap.ToPhysical(sp) < Memory.MemoryMap.RamWindow;
 +
 +    static void DeliverOne(int irq, CpuContext cpu, IMemory mem)
 +    {
 +        uint savedSp = cpu.SP;
-+        if (!SpInRam(cpu.SP)) cpu.SP = InterruptStackTop;
++        if (GameQuirks.MaskNestedInterrupts && !SpInRam(cpu.SP))
++        { StackSwaps++; LastOffStackSp = cpu.SP; cpu.SP = InterruptStackTop; }
 +        try
 +        {
 +            DeliverDispatch(irq, cpu, mem);
@@ -2505,7 +2538,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..586cadb 100644
+index fdf7b6b..fb1f558 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -2538,7 +2571,7 @@ index fdf7b6b..586cadb 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +95,39 @@ public static class Runtime
+@@ -81,14 +95,57 @@ public static class Runtime
          Mem = m;
      }
  
@@ -2547,6 +2580,13 @@ index fdf7b6b..586cadb 100644
 +    // split into "the game is slow" and "the host is slow".
 +    static readonly bool TraceFps =
 +        Environment.GetEnvironmentVariable("RECOMPONE_FPS") is "1" or "true";
++
++    // [jetmoto-fork] RECOMPONE_LOG_IRQ=1 reports, once a second, how often the
++    // ungated interrupt changes fired. Zero means a game is running the code it
++    // ran before them.
++    static readonly bool TraceIrq =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_IRQ") is "1" or "true";
++    static long _irqMark = System.Diagnostics.Stopwatch.GetTimestamp();
 +    static long _fpsMark = System.Diagnostics.Stopwatch.GetTimestamp();
 +    static long _presentTicks;
 +    static int _presents;
@@ -2566,6 +2606,17 @@ index fdf7b6b..586cadb 100644
          if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
 +
++        if (TraceIrq)
++        {
++            long t = System.Diagnostics.Stopwatch.GetTimestamp();
++            if (t - _irqMark >= System.Diagnostics.Stopwatch.Frequency)
++            {
++                _irqMark = t;
++                Console.Error.WriteLine(
++                    $"[irq] nestDeferrals={Interrupts.NestDeferrals} stackSwaps={Interrupts.StackSwaps} " +
++                    $"cdStreamInUse={Sdk.LibCdStream.InUse} lastOffStackSp=0x{Interrupts.LastOffStackSp:X8}");
++            }
++        }
 +        if (!TraceFps) return;
 +        long now = System.Diagnostics.Stopwatch.GetTimestamp();
 +        _presentTicks += now - t0;
@@ -2829,7 +2880,7 @@ index 6432fa4..fe3cd70 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..c5bd883 100644
+index ad79811..0222801 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
 @@ -19,6 +19,7 @@ public static class LibCdStream
@@ -2908,7 +2959,7 @@ index ad79811..c5bd883 100644
      internal static void OnReadStream(int lba)
      {
          if (!InUse) return;
-@@ -112,9 +149,21 @@ public static class LibCdStream
+@@ -112,9 +149,22 @@ public static class LibCdStream
          EnsureThread();
      }
  
@@ -2926,12 +2977,13 @@ index ad79811..c5bd883 100644
 +        // feeder restart on the previous movie and the new player waited for
 +        // frames that were never going to match. Cleared, the feeder waits for
 +        // this stream to tell it where to start.
++        if (!GameQuirks.ResetStreamOnStop) return;
 +        _pendingLba = -1;
 +        _streamLba = -1;
      }
  
      static void ResetRing(IMemory m)
-@@ -152,6 +201,9 @@ public static class LibCdStream
+@@ -152,6 +202,9 @@ public static class LibCdStream
              {
                  _streamLba = _pendingLba >= 0 ? _pendingLba : LibCd.CurrentLba;
                  _streamStartLba = _streamLba;
@@ -2941,7 +2993,7 @@ index ad79811..c5bd883 100644
                  _clock.Restart();
              }
  
-@@ -159,14 +211,43 @@ public static class LibCdStream
+@@ -159,14 +212,43 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -2989,7 +3041,7 @@ index ad79811..c5bd883 100644
  
              int start;
              lock (_lock)
-@@ -183,7 +264,7 @@ public static class LibCdStream
+@@ -183,7 +265,7 @@ public static class LibCdStream
              lock (_lock)
              {
                  for (int i = 0; i < n; i++) _busy[start + i] = true;
