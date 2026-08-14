@@ -2403,7 +2403,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..1805ffe 100644
+index fdf7b6b..629b739 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -2436,7 +2436,23 @@ index fdf7b6b..1805ffe 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -87,6 +101,11 @@ public static class Runtime
+@@ -81,14 +95,39 @@ public static class Runtime
+         Mem = m;
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_FPS=1 reports presented frames per second and how
++    // much of that second went into presenting, so "the port is slow" can be
++    // split into "the game is slow" and "the host is slow".
++    static readonly bool TraceFps =
++        Environment.GetEnvironmentVariable("RECOMPONE_FPS") is "1" or "true";
++    static long _fpsMark = System.Diagnostics.Stopwatch.GetTimestamp();
++    static long _presentTicks;
++    static int _presents;
++
+     public static void PresentFrame()
+     {
++        long t0 = TraceFps ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+         HostWindow.Present(Gpu);
          Audio.Attach(Spu);
          FrameClock.Throttle();
          Sdk.LibCd.Tick();
@@ -2447,7 +2463,19 @@ index fdf7b6b..1805ffe 100644
 +        Host.RamDump.Tick(Mem);
          if (Mem != null) { Bios.BiosB.RefreshPad(Mem); Sdk.LibPad.Refresh(Mem); } //is this correct?
          DispatchIrq(0); //using this to dispatch irqs too if necessary, probably not needed after the rest of stuff is reimplemented
++
++        if (!TraceFps) return;
++        long now = System.Diagnostics.Stopwatch.GetTimestamp();
++        _presentTicks += now - t0;
++        _presents++;
++        long freq = System.Diagnostics.Stopwatch.Frequency;
++        if (now - _fpsMark < freq) return;
++        Console.Error.WriteLine(
++            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present");
++        _fpsMark = now; _presentTicks = 0; _presents = 0;
      }
+ 
+     public static void DispatchIrq(int irq)
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
 index 6432fa4..fe3cd70 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
@@ -2869,10 +2897,10 @@ index ad79811..c5bd883 100644
              }
          }
 diff --git a/RecompOne.Runtime/sdk/LibEtc.cs b/RecompOne.Runtime/sdk/LibEtc.cs
-index a036512..91ed109 100644
+index a036512..027dbaa 100644
 --- a/RecompOne.Runtime/sdk/LibEtc.cs
 +++ b/RecompOne.Runtime/sdk/LibEtc.cs
-@@ -9,15 +9,286 @@ public static class LibEtc
+@@ -9,15 +9,291 @@ public static class LibEtc
      static int _vcount;
      static readonly VSyncEvent _vsyncEvent = new();
  
@@ -3067,7 +3095,12 @@ index a036512..91ed109 100644
 +        // through its VBlank handler instead, so the port drew every frame into
 +        // VRAM and showed none of them. Once the game has gone a few fields
 +        // without presenting, present for it.
-+        if (now - _lastPresent >= TicksPerFrame * 4)
++        // One present per field, not one per four. The four-field version was
++        // holding the whole game to 15 fps: Jet Moto 3 never calls VSync(0), it
++        // syncs through its own vblank handler, so every frame it displayed came
++        // from here. Presenting costs about a millisecond, so the rate this
++        // allows is the rate the game can actually reach.
++        if (now - _lastPresent >= TicksPerFrame)
 +        {
 +            _lastPresent = now;
 +            Runtime.PresentFrame();
