@@ -75,6 +75,30 @@ Two instruments did all the work and are worth keeping:
 - Six branch targets past the end of the text segment are still unregistered.
   They are linear sweep reading data as code and are unreachable.
 
+## The shipped executables
+
+`dist/` holds the three single-file builds (`JetMoto.exe`, `JetMoto2.exe`,
+`JetMoto3.exe` — the same binary under three names, each reading its own file
+name to know which game it is). They are gitignored; the release is built with:
+
+```bash
+dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
+```
+
+**A fresh install used to sit there doing nothing**, including the Jet Moto and
+Jet Moto 2 downloads already published. `Entry.Run` calls `WaitForValidDisc`
+before it opens anything, and that spins until the *runtime's* configured disc
+path is a real file — the launcher only ever passed the disc to `Entry.Run` and
+never set it in the runtime's configuration. Every development run had a
+`settings.json` from an earlier session with the path already in it, which is
+why this never showed up locally. The launcher now sets it.
+
+Verified after the fix: `JetMoto3.exe --disc "Jet Moto 3 (USA).cue"` on an empty
+folder recompiles the disc in 11 s, boots, plays the intro, and reaches a race
+under scripted input with no faults over four minutes.
+
+---
+
 ---
 
 ## Loose files
