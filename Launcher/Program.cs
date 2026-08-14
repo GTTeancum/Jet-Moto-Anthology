@@ -63,6 +63,14 @@ try
     // before PSMemory is constructed: the memory path reads these flags.
     RecompOne.Runtime.GameQuirks.Apply(title.Key);
 
+    // Tell the runtime which disc we settled on. Entry.Run calls
+    // WaitForValidDisc before it opens anything, and that spins until the
+    // *runtime's* configured disc path is a real file -- so a first run with an
+    // empty settings.json sat in the disc picker even though --disc had already
+    // named the disc and the recompile had already used it.
+    RecompOne.Runtime.Config.ConfigManager.Game.CdPath = Path.GetFullPath(disc);
+    RecompOne.Runtime.Config.ConfigManager.SaveGame();
+
     var mem = new PSMemory();
     run.Invoke(null, [mem, disc, title.Name]);
     return 0;
