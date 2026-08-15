@@ -1163,7 +1163,7 @@ index 0000000..66b1a53
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..e951178 100644
+index 8b55b53..6dc79ba 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1181,7 +1181,7 @@ index 8b55b53..e951178 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,29 @@ public sealed partial class Gpu
+@@ -50,6 +58,113 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
@@ -1193,6 +1193,90 @@ index 8b55b53..e951178 100644
 +
 +    /// <summary>Magenta: 5-bit R and B full, G zero. No Jet Moto art uses it.</summary>
 +    const ushort UndrawnMark = 0x7C1F;
++
++    // [jetmoto-fork] RECOMPONE_HUNT_COLOUR=<hex 15-bit> finds a pixel of that
++    // colour, surrounded by more of it, in the frame just finished -- then points
++    // the pixel watcher at it. Three attempts at this were wasted computing the
++    // VRAM coordinate by hand from a screenshot, which needs the current display
++    // mode and gets it wrong. Letting the runtime find its own target removes
++    // the arithmetic entirely.
++    static readonly ushort HuntColour = ushort.TryParse(
++        Environment.GetEnvironmentVariable("RECOMPONE_HUNT_COLOUR"),
++        System.Globalization.NumberStyles.HexNumber, null, out var _hc) ? _hc : (ushort)0;
++    static readonly double HuntAfter =
++        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_HUNT_AFTER"), out var _ha) ? _ha : 0;
++    static readonly System.Diagnostics.Stopwatch _huntClock = System.Diagnostics.Stopwatch.StartNew();
++    static bool _hunted;
++    static ushort HuntTarget;
++
++    void HuntForColour(int shownY)
++    {
++        if (_hunted || _huntClock.Elapsed.TotalSeconds < HuntAfter) return;
++
++        // Report what is actually in the finished frame before searching it.
++        // Deriving the target colour from a screenshot failed twice; the
++        // framebuffer's own histogram cannot be argued with.
++        if (HuntColour == 0xFFFF)
++        {
++            int hw = DisplayWidth <= 0 ? 320 : DisplayWidth;
++            int hh = DisplayHeight <= 0 ? 240 : DisplayHeight;
++            var hist = new Dictionary<ushort, int>();
++            for (int y = shownY + hh / 3; y < shownY + hh && y < VramHeight; y++)
++            {
++                int r0 = y * VramWidth;
++                for (int x = _dispVramX; x < _dispVramX + hw && x < VramWidth; x++)
++                {
++                    ushort v = (ushort)(Vram[r0 + x] & 0x7FFF);
++                    hist.TryGetValue(v, out int n);
++                    hist[v] = n + 1;
++                }
++            }
++            Console.Error.WriteLine($"[hunt] frame histogram, display ({_dispVramX},{shownY}) {hw}x{hh}:");
++            foreach (var kv in hist.OrderByDescending(k => k.Value).Take(10))
++                Console.Error.WriteLine(
++                    $"[hunt]   0x{kv.Key:X4} = rgb({(kv.Key & 0x1F) << 3},{((kv.Key >> 5) & 0x1F) << 3}," +
++                    $"{((kv.Key >> 10) & 0x1F) << 3})  x{kv.Value}");
++
++            // Latch the commonest dark colour that is not pure black -- the wedges
++            // are dark but the frame clear is black, and they must not be confused.
++            var pick = hist.Where(k => k.Key != 0 &&
++                          ((k.Key & 0x1F) << 3) + (((k.Key >> 5) & 0x1F) << 3) + (((k.Key >> 10) & 0x1F) << 3) < 96)
++                       .OrderByDescending(k => k.Value).Take(1).ToList();
++            if (pick.Count == 0) { Console.Error.WriteLine("[hunt] no dark colour present"); _hunted = true; return; }
++            HuntTarget = pick[0].Key;
++            Console.Error.WriteLine($"[hunt] target 0x{HuntTarget:X4} ({pick[0].Value} px)");
++        }
++        else HuntTarget = HuntColour;
++        int w = DisplayWidth <= 0 ? 320 : DisplayWidth;
++        int h = DisplayHeight <= 0 ? 240 : DisplayHeight;
++        var vram = Vram;
++        for (int y = shownY + 4; y < shownY + h - 4 && y < VramHeight - 4; y += 2)
++        {
++            int row = y * VramWidth;
++            for (int x = _dispVramX + 4; x < _dispVramX + w - 4 && x < VramWidth - 4; x += 2)
++            {
++                // Ignore bit 15: VRAM keeps the mask/STP flag there, so an exact
++                // 16-bit compare against a colour sampled from a screenshot never
++                // matches a pixel that was drawn with the mask bit set.
++                if ((ushort)(vram[row + x] & 0x7FFF) != HuntTarget) continue;
++                // Require a solid neighbourhood so this lands in the middle of a
++                // region rather than on a stray pixel or an edge.
++                bool solid = true;
++                for (int dy = -3; dy <= 3 && solid; dy++)
++                    for (int dx = -3; dx <= 3; dx++)
++                        if ((ushort)(vram[(y + dy) * VramWidth + (x + dx)] & 0x7FFF) != HuntTarget)
++                            { solid = false; break; }
++                if (!solid) continue;
++
++                _hunted = true;
++                GpuRasterWatch.Set(x, y);
++                Console.Error.WriteLine(
++                    $"[hunt] colour 0x{HuntTarget:X4} found at vram=({x},{y}) " +
++                    $"display=({_dispVramX},{shownY}) {w}x{h} -- watching that pixel");
++                return;
++            }
++        }
++    }
 +
 +    void FillBackBuffer(int shownY)
 +    {
@@ -1211,7 +1295,7 @@ index 8b55b53..e951178 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +176,7 @@ public sealed partial class Gpu
+@@ -145,6 +260,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1219,7 +1303,7 @@ index 8b55b53..e951178 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +187,49 @@ public sealed partial class Gpu
+@@ -155,11 +271,50 @@ public sealed partial class Gpu
          }
      }
  
@@ -1263,6 +1347,7 @@ index 8b55b53..e951178 100644
 +                    // dark polygon from a hole with something dark behind it --
 +                    // a distinction I got wrong twice by reading screenshots.
 +                    if (MarkUndrawn) FillBackBuffer(ny);
++                    if (HuntColour != 0) HuntForColour(ny);
 +                }
 +                _dispVramX = nx; _dispVramY = ny;
 +                break;
@@ -1427,10 +1512,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..e0f80c4 100644
+index 6f7a426..eaf86b4 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,54 @@ public sealed partial class Gpu
+@@ -17,6 +17,56 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1458,7 +1543,9 @@ index 6f7a426..e0f80c4 100644
 +    // one VRAM pixel, in order, with what it drew. When a region is the wrong
 +    // colour and no counter explains it, the only remaining question is "who
 +    // actually wrote here", and this answers it directly.
-+    static readonly int WatchPixelX = ParseWatchPixel(0), WatchPixelY = ParseWatchPixel(1);
++    internal static int WatchPixelX = ParseWatchPixel(0), WatchPixelY = ParseWatchPixel(1);
++
++    public static void SetWatchPixel(int x, int y) { WatchPixelX = x; WatchPixelY = y; _pixelWrites = 0; }
 +    static int ParseWatchPixel(int i)
 +    {
 +        var v = Environment.GetEnvironmentVariable("RECOMPONE_WATCH_PIXEL");
@@ -1485,7 +1572,7 @@ index 6f7a426..e0f80c4 100644
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +74,15 @@ public sealed partial class Gpu
+@@ -26,6 +76,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1501,7 +1588,7 @@ index 6f7a426..e0f80c4 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +125,77 @@ public sealed partial class Gpu
+@@ -68,6 +127,77 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1579,7 +1666,7 @@ index 6f7a426..e0f80c4 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -86,6 +214,12 @@ public sealed partial class Gpu
+@@ -86,6 +216,12 @@ public sealed partial class Gpu
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
          if (spanX > 1023 || spanY > 511) return;
  
@@ -1592,7 +1679,7 @@ index 6f7a426..e0f80c4 100644
          long area = (long)(b.X - a.X) * (c.Y - a.Y) - (long)(b.Y - a.Y) * (c.X - a.X);
          if (area == 0) return;
          if (area < 0) { (b, c) = (c, b); area = -area; }
-@@ -99,7 +233,7 @@ public sealed partial class Gpu
+@@ -99,7 +235,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1601,7 +1688,7 @@ index 6f7a426..e0f80c4 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,9 +268,14 @@ public sealed partial class Gpu
+@@ -134,9 +270,14 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1617,7 +1704,7 @@ index 6f7a426..e0f80c4 100644
              }
          }
      }
-@@ -185,6 +324,10 @@ public sealed partial class Gpu
+@@ -185,6 +326,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -1628,7 +1715,7 @@ index 6f7a426..e0f80c4 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +395,7 @@ public sealed partial class Gpu
+@@ -252,7 +397,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1637,7 +1724,7 @@ index 6f7a426..e0f80c4 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +405,7 @@ public sealed partial class Gpu
+@@ -262,7 +407,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1646,14 +1733,13 @@ index 6f7a426..e0f80c4 100644
          }
      }
  
-@@ -294,6 +437,14 @@ public sealed partial class Gpu
+@@ -294,6 +439,13 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
 +        // Match either framebuffer: the game alternates between y and y+240,
 +        // and pinning one of them is why the first attempt saw nothing in a race.
-+        if (WatchPixelX == x && (WatchPixelY == y || WatchPixelY + 240 == y || WatchPixelY + 256 == y) && _pixelWrites < 60 &&
-+            _trapClock.Elapsed.TotalSeconds >= TrapBlackAfter)
++        if (WatchPixelX == x && WatchPixelY == y && _pixelWrites < 60)
 +        {
 +            _pixelWrites++;
 +            Console.Error.WriteLine($"[pixel] rgb=({r},{g},{b}) semi={semi} <- {_curPrim}");
@@ -1661,6 +1747,19 @@ index 6f7a426..e0f80c4 100644
          if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) return;
          if (x < 0 || x >= VramWidth || y < 0 || y >= VramHeight) return;
  
+diff --git a/RecompOne.Runtime/Gpu/GpuRasterWatch.cs b/RecompOne.Runtime/Gpu/GpuRasterWatch.cs
+new file mode 100644
+index 0000000..67a5f0d
+--- /dev/null
++++ b/RecompOne.Runtime/Gpu/GpuRasterWatch.cs
+@@ -0,0 +1,7 @@
++namespace RecompOne.Runtime;
++
++/// <summary>[jetmoto-fork] Lets the colour hunt point the pixel watcher.</summary>
++public static class GpuRasterWatch
++{
++    public static void Set(int x, int y) => Gpu.SetWatchPixel(x, y);
++}
 diff --git a/RecompOne.Runtime/Hardware/CdAudio.cs b/RecompOne.Runtime/Hardware/CdAudio.cs
 new file mode 100644
 index 0000000..f8e64da
