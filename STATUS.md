@@ -96,12 +96,34 @@ what is *established* is recorded here to stop the next attempt repeating it:
 | Texels actually sampled | trapped large polygons sampling black | none during a race |
 | **Backface winding** | forced NCLIP to never cull, so every submitted polygon draws | **unchanged** |
 
-The last row is the load-bearing one: with culling off, everything the game
-submits is drawn, and the wedges survive. They are therefore not geometry the
-port is dropping. Either the game never submits polygons there, or it submits
-these and they are correct as drawn. Telling those apart needs the game's own
-terrain visibility data (`.WLD`) read and compared -- reverse engineering rather
-than emulation debugging.
+The load-bearing row is the last one: with culling off, everything the game
+submits is drawn and the wedges survive, so they are not geometry the port is
+dropping through winding, culling or the extent rule.
+
+**A correction.** Between those tests I marked the back buffer magenta before
+each frame, saw no magenta survive, and concluded the wedges were drawn polygons
+rather than holes. That was wrong: the game clears every frame with a black
+untextured 512x240 rectangle, which overwrote the marker before anything else
+drew. The test proved nothing and the conclusion drawn from it should be
+discarded. Whether the wedges are drawn or are holes showing something dark
+behind is **still open** -- as is the earlier reading that they were "textured
+polygons sampling black", which rested on flat shading, a test that cannot
+distinguish the two either.
+
+Facts about this game's rendering that did come out of the attempt, and that a
+next attempt should start from:
+
+- It clears each frame with GP0(0x60) -- an untextured black rectangle, not a
+  fill -- so a hole shows black, and the wedges measure (0,8,24), not black.
+- The display is 512x240 in some phases and 320x240 in others, double-buffered
+  at VRAM y=0 and y=240. Screen-to-VRAM arithmetic has to read the current mode;
+  assuming 320 sent two pixel-watch runs looking in the wrong place.
+- One VRAM-to-VRAM blit in an entire race. Six CPU uploads a frame, none of them
+  into the framebuffer.
+- `RECOMPONE_WATCH_PIXEL=x,y` logs every primitive that writes one VRAM pixel,
+  with its full state. It is validated -- 400 writes captured on a pixel known to
+  be painted -- and is the right tool to finish this with, pointed at a wedge
+  pixel with the display mode read first.
 
 Every switch used above is committed and off by default: `RECOMPONE_NO_HLE`,
 `NO_SEMI`, `FLAT`, `NCLIP=flip|off`, `LOG_FILL`, `LOG_UPLOAD`, `VRAM_DUMP`,

@@ -642,3 +642,41 @@ STATUS.md. Two things worth carrying forward:
 investigation was a locked dictionary write per textured polygon, tens of
 thousands a second, running on every game's hot path with no way to turn it off.
 Instrumentation that is always on is a feature, and needs to be costed like one.
+
+
+### 2026-08-15 — the wedges, and a correction
+
+Still not solved. What changed is that one of the things I told the user was
+established turns out not to be, and that is worth more than another hypothesis.
+
+I marked the back buffer magenta before each frame, saw no magenta survive
+anywhere, and concluded the wedges were drawn polygons rather than holes. Jet
+Moto 3 clears every frame with an untextured black 512x240 rectangle -- GP0(0x60),
+not a fill, which is why the fill logger never saw it -- and that clear
+overwrote the marker before any game geometry drew. The test could not have
+produced magenta whatever the answer was. It proved nothing.
+
+That is the second time in this investigation I read a test that cannot fail as
+evidence; the first was flat shading, which cannot distinguish a dark polygon
+from a hole with something dark behind it either. Both times the mistake had the
+same shape: I checked whether the result was *consistent* with my hypothesis
+instead of asking what the test would have shown if the hypothesis were false.
+
+Genuinely new, and worth having:
+
+- The frame clear is a black rectangle primitive, so a hole shows pure black.
+  The wedges measure (0,8,24). They are not the clear showing through.
+- The display is 512x240 in some phases and 320x240 in others, double buffered
+  at VRAM y=0 and y=240. Two pixel-watch runs looked in the wrong place because
+  I assumed 320 throughout.
+- One VRAM-to-VRAM blit in an entire race, and no CPU upload lands in the
+  framebuffer during one. Neither paints the wedges.
+- `RECOMPONE_WATCH_PIXEL` logs every primitive that writes a given VRAM pixel
+  with its full state, and is validated: 400 writes captured on a pixel known to
+  be painted. Pointed at a wedge pixel, with the display mode read first rather
+  than assumed, it should end this in one run.
+
+Stopping here rather than spending another cycle: the loop is four minutes per
+attempt and the last three attempts failed on targeting rather than on the
+hypothesis, which is a sign to hand over a working instrument instead of more
+guesses.
