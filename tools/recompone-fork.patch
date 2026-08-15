@@ -1079,10 +1079,10 @@ index 0000000..6783801
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..c44cfc8
+index 0000000..70c5455
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,27 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1095,10 +1095,18 @@ index 0000000..c44cfc8
 +{
 +    public static long Polys, Lines, Rects, Loads;
 +
++    /// <summary>Primitives the 1023x511 extent rule threw away before drawing.</summary>
++    public static long DroppedSpan;
++
++    /// <summary>Polygons flagged semi-transparent, and the blend modes they asked for.</summary>
++    public static long Semi;
++    public static readonly long[] Blend = new long[4];
++
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads}";
-+        Polys = Lines = Rects = Loads = 0;
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        Polys = Lines = Rects = Loads = DroppedSpan = Semi = 0;
++        System.Array.Clear(Blend);
 +        return s;
 +    }
 +}
@@ -1181,7 +1189,7 @@ index 8b55b53..8e4cac0 100644
              case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
              case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..e66d2d0 100644
+index 9900095..8dfc974 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
 @@ -44,11 +44,11 @@ public sealed partial class Gpu
@@ -1200,7 +1208,32 @@ index 9900095..e66d2d0 100644
              case >= 0xC0 and <= 0xDF: BeginImageRead(); break;
              case 0xE1: SetDrawMode(word); break;
              case 0xE2: SetTextureWindow(word); break;
-@@ -133,7 +133,12 @@ public sealed partial class Gpu
+@@ -80,9 +80,24 @@ public sealed partial class Gpu
+         _texWinOffY = (int)((word >> 15) & 0x1F);
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_LOG_FILL=1 reports the frame-clear colour and
++    // rectangle when they change. A flat coloured area on screen is either
++    // something drawn or the cleared buffer showing through a hole, and those
++    // want opposite fixes.
++    static readonly bool TraceFill =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_FILL") is "1" or "true";
++    string _lastFill = "";
++
+     void FillRect()
+     {
+         ushort color = To15((int)(_fifo[0] & 0xFF), (int)((_fifo[0] >> 8) & 0xFF), (int)((_fifo[0] >> 16) & 0xFF));
++        if (TraceFill)
++        {
++            string now = $"rgb=({_fifo[0] & 0xFF},{(_fifo[0] >> 8) & 0xFF},{(_fifo[0] >> 16) & 0xFF}) " +
++                         $"at=({_fifo[1] & 0x3F0},{(_fifo[1] >> 16) & 0x1FF}) " +
++                         $"size=({_fifo[2] & 0x3FF}x{(_fifo[2] >> 16) & 0x1FF})";
++            if (now != _lastFill) { _lastFill = now; Console.Error.WriteLine($"[fill] {now}"); }
++        }
+         int x = (int)(_fifo[1] & 0x3F0);
+         int y = (int)((_fifo[1] >> 16) & 0x1FF);
+         int w = (int)(((_fifo[2] & 0x3FF) + 0xF) & ~0xF);
+@@ -133,7 +148,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
          ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
@@ -1215,7 +1248,7 @@ index 9900095..e66d2d0 100644
              int x = (_loadX + (_loadPx % _loadW)) & (VramWidth - 1);
              int y = (_loadY + (_loadPx / _loadW)) & (VramHeight - 1);
 diff --git a/RecompOne.Runtime/Gpu/GpuHleForward.cs b/RecompOne.Runtime/Gpu/GpuHleForward.cs
-index 80a937d..4af164e 100644
+index 80a937d..f56f89a 100644
 --- a/RecompOne.Runtime/Gpu/GpuHleForward.cs
 +++ b/RecompOne.Runtime/Gpu/GpuHleForward.cs
 @@ -13,7 +13,7 @@ public sealed partial class Gpu
@@ -1227,11 +1260,70 @@ index 80a937d..4af164e 100644
      };
  
      static HleVertex HV(in Vert v) => new()
+@@ -30,7 +30,7 @@ public sealed partial class Gpu
+     {
+         int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
+         int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
+-        if (spanX > 1023 || spanY > 511) return;
++        if (spanX > 1023 || spanY > 511) { GpuCounters.DroppedSpan++; return; }
+ 
+         var be = GpuHle.Backend!;
+         be.SetDrawEnv(CurEnv());
+@@ -47,7 +47,7 @@ public sealed partial class Gpu
+ 
+     void HleLine(int x0, int y0, int r0, int g0, int b0, int x1, int y1, int r1, int g1, int b1, bool semi, bool gouraud)
+     {
+-        if (Math.Abs(x1 - x0) > 1023 || Math.Abs(y1 - y0) > 511) return;
++        if (Math.Abs(x1 - x0) > 1023 || Math.Abs(y1 - y0) > 511) { GpuCounters.DroppedSpan++; return; }
+ 
+         var be = GpuHle.Backend!;
+         be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..e2eeb07 100644
+index 6f7a426..d6cb8a0 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -99,7 +99,7 @@ public sealed partial class Gpu
+@@ -17,6 +17,15 @@ public sealed partial class Gpu
+         {  3, -1,  2, -2 },
+     };
+ 
++    static readonly bool SkipSemi =
++        Environment.GetEnvironmentVariable("RECOMPONE_NO_SEMI") is "1" or "true";
++
++    // [jetmoto-fork] RECOMPONE_FLAT=1 draws polygons in their vertex colour with
++    // no texture. A dark patch that turns the same colour as its neighbours was
++    // sampling the wrong texture; one that stays dark was sent that colour.
++    static readonly bool FlatShade =
++        Environment.GetEnvironmentVariable("RECOMPONE_FLAT") is "1" or "true";
++
+     void DrawPolygon()
+     {
+         uint cmd = _fifo[0];
+@@ -26,6 +35,15 @@ public sealed partial class Gpu
+         bool semi = (cmd & (1u << 25)) != 0;
+         bool raw = (cmd & (1u << 24)) != 0;
+         int n = quad ? 4 : 3;
++        if (semi)
++        {
++            GpuCounters.Semi++; GpuCounters.Blend[_blendMode & 3]++;
++            // [jetmoto-fork] RECOMPONE_NO_SEMI=1 skips semi-transparent polygons
++            // entirely. A flat dark shape on screen is either a blended primitive
++            // rendered wrong or opaque geometry in the wrong place, and dropping
++            // the blended ones for one run says which.
++            if (SkipSemi) return;
++        }
+ 
+         Span<Vert> v = stackalloc Vert[4];
+         int idx = 1;
+@@ -68,6 +86,8 @@ public sealed partial class Gpu
+             for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
+         }
+ 
++        if (FlatShade) { tex = false; raw = false; }
++
+         if (HleOn)
+         {
+             HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
+@@ -99,7 +119,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1240,7 +1332,7 @@ index 6f7a426..e2eeb07 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -136,7 +136,7 @@ public sealed partial class Gpu
+@@ -136,7 +156,7 @@ public sealed partial class Gpu
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
                      Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
                  }
@@ -1249,7 +1341,7 @@ index 6f7a426..e2eeb07 100644
              }
          }
      }
-@@ -252,7 +252,7 @@ public sealed partial class Gpu
+@@ -252,7 +272,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1258,7 +1350,7 @@ index 6f7a426..e2eeb07 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +262,7 @@ public sealed partial class Gpu
+@@ -262,7 +282,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1373,6 +1465,36 @@ index 0000000..f8e64da
 +        }
 +    }
 +}
+diff --git a/RecompOne.Runtime/Hardware/Gte.cs b/RecompOne.Runtime/Hardware/Gte.cs
+index e13c28a..9e48feb 100644
+--- a/RecompOne.Runtime/Hardware/Gte.cs
++++ b/RecompOne.Runtime/Hardware/Gte.cs
+@@ -40,7 +40,24 @@ public static class Gte
+         return t;
+     }
+ 
+-    static void Flag(int bit) => FLAG |= 1u << bit;
++    // [jetmoto-fork] Saturation and overflow counts, reported with the
++    // RECOMPONE_FPS line. A vertex clamped to the screen edge is what a
++    // stretched polygon looks like from the outside, and a polygon stretched
++    // past the GPU's extent rule is what a missing one looks like -- so the two
++    // symptoms share a counter, and it is worth knowing which is firing.
++    public static readonly long[] FlagHits = new long[32];
++
++    static void Flag(int bit) { FlagHits[bit]++; FLAG |= 1u << bit; }
++
++    public static string TakeFlagSummary()
++    {
++        string s = $"sx={FlagHits[14]} sy={FlagHits[13]} div={FlagHits[17]} " +
++                   $"ir1={FlagHits[24]} ir2={FlagHits[23]} ir3={FlagHits[22]} " +
++                   $"mac1={FlagHits[30] + FlagHits[27]} mac2={FlagHits[29] + FlagHits[26]} " +
++                   $"mac3={FlagHits[28] + FlagHits[25]} mac0={FlagHits[16] + FlagHits[15]}";
++        Array.Clear(FlagHits);
++        return s;
++    }
+ 
+     static int SatIR(int n, int v, bool lm)
+     {
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
 index 6027c49..50aedfc 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
@@ -2085,7 +2207,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..22a2b6c 100644
+index 8a62627..22b0b0f 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -2205,7 +2327,21 @@ index 8a62627..22a2b6c 100644
      }
  
      internal static void Pump()
-@@ -372,7 +456,12 @@ public static class HostWindow
+@@ -289,7 +373,12 @@ public static class HostWindow
+         _glBackend = (Hle.GlCore)Hle.GpuBackendFactory.Create(_gl,
+             Hle.GpuBackendFactory.Parse(ConfigManager.View.GpuBackend));
+         _glBackend.InitGl();
+-        Hle.GpuHle.Active = _glBackend.Ready;
++        // [jetmoto-fork] RECOMPONE_NO_HLE=1 renders through the software
++        // rasteriser instead of the GL backend. The two share nothing below the
++        // command FIFO, so running a scene both ways says which side of that
++        // line an artefact lives on -- which is otherwise very hard to tell.
++        Hle.GpuHle.Active = _glBackend.Ready &&
++            Environment.GetEnvironmentVariable("RECOMPONE_NO_HLE") is not ("1" or "true");
+         Hle.GpuHle.Backend = _glBackend;
+         Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
+ 
+@@ -372,7 +461,12 @@ public static class HostWindow
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
                      outW: wf.X, outH: wf.Y);
@@ -2219,7 +2355,7 @@ index 8a62627..22a2b6c 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +644,25 @@ public static class HostWindow
+@@ -555,6 +649,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -2538,7 +2674,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..fb1f558 100644
+index fdf7b6b..4f74aaf 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -2571,7 +2707,7 @@ index fdf7b6b..fb1f558 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +95,57 @@ public static class Runtime
+@@ -81,14 +95,58 @@ public static class Runtime
          Mem = m;
      }
  
@@ -2625,6 +2761,7 @@ index fdf7b6b..fb1f558 100644
 +        if (now - _fpsMark < freq) return;
 +        Console.Error.WriteLine(
 +            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present, {GpuCounters.TakeSummary()}");
++        Console.Error.WriteLine($"[gte] {Gte.TakeFlagSummary()}");
 +        _fpsMark = now; _presentTicks = 0; _presents = 0;
      }
  
