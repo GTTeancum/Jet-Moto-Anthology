@@ -13,7 +13,7 @@ redbook audio at all.
 |------|-------|
 | **Jet Moto** | Complete — a full 3-lap race played end to end |
 | **Jet Moto 2** | Playable — boots, menus, controls, races |
-| **Jet Moto 3** | Playable — boots, menus, controls, races |
+| **Jet Moto 3** | Playable — boots, menus, controls, races at a locked 60 fps |
 
 ## Screenshots
 
@@ -89,6 +89,11 @@ JetMoto.exe [--disc <path>] [--extract [folder]] [--rebuild]
 
 Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
 `Enter` Start, `Q`/`W` L1/R1.
+
+Jet Moto 3 renders at the console's own internal resolution, which is what keeps
+its busiest scenes at 60 fps rather than 21; `RECOMPONE_UPSCALE=1` opts into the
+4x upscale the other two use, at about a third of the frame rate. The in-game
+display settings switch it either way.
 
 `RECOMPONE_FRAME_DIVIDER=2` gives the original's 30 Hz pacing. A log is written
 to `jetmoto.log` beside the binary, flushed per line so a crash still leaves a

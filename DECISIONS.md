@@ -605,3 +605,40 @@ the rider respawned. The GPU primitive counter added to `RECOMPONE_FPS` is what
 settled it — a hundred polygons a frame in that state, twelve hundred once the
 bike was actually on the track. The lesson is the one already in STATUS.md and
 it still had to be relearned: measure the thing, do not infer it from a picture.
+
+
+### 2026-08-14 (evening) — the frame rate was the renderer's resolution
+
+Jet Moto 3's busiest racing scenes ran at 21 fps with two thirds of every second
+inside the presenter. I had been reading that as the port being slow. It was the
+GL backend's 4x internal resolution — a sixteenfold fill-rate cost, on by
+default. At 1x the same scenes hold 60 fps at 139,000 polygons a second with
+presentation down to 2 per cent of wall time.
+
+1x is not a compromise here: it is the resolution the console rendered at, so
+for a port meant to match retail it is the correct default. It is a per-game
+quirk, and the in-game display settings still switch it.
+
+The lesson is an old one in a new place. Every earlier measurement of "how fast
+is this" was taken with the presenter counted but never questioned, and the
+counter that finally exposed it (`RECOMPONE_FPS=1`, reporting time *inside*
+present alongside the frame count) had been added for a different investigation
+entirely.
+
+**The dark wedges on the track are not solved.** The elimination table lives in
+STATUS.md. Two things worth carrying forward:
+
+- Forcing NCLIP to never cull draws every polygon the game submits, and the
+  wedges survive that. So they are not geometry this port is dropping — which
+  rules out winding, culling and the extent rule in one measurement, and is the
+  single most useful thing anyone can know before picking this up again.
+- Twice I concluded from a screenshot that the wedges were "textured polygons
+  sampling black", on the strength of flat-shading turning the whole scene one
+  grey. That test cannot distinguish a dark polygon from a hole showing a dark
+  polygon behind it, and I read it as evidence twice before noticing. A test
+  that cannot fail is not evidence.
+
+**And a self-inflicted one:** the texture-page and CLUT census I added for that
+investigation was a locked dictionary write per textured polygon, tens of
+thousands a second, running on every game's hot path with no way to turn it off.
+Instrumentation that is always on is a feature, and needs to be costed like one.
