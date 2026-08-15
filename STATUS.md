@@ -57,23 +57,66 @@ Two instruments did all the work and are worth keeping:
   the GPU was asked to draw. "Nothing is on screen" has two very different
   causes, and a primitive count separates them in one run.
 
-### Known issues
+### Performance
 
-- **A band of the other frame along the top of the screen**, seen occasionally
-  before the presenter was synchronised to the game's buffer swap. Jet Moto 3
-  does not call `VSync(0)`, so presentation ran on a timer and sometimes caught
-  a frame mid-draw. It now presents when the display origin moves, which is the
-  swap itself. Not seen since.
-- **Water reads as flat dark navy.** It may be correct for a deep canyon; it has
-  not been checked against the original and looks more like an untextured
-  polygon than water.
-- Not machine-verified: a completed lap. The harness can hold the throttle but
-  cannot follow a racing line — it drives into the water, and the fixed camera
-  that shows while the rider is out of bounds was mistaken for a rendering bug
-  for most of a session. The same limitation applies to the other two ports.
+Locked **60 fps** in racing, including the busiest scenes measured, at 139,000
+polygons a second with 2 per cent of wall time inside the presenter.
+
+That took one change. The GL backend renders at 4x internal resolution by
+default, a sixteenfold fill-rate cost, and it was holding the busiest scenes to
+**21 fps with two thirds of every second in the presenter** -- not the game and
+not the recompiled code. Jet Moto 3 now asks for the console's own 1x, which is
+three times faster and also what the hardware actually drew. The in-game display
+settings still switch it, and `RECOMPONE_UPSCALE=1` restores 4x.
+
+| | 4x internal | 1x internal |
+|---|---|---|
+| busiest scene | 21 fps | 60 fps |
+| polygons/second there | 45,000 | 139,000 |
+| time in present | 65% | 2% |
+
+### Known issue: dark wedges on the track
+
+A handful of large flat dark-navy shapes lie on the track surface during a race.
+Cosmetic, and the only visual defect left. It has resisted a long bisection, so
+what is *established* is recorded here to stop the next attempt repeating it:
+
+| Suspect | Test | Result |
+|---|---|---|
+| The GL backend | rendered through the software rasteriser | identical |
+| GTE / vertex maths | saturation counts | unremarkable |
+| The 1023x511 extent rule | counted rejections | zero |
+| Semi-transparency | skipped all blended polygons | unchanged |
+| The texel-0 discard | read both paths | correct |
+| The frame clear | logged every fill | one black fill at boot |
+| Vertex colour | forced flat shading | every polygon is 0x808080 |
+| The texture-window formula | read both paths | matches hardware |
+| CLUTs | logged use, checked VRAM at each | populated |
+| An empty texture page (11,0) | skipped polygons sampling it | unchanged |
+| Texels actually sampled | trapped large polygons sampling black | none during a race |
+| **Backface winding** | forced NCLIP to never cull, so every submitted polygon draws | **unchanged** |
+
+The last row is the load-bearing one: with culling off, everything the game
+submits is drawn, and the wedges survive. They are therefore not geometry the
+port is dropping. Either the game never submits polygons there, or it submits
+these and they are correct as drawn. Telling those apart needs the game's own
+terrain visibility data (`.WLD`) read and compared -- reverse engineering rather
+than emulation debugging.
+
+Every switch used above is committed and off by default: `RECOMPONE_NO_HLE`,
+`NO_SEMI`, `FLAT`, `NCLIP=flip|off`, `LOG_FILL`, `LOG_UPLOAD`, `VRAM_DUMP`,
+`WATCH_PAGE`, `SKIP_PAGE`, `TRAP_BLACK`, plus per-second counters behind
+`RECOMPONE_FPS=1`.
+
+### Other known issues
+
+- Not machine-verified: a completed lap. The harness holds the throttle but
+  cannot follow a racing line.
 - The intro runs about 90 seconds before the shell. Start skips the logos.
-- Six branch targets past the end of the text segment are still unregistered.
-  They are linear sweep reading data as code and are unreachable.
+- Six branch targets past the end of the text segment are unregistered; they are
+  linear sweep reading data as code, and unreachable.
+
+---
 
 ## The shipped executables
 
