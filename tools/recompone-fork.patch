@@ -1092,10 +1092,10 @@ index 0000000..d462d5c
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..67d7e8d
+index 0000000..f7ce097
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,73 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1132,6 +1132,9 @@ index 0000000..67d7e8d
 +    /// <summary>Why the colour hunt did or did not run this second.</summary>
 +    public static long HuntCalls, HuntSkipDone, HuntSkipEarly;
 +
++    /// <summary>Triangles with three collinear vertices -- they cover nothing.</summary>
++    public static long Degenerate;
++
 +    /// <summary>Textured polygons per CLUT address, so a palette that is all
 +    /// black can be spotted by cross-referencing a VRAM dump.</summary>
 +    public static readonly Dictionary<int, long> Clut = [];
@@ -1159,8 +1162,8 @@ index 0000000..67d7e8d
 +
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
-+        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = 0;
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} degen={Degenerate} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = Degenerate = 0;
 +        HuntCalls = HuntSkipDone = HuntSkipEarly = 0;
 +        System.Array.Clear(Blend);
 +        return s;
@@ -1518,7 +1521,7 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..eaf86b4 100644
+index 6f7a426..fabf39a 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
 @@ -17,6 +17,56 @@ public sealed partial class Gpu
@@ -1672,7 +1675,7 @@ index 6f7a426..eaf86b4 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -86,6 +216,12 @@ public sealed partial class Gpu
+@@ -86,8 +216,17 @@ public sealed partial class Gpu
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
          if (spanX > 1023 || spanY > 511) return;
  
@@ -1683,9 +1686,15 @@ index 6f7a426..eaf86b4 100644
 +                       $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V})";
 +
          long area = (long)(b.X - a.X) * (c.Y - a.Y) - (long)(b.Y - a.Y) * (c.X - a.X);
-         if (area == 0) return;
+-        if (area == 0) return;
++        // [jetmoto-fork] A triangle whose three vertices are collinear covers no
++        // pixels. Counted because a hole in a mesh is exactly what a run of these
++        // looks like, and vertices collapse together when the GTE saturates.
++        if (area == 0) { GpuCounters.Degenerate++; return; }
          if (area < 0) { (b, c) = (c, b); area = -area; }
-@@ -99,7 +235,7 @@ public sealed partial class Gpu
+ 
+         int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
+@@ -99,7 +238,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1694,7 +1703,7 @@ index 6f7a426..eaf86b4 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,9 +270,14 @@ public sealed partial class Gpu
+@@ -134,9 +273,14 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1710,7 +1719,7 @@ index 6f7a426..eaf86b4 100644
              }
          }
      }
-@@ -185,6 +326,10 @@ public sealed partial class Gpu
+@@ -185,6 +329,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -1721,7 +1730,7 @@ index 6f7a426..eaf86b4 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +397,7 @@ public sealed partial class Gpu
+@@ -252,7 +400,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1730,7 +1739,7 @@ index 6f7a426..eaf86b4 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +407,7 @@ public sealed partial class Gpu
+@@ -262,7 +410,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1739,7 +1748,7 @@ index 6f7a426..eaf86b4 100644
          }
      }
  
-@@ -294,6 +439,13 @@ public sealed partial class Gpu
+@@ -294,6 +442,13 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
@@ -2643,7 +2652,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..4c599c1 100644
+index 8a62627..61a2883 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -2690,7 +2699,7 @@ index 8a62627..4c599c1 100644
                  API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
              };
              _window = Silk.NET.Windowing.Window.Create(options);
-@@ -177,6 +202,87 @@ public static class HostWindow
+@@ -177,10 +202,142 @@ public static class HostWindow
          return best;
      }
  
@@ -2707,6 +2716,40 @@ index 8a62627..4c599c1 100644
 +    // to the screen) and ReadVram comes back empty even when the window is
 +    // visibly rendering, so glReadPixels on the default framebuffer is the
 +    // only source that reflects what is actually displayed.
++    static void DumpFromVram()
++    {
++        var gpu = _gpu;
++        if (gpu == null) return;
++        int w = gpu.DisplayWidth <= 0 ? 320 : gpu.DisplayWidth;
++        int h = gpu.DisplayHeight <= 0 ? 240 : gpu.DisplayHeight;
++        int ox = gpu.DisplayX, oy = gpu.DisplayY;
++        try
++        {
++            var path = Path.Combine(_dumpDir!, $"frame-{_dumped:D4}.ppm");
++            using (var fsw = File.Create(path))
++            {
++                var hdr = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
++                fsw.Write(hdr, 0, hdr.Length);
++                var row = new byte[w * 3];
++                for (int y = 0; y < h; y++)
++                {
++                    int vy = (oy + y) & (Gpu.VramHeight - 1);
++                    for (int x = 0; x < w; x++)
++                    {
++                        ushort p16 = gpu.Vram[vy * Gpu.VramWidth + ((ox + x) & (Gpu.VramWidth - 1))];
++                        row[x * 3] = (byte)((p16 & 0x1F) << 3);
++                        row[x * 3 + 1] = (byte)(((p16 >> 5) & 0x1F) << 3);
++                        row[x * 3 + 2] = (byte)(((p16 >> 10) & 0x1F) << 3);
++                    }
++                    fsw.Write(row, 0, row.Length);
++                }
++            }
++            Console.Error.WriteLine($"[Dump] frame {_frameNo - 1} -> {path} ({w}x{h}) from vram");
++            _dumped++;
++        }
++        catch (Exception e) { Console.Error.WriteLine($"[Dump] failed: {e.Message}"); }
++    }
++
 +    static void DumpFrame()
 +    {
 +        if (!_dumpInit)
@@ -2717,8 +2760,18 @@ index 8a62627..4c599c1 100644
 +                _dumpEvery = n;
 +            if (!string.IsNullOrEmpty(_dumpDir)) Directory.CreateDirectory(_dumpDir);
 +        }
-+        if (string.IsNullOrEmpty(_dumpDir) || _gl == null || _window == null) return;
++        if (string.IsNullOrEmpty(_dumpDir)) return;
 +        if (_frameNo++ % _dumpEvery != 0) return;
++
++        // [jetmoto-fork] Headless runs can still produce screenshots: with the
++        // software rasteriser the finished frame is in the VRAM shadow, so the
++        // display window can be cut straight out of it. This is what lets a
++        // capture run without opening a window on someone's desktop.
++        if (_gl == null || _window == null)
++        {
++            DumpFromVram();
++            return;
++        }
 +
 +        int w = _window.FramebufferSize.X, h = _window.FramebufferSize.Y;
 +        if (w <= 0 || h <= 0) return;
@@ -2778,7 +2831,19 @@ index 8a62627..4c599c1 100644
      public static void Present(Gpu? gpu)
      {
          _gpu = gpu;
-@@ -199,6 +305,7 @@ public static class HostWindow
+-        if (_headless || _window == null) return;
++        if (_headless || _window == null)
++        {
++            // [jetmoto-fork] Headless still honours RECOMPONE_DUMP_DIR, straight
++            // out of the VRAM shadow. Capturing evidence should not require
++            // putting a window on someone's desktop.
++            DumpFrame();
++            return;
++        }
+         try { _window.DoEvents(); }
+         catch (Exception e) {
+             Console.WriteLine(e.Message);
+@@ -199,6 +356,7 @@ public static class HostWindow
              ConfigManager.SaveView(PanelManager.Panels);
          }
          _window.DoRender();
@@ -2786,7 +2851,7 @@ index 8a62627..4c599c1 100644
      }
  
      internal static void Pump()
-@@ -285,13 +392,24 @@ public static class HostWindow
+@@ -285,13 +443,24 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -2814,7 +2879,7 @@ index 8a62627..4c599c1 100644
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -372,7 +490,12 @@ public static class HostWindow
+@@ -372,7 +541,12 @@ public static class HostWindow
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
                      outW: wf.X, outH: wf.Y);
@@ -2828,7 +2893,7 @@ index 8a62627..4c599c1 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +678,25 @@ public static class HostWindow
+@@ -555,6 +729,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
