@@ -1092,10 +1092,10 @@ index 0000000..d462d5c
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..66b1a53
+index 0000000..67d7e8d
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,70 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1129,6 +1129,9 @@ index 0000000..66b1a53
 +    /// <summary>Uploads landing in the page named by RECOMPONE_WATCH_PAGE.</summary>
 +    public static long PageWrites;
 +
++    /// <summary>Why the colour hunt did or did not run this second.</summary>
++    public static long HuntCalls, HuntSkipDone, HuntSkipEarly;
++
 +    /// <summary>Textured polygons per CLUT address, so a palette that is all
 +    /// black can be spotted by cross-referencing a VRAM dump.</summary>
 +    public static readonly Dictionary<int, long> Clut = [];
@@ -1156,14 +1159,15 @@ index 0000000..66b1a53
 +
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
 +        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = 0;
++        HuntCalls = HuntSkipDone = HuntSkipEarly = 0;
 +        System.Array.Clear(Blend);
 +        return s;
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..6dc79ba 100644
+index 8b55b53..f6efb38 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1181,7 +1185,7 @@ index 8b55b53..6dc79ba 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,113 @@ public sealed partial class Gpu
+@@ -50,6 +58,115 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
@@ -1211,7 +1215,9 @@ index 8b55b53..6dc79ba 100644
 +
 +    void HuntForColour(int shownY)
 +    {
-+        if (_hunted || _huntClock.Elapsed.TotalSeconds < HuntAfter) return;
++        GpuCounters.HuntCalls++;
++        if (_hunted) { GpuCounters.HuntSkipDone++; return; }
++        if (_huntClock.Elapsed.TotalSeconds < HuntAfter) { GpuCounters.HuntSkipEarly++; return; }
 +
 +        // Report what is actually in the finished frame before searching it.
 +        // Deriving the target colour from a screenshot failed twice; the
@@ -1295,7 +1301,7 @@ index 8b55b53..6dc79ba 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +260,7 @@ public sealed partial class Gpu
+@@ -145,6 +262,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1303,7 +1309,7 @@ index 8b55b53..6dc79ba 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +271,50 @@ public sealed partial class Gpu
+@@ -155,11 +273,50 @@ public sealed partial class Gpu
          }
      }
  

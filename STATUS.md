@@ -75,7 +75,40 @@ settings still switch it, and `RECOMPONE_UPSCALE=1` restores 4x.
 | polygons/second there | 45,000 | 139,000 |
 | time in present | 65% | 2% |
 
-### Known issue: dark wedges on the track
+### The dark wedges: identified
+
+**What paints them.** One triangle, the same one every frame, and nothing else
+writes those pixels at all:
+
+```
+tri tex=True raw=False semi=False gouraud=False colour=(128,128,128)
+page=(512,256) depth=1 clut=(768,387)
+xy=(343,224)(87,480)(343,480)   uv=(255,0)(0,255)(255,255)
+```
+
+Full-page UVs (0..255 across a 256x256 page), neutral vertex colour, no
+transparency, screen coordinates that overrun the 320x240 buffer on both axes.
+That is a backdrop: one half of a quad stretched over the whole view, textured
+from page (8,1). It samples dark where the wedges appear.
+
+**What that settles.** The pixel watcher caught 60 consecutive writes to one
+wedge pixel and every one is this triangle -- so no terrain polygon covers that
+pixel at all. The wedges are the backdrop showing through gaps in the terrain.
+Not a dark polygon drawn over the track, and not the port dropping geometry
+either: with culling forced off, everything the game submits still draws and the
+gaps remain. The game is not submitting terrain there.
+
+**What is left.** Why the terrain mesh has gaps in those cells. That is the
+game's own visibility or level-of-detail decision, which is driven by the track's
+`.WLD` data -- so the next step is reading that structure and comparing it
+against what gets submitted, rather than any further work on the renderer.
+
+Getting here needed the runtime to find its own target: three attempts were lost
+computing a VRAM coordinate by hand from a screenshot, which needs the display
+mode, and Jet Moto 3 switches between 512x240 and 320x240 across phases. In a
+race it is 320x240, double buffered at VRAM y=0 and y=240.
+
+### Earlier eliminations, kept for the record
 
 A handful of large flat dark-navy shapes lie on the track surface during a race.
 Cosmetic, and the only visual defect left. It has resisted a long bisection, so
@@ -121,9 +154,18 @@ next attempt should start from:
 - One VRAM-to-VRAM blit in an entire race. Six CPU uploads a frame, none of them
   into the framebuffer.
 - `RECOMPONE_WATCH_PIXEL=x,y` logs every primitive that writes one VRAM pixel,
-  with its full state. It is validated -- 400 writes captured on a pixel known to
-  be painted -- and is the right tool to finish this with, pointed at a wedge
-  pixel with the display mode read first.
+  with its full state. Validated: 400 writes captured on a pixel known to be
+  painted.
+- `RECOMPONE_HUNT_COLOUR=FFFF` prints the finished frame's colour histogram and
+  latches the commonest dark colour that is not the black clear, then points the
+  pixel watcher at it -- no hand-computed coordinates, which is what sank three
+  earlier attempts. `RECOMPONE_HUNT_AFTER=<seconds>` delays it past the intro.
+- **Mind the clock.** The hunt gate is wall time from startup, and Jet Moto 3
+  spends roughly the first three minutes of a scripted run in movies, menus and
+  loading. A run that only lasts four minutes leaves a very narrow window in
+  which the gate is open *and* the bike is on track, and several attempts fell
+  outside it. `hunt=<calls>/<gated>/<done>` on the RECOMPONE_FPS line says which
+  of those is happening rather than leaving it to be guessed at.
 
 Every switch used above is committed and off by default: `RECOMPONE_NO_HLE`,
 `NO_SEMI`, `FLAT`, `NCLIP=flip|off`, `LOG_FILL`, `LOG_UPLOAD`, `VRAM_DUMP`,
