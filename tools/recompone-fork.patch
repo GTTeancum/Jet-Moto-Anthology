@@ -1079,10 +1079,10 @@ index 0000000..6783801
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..70c5455
+index 0000000..dfa9421
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,27 @@
+@@ -0,0 +1,58 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1102,10 +1102,41 @@ index 0000000..70c5455
 +    public static long Semi;
 +    public static readonly long[] Blend = new long[4];
 +
++    /// <summary>Textured polygons per texture page, 16 across by 2 down.</summary>
++    public static readonly long[] TexPage = new long[32];
++
++    /// <summary>Uploads landing in the page named by RECOMPONE_WATCH_PAGE.</summary>
++    public static long PageWrites;
++
++    /// <summary>Textured polygons per CLUT address, so a palette that is all
++    /// black can be spotted by cross-referencing a VRAM dump.</summary>
++    public static readonly Dictionary<int, long> Clut = [];
++
++    public static string TakeCluts()
++    {
++        lock (Clut)
++        {
++            var top = Clut.OrderByDescending(kv => kv.Value).Take(10)
++                .Select(kv => $"({(kv.Key & 0x3F) * 16},{kv.Key >> 6})={kv.Value}");
++            var s = string.Join(" ", top);
++            Clut.Clear();
++            return s;
++        }
++    }
++
++    public static string TakeTexPages()
++    {
++        var used = new List<string>();
++        for (int i = 0; i < 32; i++)
++            if (TexPage[i] > 0) used.Add($"({i % 16},{i / 16})={TexPage[i]}");
++        System.Array.Clear(TexPage);
++        return string.Join(" ", used);
++    }
++
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
-+        Polys = Lines = Rects = Loads = DroppedSpan = Semi = 0;
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = 0;
 +        System.Array.Clear(Blend);
 +        return s;
 +    }
@@ -1189,7 +1220,7 @@ index 8b55b53..8e4cac0 100644
              case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
              case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..8dfc974 100644
+index 9900095..7eb0fb7 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
 @@ -44,11 +44,11 @@ public sealed partial class Gpu
@@ -1233,7 +1264,56 @@ index 9900095..8dfc974 100644
          int x = (int)(_fifo[1] & 0x3F0);
          int y = (int)((_fifo[1] >> 16) & 0x1FF);
          int w = (int)(((_fifo[2] & 0x3FF) + 0xF) & ~0xF);
-@@ -133,7 +148,12 @@ public sealed partial class Gpu
+@@ -117,6 +132,23 @@ public sealed partial class Gpu
+             }
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_LOG_UPLOAD=1 reports every distinct CPU-to-VRAM
++    // destination rectangle. A texture page that reads back empty is either one
++    // nothing was ever written to or one something wrote over, and the list of
++    // destinations separates those two.
++    static readonly bool TraceUpload =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_UPLOAD") is "1" or "true";
++    readonly HashSet<long> _seenUploads = [];
++
++    static readonly int WatchPageX = ParseWatch(0), WatchPageY = ParseWatch(1);
++    static int ParseWatch(int i)
++    {
++        var v = Environment.GetEnvironmentVariable("RECOMPONE_WATCH_PAGE");
++        if (string.IsNullOrWhiteSpace(v)) return -1;
++        var parts = v.Split(',');
++        return i < parts.Length && int.TryParse(parts[i], out var n) ? n : -1;
++    }
++
+     void BeginImageLoad()
+     {
+         _loadX = (int)(_fifo[1] & 0x3FF);
+@@ -125,6 +157,24 @@ public sealed partial class Gpu
+         _loadH = (int)((_fifo[2] >> 16) & 0xFFFF); if (_loadH == 0) _loadH = 0x200; else _loadH &= 0x1FF; if (_loadH == 0) _loadH = 0x200;
+         _loadPx = 0;
+         _loadImage = true;
++        if (TraceUpload)
++        {
++            long key = ((long)_loadX << 40) | ((long)_loadY << 24) | ((long)_loadW << 12) | (uint)_loadH;
++            if (_seenUploads.Add(key))
++                Console.Error.WriteLine(
++                    $"[upload] to ({_loadX},{_loadY}) {_loadW}x{_loadH}  pages " +
++                    $"x{_loadX / 64}..{(_loadX + _loadW - 1) / 64} y{_loadY / 256}..{(_loadY + _loadH - 1) / 256}");
++        }
++        // RECOMPONE_WATCH_PAGE=<px>,<py> reports every upload that lands in one
++        // texture page, deduped by nothing -- so a page being rewritten on a
++        // timer shows up as a stream rather than a single line.
++        if (WatchPageX >= 0)
++        {
++            int wx0 = WatchPageX * 64, wy0 = WatchPageY * 256;
++            if (_loadX < wx0 + 64 && _loadX + _loadW > wx0 &&
++                _loadY < wy0 + 256 && _loadY + _loadH > wy0)
++                GpuCounters.PageWrites++;
++        }
+         HleLoadBegin();
+         _fifo.Clear();
+     }
+@@ -133,7 +183,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
          ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
@@ -1279,10 +1359,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..d6cb8a0 100644
+index 6f7a426..bc09b8f 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,15 @@ public sealed partial class Gpu
+@@ -17,6 +17,25 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1292,13 +1372,23 @@ index 6f7a426..d6cb8a0 100644
 +    // [jetmoto-fork] RECOMPONE_FLAT=1 draws polygons in their vertex colour with
 +    // no texture. A dark patch that turns the same colour as its neighbours was
 +    // sampling the wrong texture; one that stays dark was sent that colour.
++    static readonly int SkipPage = ParseSkipPage();
++    static int ParseSkipPage()
++    {
++        var v = Environment.GetEnvironmentVariable("RECOMPONE_SKIP_PAGE");
++        if (string.IsNullOrWhiteSpace(v)) return -1;
++        var p = v.Split(',');
++        return p.Length == 2 && int.TryParse(p[0], out var x) && int.TryParse(p[1], out var y)
++            ? (x & 15) + (y & 1) * 16 : -1;
++    }
++
 +    static readonly bool FlatShade =
 +        Environment.GetEnvironmentVariable("RECOMPONE_FLAT") is "1" or "true";
 +
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +35,15 @@ public sealed partial class Gpu
+@@ -26,6 +45,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1314,16 +1404,30 @@ index 6f7a426..d6cb8a0 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +86,8 @@ public sealed partial class Gpu
+@@ -68,6 +96,22 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
++        if (tex)
++        {
++            int page = ((_texPageX / 64) & 15) + ((_texPageY / 256) & 1) * 16;
++            GpuCounters.TexPage[page]++;
++            // RECOMPONE_SKIP_PAGE=<px>,<py> drops polygons sampling one texture
++            // page. Naming the page an artefact comes from is the difference
++            // between "some polygons look wrong" and a specific thing to chase.
++            if (page == SkipPage) return;
++            lock (GpuCounters.Clut)
++            {
++                GpuCounters.Clut.TryGetValue(clut, out long seen);
++                GpuCounters.Clut[clut] = seen + 1;
++            }
++        }
 +        if (FlatShade) { tex = false; raw = false; }
 +
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -99,7 +119,7 @@ public sealed partial class Gpu
+@@ -99,7 +143,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1332,7 +1436,7 @@ index 6f7a426..d6cb8a0 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -136,7 +156,7 @@ public sealed partial class Gpu
+@@ -136,7 +180,7 @@ public sealed partial class Gpu
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
                      Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
                  }
@@ -1341,7 +1445,7 @@ index 6f7a426..d6cb8a0 100644
              }
          }
      }
-@@ -252,7 +272,7 @@ public sealed partial class Gpu
+@@ -252,7 +296,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1350,7 +1454,7 @@ index 6f7a426..d6cb8a0 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +282,7 @@ public sealed partial class Gpu
+@@ -262,7 +306,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2207,7 +2311,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..22b0b0f 100644
+index 8a62627..80f3afa 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -2254,7 +2358,7 @@ index 8a62627..22b0b0f 100644
                  API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
              };
              _window = Silk.NET.Windowing.Window.Create(options);
-@@ -177,6 +202,64 @@ public static class HostWindow
+@@ -177,6 +202,87 @@ public static class HostWindow
          return best;
      }
  
@@ -2307,6 +2411,29 @@ index 8a62627..22b0b0f 100644
 +                    fsw.Write(_rgbDisplay, y * stride, stride);
 +            }
 +
++            // [jetmoto-fork] RECOMPONE_VRAM_DUMP=1 writes the 1024x512 software
++            // VRAM beside each frame. A polygon sampling black is a question
++            // about what is in VRAM, and this is the only way to look.
++            if (Environment.GetEnvironmentVariable("RECOMPONE_VRAM_DUMP") is "1" or "true" && _gpu != null)
++            {
++                var vpath = Path.Combine(_dumpDir!, $"vram-{_dumped:D4}.ppm");
++                using var vw = File.Create(vpath);
++                var vhdr = System.Text.Encoding.ASCII.GetBytes("P6\n1024 512\n255\n");
++                vw.Write(vhdr, 0, vhdr.Length);
++                var row = new byte[1024 * 3];
++                for (int y = 0; y < 512; y++)
++                {
++                    for (int x = 0; x < 1024; x++)
++                    {
++                        ushort p16 = _gpu.Vram[y * 1024 + x];
++                        row[x * 3] = (byte)((p16 & 0x1F) << 3);
++                        row[x * 3 + 1] = (byte)(((p16 >> 5) & 0x1F) << 3);
++                        row[x * 3 + 2] = (byte)(((p16 >> 10) & 0x1F) << 3);
++                    }
++                    vw.Write(row, 0, row.Length);
++                }
++            }
++
 +            int nz = 0;
 +            for (int i = 0; i < needed; i += 7) if (_rgbDisplay[i] != 0) nz++;
 +            Console.Error.WriteLine(
@@ -2319,7 +2446,7 @@ index 8a62627..22b0b0f 100644
      public static void Present(Gpu? gpu)
      {
          _gpu = gpu;
-@@ -199,6 +282,7 @@ public static class HostWindow
+@@ -199,6 +305,7 @@ public static class HostWindow
              ConfigManager.SaveView(PanelManager.Panels);
          }
          _window.DoRender();
@@ -2327,7 +2454,7 @@ index 8a62627..22b0b0f 100644
      }
  
      internal static void Pump()
-@@ -289,7 +373,12 @@ public static class HostWindow
+@@ -289,7 +396,12 @@ public static class HostWindow
          _glBackend = (Hle.GlCore)Hle.GpuBackendFactory.Create(_gl,
              Hle.GpuBackendFactory.Parse(ConfigManager.View.GpuBackend));
          _glBackend.InitGl();
@@ -2341,7 +2468,7 @@ index 8a62627..22b0b0f 100644
          Hle.GpuHle.Backend = _glBackend;
          Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
  
-@@ -372,7 +461,12 @@ public static class HostWindow
+@@ -372,7 +484,12 @@ public static class HostWindow
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
                      outW: wf.X, outH: wf.Y);
@@ -2355,7 +2482,7 @@ index 8a62627..22b0b0f 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +649,25 @@ public static class HostWindow
+@@ -555,6 +672,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -2674,7 +2801,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..4f74aaf 100644
+index fdf7b6b..50b2704 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -2707,7 +2834,7 @@ index fdf7b6b..4f74aaf 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +95,58 @@ public static class Runtime
+@@ -81,14 +95,60 @@ public static class Runtime
          Mem = m;
      }
  
@@ -2762,6 +2889,8 @@ index fdf7b6b..4f74aaf 100644
 +        Console.Error.WriteLine(
 +            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present, {GpuCounters.TakeSummary()}");
 +        Console.Error.WriteLine($"[gte] {Gte.TakeFlagSummary()}");
++        Console.Error.WriteLine($"[tex] {GpuCounters.TakeTexPages()}");
++        Console.Error.WriteLine($"[clut] {GpuCounters.TakeCluts()}");
 +        _fpsMark = now; _presentTicks = 0; _presents = 0;
      }
  
