@@ -90,10 +90,11 @@ JetMoto.exe [--disc <path>] [--extract [folder]] [--rebuild]
 Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
 `Enter` Start, `Q`/`W` L1/R1.
 
-Jet Moto 3 renders at the console's own internal resolution, which is what keeps
-its busiest scenes at 60 fps rather than 21; `RECOMPONE_UPSCALE=1` opts into the
-4x upscale the other two use, at about a third of the frame rate. The in-game
-display settings switch it either way.
+Jet Moto 3 renders at 640x480 internally, which holds a locked 60 fps even in
+its heaviest scenes. The 4x upscale the other two default to costs twenty-four
+times as much in the presenter and drops it to about 21 fps, so it is not the
+default here; `RECOMPONE_RES_SCALE=1|2|4` overrides, and the in-game display
+settings switch it too.
 
 `RECOMPONE_FRAME_DIVIDER=2` gives the original's 30 Hz pacing. A log is written
 to `jetmoto.log` beside the binary, flushed per line so a crash still leaves a

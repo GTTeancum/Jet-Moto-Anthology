@@ -1,68 +1,53 @@
 #!/usr/bin/env python3
-"""Convert the runtime's binary PPM frame dumps to PNG.
-
-Deliberately dependency-free (zlib + struct only) so the harness never needs
-Pillow installed to be able to look at a frame.
-
-    python harness/ppm2png.py harness/captures
 """
-import struct
+Convert captured PPM frames to PNG.
+
+Native captures come out at the console's own 320x240 (or 512x240), which is
+hard to read on a modern display, so frames smaller than 640 wide are scaled up
+with nearest-neighbour. That keeps every pixel exactly as rendered -- it makes
+the image legible without inventing detail that was never drawn.
+
+    python harness/ppm2png.py <dir> [--scale N]
+"""
+import glob
+import os
 import sys
-import zlib
-from pathlib import Path
+
+from PIL import Image
 
 
-def read_ppm(path):
-    data = path.read_bytes()
-    # header: P6 <ws> W <ws> H <ws> MAX <single ws> then raw RGB
-    fields, pos = [], 2
-    while len(fields) < 3:
-        while pos < len(data) and data[pos:pos + 1].isspace():
-            pos += 1
-        if data[pos:pos + 1] == b'#':
-            while data[pos:pos + 1] not in (b'\n', b''):
-                pos += 1
-            continue
-        start = pos
-        while pos < len(data) and not data[pos:pos + 1].isspace():
-            pos += 1
-        fields.append(int(data[start:pos]))
-    pos += 1
-    w, h, _ = fields
-    return w, h, data[pos:pos + w * h * 3]
+def convert(path, scale):
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    if scale is None:
+        scale = max(1, -(-640 // w)) if w < 640 else 1
+    if scale > 1:
+        im = im.resize((w * scale, h * scale), Image.NEAREST)
+    out = path.rsplit(".", 1)[0] + ".png"
+    im.save(out)
 
-
-def write_png(path, w, h, rgb):
-    raw = b''.join(b'\x00' + rgb[y * w * 3:(y + 1) * w * 3] for y in range(h))
-
-    def chunk(tag, payload):
-        return (struct.pack('>I', len(payload)) + tag + payload
-                + struct.pack('>I', zlib.crc32(tag + payload) & 0xFFFFFFFF))
-
-    png = (b'\x89PNG\r\n\x1a\n'
-           + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0))
-           + chunk(b'IDAT', zlib.compress(raw, 6))
-           + chunk(b'IEND', b''))
-    path.write_bytes(png)
+    px = im.load()
+    lit = tot = 0
+    for y in range(0, im.size[1], 7):
+        for x in range(0, im.size[0], 7):
+            r, g, b = px[x, y]
+            tot += 1
+            if r + g + b > 24:
+                lit += 1
+    print(f"{os.path.basename(out)}  {w}x{h} -> {im.size[0]}x{im.size[1]}  "
+          f"{lit * 100 // max(tot, 1)}% non-black")
 
 
 def main():
-    target = Path(sys.argv[1] if len(sys.argv) > 1 else "harness/captures")
-    files = sorted(target.glob("*.ppm")) if target.is_dir() else [target]
-    if not files:
-        print(f"no .ppm files in {target}")
-        return 1
-    for f in files:
-        w, h, rgb = read_ppm(f)
-        if len(rgb) < w * h * 3:
-            print(f"{f.name}: truncated ({len(rgb)} of {w*h*3} bytes), skipped")
-            continue
-        out = f.with_suffix(".png")
-        write_png(out, w, h, rgb)
-        nonzero = sum(1 for b in rgb[::97] if b)          # cheap content probe
-        print(f"{out.name}  {w}x{h}  {nonzero * 97 * 100 // len(rgb)}% non-black samples")
-    return 0
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    scale = None
+    for a in sys.argv[1:]:
+        if a.startswith("--scale"):
+            scale = int(a.split("=", 1)[1]) if "=" in a else None
+    target = args[0] if args else "."
+    for p in sorted(glob.glob(os.path.join(target, "*.ppm"))):
+        convert(p, scale)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -59,21 +59,26 @@ Two instruments did all the work and are worth keeping:
 
 ### Performance
 
-Locked **60 fps** in racing, including the busiest scenes measured, at 139,000
-polygons a second with 2 per cent of wall time inside the presenter.
+Locked **60 fps** in racing at **640x480 internal**, including the busiest
+scenes measured, at 137,000 polygons a second with under 3 per cent of wall time
+inside the presenter.
 
-That took one change. The GL backend renders at 4x internal resolution by
-default, a sixteenfold fill-rate cost, and it was holding the busiest scenes to
-**21 fps with two thirds of every second in the presenter** -- not the game and
-not the recompiled code. Jet Moto 3 now asks for the console's own 1x, which is
-three times faster and also what the hardware actually drew. The in-game display
-settings still switch it, and `RECOMPONE_UPSCALE=1` restores 4x.
+The GL backend defaults to 4x internal resolution, a sixteenfold fill-rate cost,
+and that was holding the busiest scenes to **21 fps with two thirds of every
+second in the presenter** -- not the game and not the recompiled code. 1x fixes
+the frame rate but 320x240 upscaled is a hard sell on a modern display, so the
+scales were measured rather than argued about:
 
-| | 4x internal | 1x internal |
-|---|---|---|
-| busiest scene | 21 fps | 60 fps |
-| polygons/second there | 45,000 | 139,000 |
-| time in present | 65% | 2% |
+| | 1x (320x240) | 2x (640x480) | 4x (1280x960) |
+|---|---|---|---|
+| busiest scene | 60 fps | **60 fps** | 21 fps |
+| polygons/second there | 139,000 | 137,000 | 45,000 |
+| time in present | 2% | 2.8% | 65% |
+
+2x is free relative to 1x and is the default. Note the shape of that curve: 2x
+to 4x is four times the fill but twenty-four times the presenter cost, so the
+top setting is not simply "a bit heavier". `RECOMPONE_RES_SCALE=1|2|4` overrides
+it and the in-game display settings still switch it.
 
 ### The dark wedges: identified
 

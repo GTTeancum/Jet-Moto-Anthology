@@ -965,10 +965,10 @@ index 24e34c6..a9cbb44 100644
  
 diff --git a/RecompOne.Runtime/GameQuirks.cs b/RecompOne.Runtime/GameQuirks.cs
 new file mode 100644
-index 0000000..d462d5c
+index 0000000..4b8a1e3
 --- /dev/null
 +++ b/RecompOne.Runtime/GameQuirks.cs
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,127 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1047,15 +1047,20 @@ index 0000000..d462d5c
 +    public static bool ResetStreamOnStop { get; set; }
 +
 +    /// <summary>
-+    /// Render at the console's own internal resolution rather than the 4x the
-+    /// GL backend defaults to. That default is a sixteenfold fill-rate cost, and
-+    /// it is what held Jet Moto 3's busiest scenes to about 21 fps with two
-+    /// thirds of every second inside the presenter. At 1x the same scenes hold
-+    /// 60 fps with presentation down to two per cent, which is both faster than
-+    /// the console managed and what the console actually drew. The in-game
-+    /// display settings still switch it.
++    /// Internal render scale for the GL backend, 1x/2x/4x; 0 leaves the default.
++    ///
++    /// The backend defaults to 4x, which is a sixteenfold fill-rate cost and
++    /// held Jet Moto 3's busiest scenes to about 21 fps with two thirds of every
++    /// second inside the presenter. 1x is what the console drew and runs at a
++    /// locked 60, but 320x240 upscaled is a hard sell on a modern display.
++    ///
++    /// 2x measures at a locked 60 as well -- 137,000 polygons a second with 2.8
++    /// per cent in the presenter -- so it is free relative to 1x and renders at
++    /// 640x480 internally. That is the default here. The jump from 2x to 4x is
++    /// only four times the fill but twenty-four times the presenter cost, which
++    /// is worth knowing before anyone raises it again.
 +    /// </summary>
-+    public static bool NativeResolution { get; set; }
++    public static int RenderScale { get; set; }
 +
 +    /// <summary>Apply a named preset. Unknown names are ignored.</summary>
 +    public static void Apply(string game)
@@ -1068,8 +1073,9 @@ index 0000000..d462d5c
 +                SoftwarePresent24 = true;
 +                MaskNestedInterrupts = true;
 +                ResetStreamOnStop = true;
-+                NativeResolution =
-+                    Environment.GetEnvironmentVariable("RECOMPONE_UPSCALE") is not ("1" or "true");
++                RenderScale =
++                    int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RES_SCALE"), out var rs)
++                    && (rs == 1 || rs == 2 || rs == 4) ? rs : 2;
 +                DeferredDmaIrq =
 +                    Environment.GetEnvironmentVariable("RECOMPONE_DEFER_DMA") is not ("0" or "false");
 +                NoGpuDmaIrq =
@@ -2652,7 +2658,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..61a2883 100644
+index 8a62627..743de96 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -2699,7 +2705,7 @@ index 8a62627..61a2883 100644
                  API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
              };
              _window = Silk.NET.Windowing.Window.Create(options);
-@@ -177,10 +202,142 @@ public static class HostWindow
+@@ -177,10 +202,162 @@ public static class HostWindow
          return best;
      }
  
@@ -2731,15 +2737,35 @@ index 8a62627..61a2883 100644
 +                var hdr = System.Text.Encoding.ASCII.GetBytes($"P6\n{w} {h}\n255\n");
 +                fsw.Write(hdr, 0, hdr.Length);
 +                var row = new byte[w * 3];
++                bool bpp24 = gpu.Display24Bit;
 +                for (int y = 0; y < h; y++)
 +                {
 +                    int vy = (oy + y) & (Gpu.VramHeight - 1);
++                    int vbase = vy * Gpu.VramWidth;
 +                    for (int x = 0; x < w; x++)
 +                    {
-+                        ushort p16 = gpu.Vram[vy * Gpu.VramWidth + ((ox + x) & (Gpu.VramWidth - 1))];
-+                        row[x * 3] = (byte)((p16 & 0x1F) << 3);
-+                        row[x * 3 + 1] = (byte)(((p16 >> 5) & 0x1F) << 3);
-+                        row[x * 3 + 2] = (byte)(((p16 >> 10) & 0x1F) << 3);
++                        if (bpp24)
++                        {
++                            // 24-bit display packs three bytes per pixel across
++                            // the 16-bit VRAM words. Reading it as 15-bit is what
++                            // turned captured movie frames into coloured noise.
++                            int byteIdx = x * 3;
++                            int hw = ox + (byteIdx >> 1);
++                            ushort a = gpu.Vram[vbase + (hw & (Gpu.VramWidth - 1))];
++                            ushort b = gpu.Vram[vbase + ((hw + 1) & (Gpu.VramWidth - 1))];
++                            int v24 = a | (b << 16);
++                            int sh = (byteIdx & 1) * 8;
++                            row[x * 3] = (byte)((v24 >> sh) & 0xFF);
++                            row[x * 3 + 1] = (byte)((v24 >> (sh + 8)) & 0xFF);
++                            row[x * 3 + 2] = (byte)((v24 >> (sh + 16)) & 0xFF);
++                        }
++                        else
++                        {
++                            ushort p16 = gpu.Vram[vbase + ((ox + x) & (Gpu.VramWidth - 1))];
++                            row[x * 3] = (byte)((p16 & 0x1F) << 3);
++                            row[x * 3 + 1] = (byte)(((p16 >> 5) & 0x1F) << 3);
++                            row[x * 3 + 2] = (byte)(((p16 >> 10) & 0x1F) << 3);
++                        }
 +                    }
 +                    fsw.Write(row, 0, row.Length);
 +                }
@@ -2843,7 +2869,7 @@ index 8a62627..61a2883 100644
          try { _window.DoEvents(); }
          catch (Exception e) {
              Console.WriteLine(e.Message);
-@@ -199,6 +356,7 @@ public static class HostWindow
+@@ -199,6 +376,7 @@ public static class HostWindow
              ConfigManager.SaveView(PanelManager.Panels);
          }
          _window.DoRender();
@@ -2851,7 +2877,7 @@ index 8a62627..61a2883 100644
      }
  
      internal static void Pump()
-@@ -285,13 +443,24 @@ public static class HostWindow
+@@ -285,13 +463,34 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -2860,9 +2886,19 @@ index 8a62627..61a2883 100644
 +        // The 4x default is a 16x fill-rate multiplier, which is what put Jet
 +        // Moto 3's busiest scenes under 30 fps; at 1x it is what the console
 +        // drew, which is the point of a port that is meant to match retail.
-+        bool nativeRes = ConfigManager.View.NativeResolution || GameQuirks.NativeResolution ||
++        bool nativeRes = ConfigManager.View.NativeResolution ||
 +            Environment.GetEnvironmentVariable("RECOMPONE_NATIVE_RES") is "1" or "true";
-+        Hle.GlVram.Scale = nativeRes ? 1 : 4;
++
++        // [jetmoto-fork] RECOMPONE_RES_SCALE=<1|2|4> picks the internal render
++        // scale outright. 4x is a sixteenfold fill cost and 1x is what the
++        // console drew; 2x sits between and is worth measuring rather than
++        // assuming, because 320x240 upscaled is a hard sell on a modern display.
++        int scale = nativeRes ? 1 : (GameQuirks.RenderScale != 0 ? GameQuirks.RenderScale : 4);
++        if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RES_SCALE"), out var rs)
++            && (rs == 1 || rs == 2 || rs == 4))
++            scale = rs;
++        Hle.GlVram.Scale = scale;
++        nativeRes = scale == 1;
          _glBackend = (Hle.GlCore)Hle.GpuBackendFactory.Create(_gl,
              Hle.GpuBackendFactory.Parse(ConfigManager.View.GpuBackend));
          _glBackend.InitGl();
@@ -2879,7 +2915,7 @@ index 8a62627..61a2883 100644
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -372,7 +541,12 @@ public static class HostWindow
+@@ -372,7 +571,12 @@ public static class HostWindow
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
                      outW: wf.X, outH: wf.Y);
@@ -2893,7 +2929,7 @@ index 8a62627..61a2883 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +729,25 @@ public static class HostWindow
+@@ -555,6 +759,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
