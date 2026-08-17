@@ -161,3 +161,32 @@ one whose origin is not the current display origin -- and count how much of it
 gets covered per frame. If coverage is short of the full window, the question
 becomes what the game expected to fill it, and that is answerable against the
 PCSX-Redux reference now that it exists.
+
+### The back buffer is fully covered, and the colour elimination was unsound
+
+Two results, one of which corrects an earlier entry.
+
+**1. Nothing is undrawn.** `RECOMPONE_MARK_UNDRAWN=1` fills the back buffer with
+magenta (0x7C1F) before each frame, so anything the game fails to paint survives
+to the dump. Across the last 60 frames of a full demo run: **0% magenta**. The
+back buffer is completely covered every frame.
+
+That is the clean answer to the question this whole investigation started from.
+Nothing is missing. The dark regions are painted by something, deliberately.
+
+Worth noting how this became answerable: `MARK_UNDRAWN` was dismissed earlier on
+the grounds that "the game's own black clear rectangle would overwrite the
+marker". The fill trace later showed exactly one fill rectangle in 400 seconds.
+The dismissal was an assumption, and it was wrong, and it cost the use of a
+working tool for days.
+
+**2. Retract "not the rasteriser".** `RECOMPONE_LOG_COLOUR` compares
+`To15(r,g,b)` at the *top* of `Plot`, but the dither block at GpuRaster.cs:667
+modifies r, g and b afterwards and the packed result is what reaches VRAM. With
+dithering enabled the probe is comparing a pre-dither colour against a
+post-dither pixel, so its zero hits mean nothing. The earlier entry's
+"Not the rasteriser: zero hits" line is withdrawn.
+
+Fix the probe by moving the check to just before the VRAM store, or by running
+it with dithering disabled. Then re-run it; combined with result 1, the
+rasteriser is now the most likely painter rather than an eliminated one.
