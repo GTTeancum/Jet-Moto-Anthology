@@ -996,3 +996,44 @@ framebuffer -- and count pixels whose last writer was that primitive. Those
 pixels are the hole, measured directly.
 
 That number, per frame, against the reference, is the remaining task.
+
+## 2026-08-17 — The defect, quantified: up to 49% of the frame is bare clear
+
+`RECOMPONE_HOLES=1` tags the screen-clear quad and tracks, per pixel, whether
+the clear is still the last thing that wrote it at end of frame. Those pixels
+are holes, measured directly. The clear is identified **geometrically** -- an
+untextured primitive whose bounding box covers at least 95% of the draw area --
+rather than by colour, because the clear colour differs between tracks and a
+colour key would silently miss most of them.
+
+In-race sample, one line per 60 frames:
+
+```
+t=249.7  49%  (38061/76800)
+t=250.7  33%
+t=251.7  46%
+t=252.7  16%
+t=253.7  28%
+t=254.7  48%
+t=255.7  10%
+t=256.7   0%  (458/76800)
+t=257.7   0%  (0/76800)
+t=258.7   2%
+```
+
+Nearly half the frame, in the worst samples, is background that nothing drew
+over. It swings between 0% and 49% within a couple of seconds. This is the first
+number in this whole investigation that measures the reported defect directly
+instead of standing in for it.
+
+**Caveat to settle before drawing conclusions from it.** Some clear-owned area
+may be legitimate: if a frame's backdrop quad is not drawn, sky would read as a
+hole and be counted here. The backdrop is a real primitive (page (512,256), the
+cloud panorama), so it should cover sky, and frames reaching 0% show full
+coverage is achievable. But confirm what the 49% frames actually look like, and
+what the same measurement gives on PCSX-Redux, before treating 49% as entirely
+defect.
+
+The reference comparison is now cheap and meaningful: run the same probe idea
+against the emulator, or simply check whether reference frames of a comparable
+scene show any background at all.
