@@ -22,15 +22,33 @@ local every = tonumber(os.getenv('REF_EVERY') or '30')
 local max   = tonumber(os.getenv('REF_MAX')   or '600')
 
 local frame, dumped = 0, 0
+local warned = false
+local LF = string.char(10)
 
 listener = PCSX.Events.createEventListener('GPU::Vsync', function()
     frame = frame + 1
+    if frame == 1 then PCSX.log('[refcap] first vsync seen' .. LF) end
     if frame % every ~= 0 then return end
     local ok, ss = pcall(PCSX.GPU.takeScreenShot)
-    if not ok or ss == nil then return end
+    -- Say why. A probe that can fail silently is how every previous dead end in
+    -- this investigation stayed dead for a whole run.
+    if not ok or ss == nil then
+        if not warned then
+            warned = true
+            PCSX.log('[refcap] takeScreenShot failed at vsync ' .. frame ..
+                     ': ' .. tostring(ss) .. LF)
+        end
+        return
+    end
     -- bpp: 0 = BPP_16 (BGR555 halfwords), 1 = BPP_24 (three bytes per pixel).
-    local path = string.format('%s/frame-%04d-%dx%d-b%d.bin',
-                               dir, dumped, ss.width, ss.height, ss.bpp)
+    local w, h, bpp = tonumber(ss.width), tonumber(ss.height), tonumber(ss.bpp)
+    -- Before the game programs a display area the screenshot is 0x0. Those are
+    -- not frames; counting them just burns the dump budget during BIOS boot.
+    if w == 0 or h == 0 then return end
+    if dumped == 0 then
+        PCSX.log(string.format('[refcap] display up at vsync %d: %dx%d bpp=%d', frame, w, h, bpp) .. LF)
+    end
+    local path = string.format('%s/frame-%04d-%dx%d-b%d.bin', dir, dumped, w, h, bpp)
     local ok2, err = pcall(function()
         local f = Support.File.open(path, 'TRUNCATE')
         -- writeMoveSlice wants ownership and this slice is borrowed, so fall
