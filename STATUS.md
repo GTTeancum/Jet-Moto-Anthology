@@ -9,6 +9,39 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 | **Jet Moto 3** (SCUS-94555) | **playable** — boots, menus, controls, races at a locked 60 fps; 2026-08-15 |
 
 
+
+## 2026-08-17 — A real rendering bug, found by comparison
+
+`GpuRaster` wrapped the texture/vertex-colour product instead of saturating it.
+`tr` reaches `255*255>>7 = 508`, `Plot` packs with `(v >> 3) & 0x1F`, so 256
+became `32 & 31 = 0` -- pure black. Every texel lit past 255 folded to dark.
+
+The effect is brightness-dependent, so it tracked lighting, which tracks surface
+orientation, which looks exactly like polygons being dropped along facet edges.
+That is why days of "is this geometry submitted?" probes all came back clean:
+the geometry was always there. Fixed at both modulation sites.
+
+**Found only by comparison.** PCSX-Redux is built and runs the same attract demo
+(`harness/jm3-refcap.lua`, `harness/ref2png.py`). Its Devil's Canyon shows blue
+sky, blue river and fully lit rock; ours showed murk. After the fix ours matches
+on brightness and colour. Four earlier conclusions reached without a reference
+were all wrong, in both directions.
+
+**Still open:** hard-edged black regions remain, notably below the horizon at
+race start. Colour wrapping is now ruled out as their cause by test rather than
+assumed. Next step is a like-for-like frame pair -- the attract demo cycles
+tracks between runs, so pairs must be aligned by HUD content, not frame index.
+
+**Reference emulator run recipe** (details in DECISIONS.md):
+
+```
+pcsx-redux.exe -no-ui -softgpu -dynarec -run   -bios tools/pcsx-redux/openbios.bin -iso "Jet Moto 3 (USA).cue"   -dofile harness/jm3-refcap.lua
+```
+
+`-no-ui` segfaults without `-softgpu`; without `-dynarec` the CPU is interpreted
+and crawls. Lua errors appear only in the GUI's Lua console, never in `-logfile`.
+
+
 ## 2026-08-17 — Correction: the capture harness was the problem
 
 `harness/jm3-ontrack.txt` does not drive the bike. It wedges it against terrain
