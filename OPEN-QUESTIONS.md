@@ -74,3 +74,30 @@ silently.
 **Do not compare frames across runs by index.** The attract demo cycles tracks,
 so two runs land on different courses. A wireframe run and a normal run at the
 same frame number showed different tracks. Pairs must be aligned by HUD content.
+
+### 0x0C20 is painted by neither the rasteriser nor a fill rect
+
+Two probes, both proven to fire before their results were believed:
+
+- `RECOMPONE_LOG_COLOUR=3104` (new, self-targeting: reports the primitives that
+  produce a given 15-bit output colour, no coordinates involved). Verified
+  against a known answer first -- targeting black gives 40 hits in seconds.
+  Targeting 0x0C20 through a race: **zero hits**.
+- `RECOMPONE_LOG_FILL=1` across a full 400 s demo run: **one** fill rectangle,
+  colour (0,0,0). `FillRect` writes VRAM directly and bypasses `Plot`, which is
+  why the colour logger cannot see fills and why both probes were needed.
+
+So the colour arrives by neither path. What is left:
+
+1. A VRAM upload (`LoadImage`/CPU-to-VRAM DMA) painting a backdrop.
+2. Nothing writes those pixels that frame, and what shows is stale framebuffer
+   content.
+
+Option 2 deserves the first look, because a single fill in 400 seconds means
+**this game does not clear its framebuffer with fill rectangles**. Whatever it
+clears with, we may be dropping it. Instrument `LoadImage` first to separate the
+two, since that is one cheap probe that distinguishes them.
+
+Caveat on the null: the traced run may simply have been on a track without that
+colour, since attract cycles tracks. Confirm the colour is present in the same
+run's dumps before treating the zero as meaningful.
