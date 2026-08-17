@@ -1037,3 +1037,36 @@ defect.
 The reference comparison is now cheap and meaningful: run the same probe idea
 against the emulator, or simply check whether reference frames of a comparable
 scene show any background at all.
+
+### The caveat is settled: it is not sky, it is the entire 3D scene
+
+Rendering the worst frame from the holes run (frame-0210, 94% bare clear)
+answers it outright. The HUD draws perfectly -- lap timer 0:58.00, lap 1/3, 1st
+place, speed 88, minimap, the "PRESS START" prompt. The **entire 3D world is
+absent**: no terrain, no sky backdrop, no bike, nothing.
+
+So the clear-owned area is not legitimate unpainted sky. And the defect is not
+"some polygons are missing". Whole frames render with no 3D content at all,
+while other frames in the same second render 16%, 33% or 0% bare. The game is
+simulating correctly throughout -- the timer advances and the speedometer reads
+88.
+
+That reframes the target. The 2D HUD path works every frame. The 3D scene path
+intermittently produces nothing. A per-polygon explanation cannot produce a frame
+that is 94% empty with a perfect HUD; something is dropping the whole 3D
+submission.
+
+**Where to look, in order:**
+
+1. The ordering table handoff. These games build an OT in one buffer while
+   drawing the other. If the buffers are swapped wrongly, or the OT is cleared
+   before it is drawn, a frame renders empty while the HUD -- typically
+   submitted separately or later -- still appears.
+2. The `DrawOTag` DMA itself: a linked-list transfer that terminates early, or
+   is skipped, loses the whole chain. `GpuCounters.Polys` per frame would show
+   this immediately -- a near-zero frame among normal ones.
+
+The cheapest next probe is per-frame primitive counts alongside the holes
+percentage. If polygon submission collapses on the empty frames, the fault is
+upstream in the OT or its DMA; if the polygons are submitted but not drawn, it
+is in the rasteriser's handling of them.
