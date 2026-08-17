@@ -6,7 +6,7 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 |------|-------|
 | **Jet Moto** (SCUS-94309) | **done** — a full 3-lap race played end to end, 2026-08-09 |
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
-| **Jet Moto 3** (SCUS-94555) | **playable** — boots, menus, controls, races; 2026-08-14 |
+| **Jet Moto 3** (SCUS-94555) | **playable** — boots, menus, controls, races at a locked 60 fps; 2026-08-15 |
 
 ## Jet Moto 3
 
@@ -80,102 +80,46 @@ to 4x is four times the fill but twenty-four times the presenter cost, so the
 top setting is not simply "a bit heavier". `RECOMPONE_RES_SCALE=1|2|4` overrides
 it and the in-game display settings still switch it.
 
-### The dark wedges: identified
+### The dark wedges: not a defect
 
-**What paints them.** One triangle, the same one every frame, and nothing else
-writes those pixels at all:
+They are the river. Devil's Canyon is a river track -- the game's own loading
+screen calls it "the raging Apache River... serene lakes, and wondrous rapids" --
+and the dark blue-black masses lying between the sandbars are the water.
 
-```
-tri tex=True raw=False semi=False gouraud=False colour=(128,128,128)
-page=(512,256) depth=1 clut=(768,387)
-xy=(343,224)(87,480)(343,480)   uv=(255,0)(0,255)(255,255)
-```
+Established against a reference, finally. `RECOMPONE_SWAP_FILE=<from>=<to>`
+redirects a CD file lookup, so pointing the boot logo at
+`/DATA/FMV/TRKSEL/CANYON.STR` makes the intro player decode the game's own
+Devil's Canyon track preview -- developer-rendered footage of this exact track,
+through the game's own decoder, with no menu navigation to script. It shows the
+same canyon rock above the same large dark water below. Sampled: the reference
+river reads (2,2,72), (3,0,62), (2,1,33); this port's dark areas read (48,48,56),
+(24,32,56), (24,32,48). Both deep blue, and the reference is lossy MDEC at a
+different exposure.
 
-Full-page UVs (0..255 across a 256x256 page), neutral vertex colour, no
-transparency, screen coordinates that overrun the 320x240 buffer on both axes.
-That is a backdrop: one half of a quad stretched over the whole view, textured
-from page (8,1). It samples dark where the wedges appear.
+The mechanism, for the record: those pixels are painted by a backdrop quad
+(page (512,256), full-page UVs, neutral vertex colour) that carries the canyon
+panorama with its water band, and no terrain polygon covers them because none is
+submitted there. All of which is correct for water.
 
-**What that settles.** The pixel watcher caught 60 consecutive writes to one
-wedge pixel and every one is this triangle -- so no terrain polygon covers that
-pixel at all. The wedges are the backdrop showing through gaps in the terrain.
-Not a dark polygon drawn over the track, and not the port dropping geometry
-either: with culling forced off, everything the game submits still draws and the
-gaps remain. The game is not submitting terrain there.
+**The cost of not having a reference.** A day went into this on the assumption
+that a large flat dark region had to be wrong. It was scenery. The check that
+settled it -- play the game's own footage of the track and look -- was available
+from the first hour and cost about twenty minutes once attempted. Anything that
+looks like a rendering defect in a game nobody here has played should be
+compared against the game's own art before it is treated as a bug.
 
-**What is left.** Why the terrain mesh has gaps in those cells. That is the
-game's own visibility or level-of-detail decision, which is driven by the track's
-`.WLD` data -- so the next step is reading that structure and comparing it
-against what gets submitted, rather than any further work on the renderer.
+Along the way, and worth keeping:
 
-Getting here needed the runtime to find its own target: three attempts were lost
-computing a VRAM coordinate by hand from a screenshot, which needs the display
-mode, and Jet Moto 3 switches between 512x240 and 320x240 across phases. In a
-race it is 320x240, double buffered at VRAM y=0 and y=240.
+- The GPU primitive counters, the pixel watcher and the colour hunt
+  (`RECOMPONE_WATCH_PIXEL`, `RECOMPONE_HUNT_COLOUR`) that identified the exact
+  primitive.
+- Headless frame capture, so investigating never needs a window again.
+- 24-bit display capture, without which every movie frame is coloured noise.
+- Two tests that could not fail, both of which I read as evidence before
+  noticing: flat shading (cannot separate a dark polygon from a hole showing
+  something dark) and a magenta back-buffer marker (overwritten by the game's own
+  black clear before anything drew).
 
-### Earlier eliminations, kept for the record
-
-A handful of large flat dark-navy shapes lie on the track surface during a race.
-Cosmetic, and the only visual defect left. It has resisted a long bisection, so
-what is *established* is recorded here to stop the next attempt repeating it:
-
-| Suspect | Test | Result |
-|---|---|---|
-| The GL backend | rendered through the software rasteriser | identical |
-| GTE / vertex maths | saturation counts | unremarkable |
-| The 1023x511 extent rule | counted rejections | zero |
-| Semi-transparency | skipped all blended polygons | unchanged |
-| The texel-0 discard | read both paths | correct |
-| The frame clear | logged every fill | one black fill at boot |
-| Vertex colour | forced flat shading | every polygon is 0x808080 |
-| The texture-window formula | read both paths | matches hardware |
-| CLUTs | logged use, checked VRAM at each | populated |
-| An empty texture page (11,0) | skipped polygons sampling it | unchanged |
-| Texels actually sampled | trapped large polygons sampling black | none during a race |
-| **Backface winding** | forced NCLIP to never cull, so every submitted polygon draws | **unchanged** |
-
-The load-bearing row is the last one: with culling off, everything the game
-submits is drawn and the wedges survive, so they are not geometry the port is
-dropping through winding, culling or the extent rule.
-
-**A correction.** Between those tests I marked the back buffer magenta before
-each frame, saw no magenta survive, and concluded the wedges were drawn polygons
-rather than holes. That was wrong: the game clears every frame with a black
-untextured 512x240 rectangle, which overwrote the marker before anything else
-drew. The test proved nothing and the conclusion drawn from it should be
-discarded. Whether the wedges are drawn or are holes showing something dark
-behind is **still open** -- as is the earlier reading that they were "textured
-polygons sampling black", which rested on flat shading, a test that cannot
-distinguish the two either.
-
-Facts about this game's rendering that did come out of the attempt, and that a
-next attempt should start from:
-
-- It clears each frame with GP0(0x60) -- an untextured black rectangle, not a
-  fill -- so a hole shows black, and the wedges measure (0,8,24), not black.
-- The display is 512x240 in some phases and 320x240 in others, double-buffered
-  at VRAM y=0 and y=240. Screen-to-VRAM arithmetic has to read the current mode;
-  assuming 320 sent two pixel-watch runs looking in the wrong place.
-- One VRAM-to-VRAM blit in an entire race. Six CPU uploads a frame, none of them
-  into the framebuffer.
-- `RECOMPONE_WATCH_PIXEL=x,y` logs every primitive that writes one VRAM pixel,
-  with its full state. Validated: 400 writes captured on a pixel known to be
-  painted.
-- `RECOMPONE_HUNT_COLOUR=FFFF` prints the finished frame's colour histogram and
-  latches the commonest dark colour that is not the black clear, then points the
-  pixel watcher at it -- no hand-computed coordinates, which is what sank three
-  earlier attempts. `RECOMPONE_HUNT_AFTER=<seconds>` delays it past the intro.
-- **Mind the clock.** The hunt gate is wall time from startup, and Jet Moto 3
-  spends roughly the first three minutes of a scripted run in movies, menus and
-  loading. A run that only lasts four minutes leaves a very narrow window in
-  which the gate is open *and* the bike is on track, and several attempts fell
-  outside it. `hunt=<calls>/<gated>/<done>` on the RECOMPONE_FPS line says which
-  of those is happening rather than leaving it to be guessed at.
-
-Every switch used above is committed and off by default: `RECOMPONE_NO_HLE`,
-`NO_SEMI`, `FLAT`, `NCLIP=flip|off`, `LOG_FILL`, `LOG_UPLOAD`, `VRAM_DUMP`,
-`WATCH_PAGE`, `SKIP_PAGE`, `TRAP_BLACK`, plus per-second counters behind
-`RECOMPONE_FPS=1`.
 
 ### Other known issues
 

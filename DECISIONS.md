@@ -680,3 +680,39 @@ Stopping here rather than spending another cycle: the loop is four minutes per
 attempt and the last three attempts failed on targeting rather than on the
 hypothesis, which is a sign to hand over a working instrument instead of more
 guesses.
+
+
+### 2026-08-15 (later) — the wedges were the river
+
+Not a bug. Devil's Canyon is a river track, and the dark masses on the track are
+the water. The game's own loading screen says so in as many words: "the raging
+Apache River... serene lakes, and wondrous rapids".
+
+What finally settled it was getting a reference, which I had said for hours I
+lacked and never went after. `RECOMPONE_SWAP_FILE=<from>=<to>` redirects a CD
+file lookup; pointing the boot logo at `/DATA/FMV/TRKSEL/CANYON.STR` makes the
+intro player decode the game's own track preview for this exact track. Developer
+footage, through the game's decoder, no menus to navigate. It shows the same
+canyon rock over the same large dark water. The reference river samples
+(2,2,72), (3,0,62), (2,1,33); this port's dark regions (48,48,56), (24,32,56),
+(24,32,48).
+
+The lesson is not subtle. A day went into proving a rendering defect existed,
+against scenery, because I assumed a large flat dark region had to be wrong in a
+game I have never seen running. The check that settled it was available from the
+first hour and took twenty minutes. **Before treating something as a rendering
+bug, compare it against the game's own art.** The disc is full of authored
+reference -- loading screens, track previews, attract footage -- and all of it
+decodes through machinery this port already has.
+
+Two secondary lessons, both about tests that cannot fail:
+
+- Flat shading cannot separate "a dark polygon" from "a hole showing something
+  dark behind it". I read it as evidence for the first, twice.
+- A magenta back-buffer marker cannot survive the game's own black clear
+  rectangle, which runs before anything else draws. I read its absence as proof
+  the wedges were drawn geometry.
+
+Both times the error was checking whether the result was consistent with the
+hypothesis rather than asking what the test would show if the hypothesis were
+false.

@@ -3343,7 +3343,7 @@ index fdf7b6b..50b2704 100644
  
      public static void DispatchIrq(int irq)
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..fe3cd70 100644
+index 6432fa4..f635500 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
 @@ -1,3 +1,4 @@
@@ -3469,12 +3469,21 @@ index 6432fa4..fe3cd70 100644
          for (int j = 0; j < bytes; j++)
              m.WriteU8(madr + (uint)j, data[j]);
          c.V0 = 1;
-@@ -221,11 +284,25 @@ public static class LibCd
+@@ -221,11 +284,45 @@ public static class LibCd
  
      public static void CdDataSync(CpuContext c, IMemory m) => c.V0 = 0;
  
 +    static readonly bool SkipFmv =
 +        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
++
++    static readonly string? SwapFrom = ParseSwap(0), SwapTo = ParseSwap(1);
++    static string? ParseSwap(int i)
++    {
++        var v = Environment.GetEnvironmentVariable("RECOMPONE_SWAP_FILE");
++        if (string.IsNullOrWhiteSpace(v) || !v.Contains('=')) return null;
++        var parts = v.Split('=', 2);
++        return i < parts.Length ? parts[i] : null;
++    }
 +
      public static void CdSearchFile(CpuContext c, IMemory m)
      {
@@ -3492,10 +3501,21 @@ index 6432fa4..fe3cd70 100644
 +            return;
 +        }
 +
++        // [jetmoto-fork] RECOMPONE_SWAP_FILE=<from>=<to> makes a lookup for one
++        // path return another file's location. It exists to play a movie the
++        // game would otherwise only reach through its menus: point the boot logo
++        // at a track preview and the intro player decodes that instead, using
++        // the game's own pipeline, with no navigation to script.
++        if (SwapFrom != null && name.Contains(SwapFrom, StringComparison.OrdinalIgnoreCase))
++        {
++            Log.Sdk($"CdSearchFile '{name}' swapped for '{SwapTo}'");
++            name = SwapTo!;
++        }
++
          if (Runtime.Cd == null || !Runtime.Cd.Fs.Locate(name, out int lba, out uint size))
          {
              Log.Sdk($"CdSearchFile '{name}'wasnt found");
-@@ -252,10 +329,14 @@ public static class LibCd
+@@ -252,10 +349,14 @@ public static class LibCd
          c.V0 = fp;
      }
  
@@ -3514,7 +3534,7 @@ index 6432fa4..fe3cd70 100644
  
      public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
      public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
-@@ -271,7 +352,7 @@ public static class LibCd
+@@ -271,7 +372,7 @@ public static class LibCd
  
      static void CdResetState()
      {
@@ -3523,7 +3543,7 @@ index 6432fa4..fe3cd70 100644
          _status = StatMotor; //drive aways spin
          _mode = 0;
          _com = 0;
-@@ -300,6 +381,23 @@ public static class LibCd
+@@ -300,6 +401,23 @@ public static class LibCd
          return ExecCommand(m, com, param, result);
      }
  
@@ -3547,7 +3567,7 @@ index 6432fa4..fe3cd70 100644
      static int ExecCommand(IMemory m, byte com, uint param, uint result)
      {
          _com = com;
-@@ -312,9 +410,16 @@ public static class LibCd
+@@ -312,9 +430,16 @@ public static class LibCd
                  if (param != 0)
                      lock (_posGate)
                          for (int i = 0; i < 4; i++) _pos[i] = m.ReadU8(param + (uint)i);
@@ -3564,7 +3584,7 @@ index 6432fa4..fe3cd70 100644
                  break;
              case Setfilter:
                  if (param != 0) { _filterFile = m.ReadU8(param); _filterChannel = m.ReadU8(param + 1); }
-@@ -351,6 +456,11 @@ public static class LibCd
+@@ -351,6 +476,11 @@ public static class LibCd
              case Play:
                  _readActive = false;
                  _status = (byte)(StatMotor | StatPlay);
@@ -3576,7 +3596,7 @@ index 6432fa4..fe3cd70 100644
                  break;
              case Getparam:
                  _lastResult[0] = _status;
-@@ -423,12 +533,14 @@ public static class LibCd
+@@ -423,12 +553,14 @@ public static class LibCd
                  return 0;
              }
              case Pause: case Stop: case Init:

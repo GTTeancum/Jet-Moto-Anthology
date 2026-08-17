@@ -13,7 +13,7 @@ redbook audio at all.
 |------|-------|
 | **Jet Moto** | Complete — a full 3-lap race played end to end |
 | **Jet Moto 2** | Playable — boots, menus, controls, races |
-| **Jet Moto 3** | Playable — boots, menus, controls, races at a locked 60 fps |
+| **Jet Moto 3** | Playable — boots, menus, controls, races at a locked 60 fps, 640x480 |
 
 ## Screenshots
 
