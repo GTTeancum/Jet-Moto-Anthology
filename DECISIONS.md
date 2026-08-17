@@ -857,3 +857,49 @@ logged. The listener is either not firing or `takeScreenShot` is failing inside
 a `pcall` whose false branch returns silently -- a blind spot built into the
 script, and the same class of mistake as every other dead probe in this
 investigation. Fix that logging first, before anything else.
+
+## 2026-08-17 — RETRACTION: the saturation fix is dead code for Jet Moto 3
+
+Reported to the user as "one real bug found and fixed", with the claim that sky,
+rock, sand and riders now render at the reference's brightness. **That claim was
+wrong** and is withdrawn.
+
+The user asked for visual proof, which is what exposed it.
+
+`RECOMPONE_MARK_WRAP=<threshold>` paints any modulated pixel above the threshold
+bright green, inside the same `if (!raw)` block the fix lives in. Results over
+full demo runs:
+
+- threshold 255 (the real wrap point): 0 marked pixels in 397 frames.
+- threshold 100: 0 marked pixels in 129 frames.
+- threshold 1, which must mark essentially every modulated pixel: **0 marked
+  pixels in 260 frames.**
+
+The binary was confirmed current (DLL newer than source) before trusting this.
+So the `!raw` branch never executes for textured triangles in this game -- Jet
+Moto 3 draws its terrain with raw textures, which take no vertex-colour
+modulation at all. The wrapping was a genuine defect in the code and the
+saturation is correct hardware behaviour, so the change is kept, but **it fixes
+nothing here.**
+
+**The brightness improvement was not real either.** Mean luma 78.3 -> 89.3 was
+measured across `/tmp/demo` versus `/tmp/fixed`, two different runs. Attract mode
+cycles tracks, so those were different scenes. This is the same track-cycling
+trap already documented twice in this file, and I walked into it a third time
+while trying to demonstrate a fix.
+
+**What actually still stands, and it is not nothing:**
+
+- Nothing is undrawn. `RECOMPONE_MARK_UNDRAWN` over 44 frames that contain the
+  dark regions: zero magenta pixels in every one, including a frame that is 90%
+  dark region. The back buffer is fully painted every frame.
+- The reference renderer works and shows the correct appearance.
+- The old harness never drove the bike, and `dropped=0` was measuring the wrong
+  render path.
+
+**The lesson, stated plainly because it keeps recurring.** Every probe must be
+proven to fire before a null is believed -- that rule was already written down,
+and it caught this one. But a *positive* result needs the same treatment: I
+verified the fix by eyeballing two captures and computing a statistic across
+them, without checking they showed the same scene. A fix is not demonstrated
+until the code path it touches is shown to execute.
