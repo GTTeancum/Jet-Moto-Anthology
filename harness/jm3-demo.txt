@@ -1,0 +1,15 @@
+# Jet Moto 3 -- zero input. Boot, let the movies play out, let the title screen
+# time out into the game's own attract demo.
+#
+# Why this script exists: a hand-written driving script does not drive. The
+# jm3-ontrack.txt rider wedges itself against terrain within seconds and sits
+# there, and a camera jammed inside a wall renders exactly like broken geometry
+# -- backfaces culled, world visible "through" surfaces, nonsensical silhouettes.
+# Several days of missing-polygon investigation were run against captures from
+# that state.
+#
+# Attract mode is driven by the game, along the developers' own racing line,
+# with the camera where the developers put it. It is the only viewpoint in this
+# project that is known-good by construction, so it is the correct surface for
+# judging whether anything is actually missing.
+0:

@@ -8,6 +8,37 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 | **Jet Moto 2** (SCUS-94167) | **playable** — boots, menus, controls, races; 2026-08-09 |
 | **Jet Moto 3** (SCUS-94555) | **playable** — boots, menus, controls, races at a locked 60 fps; 2026-08-15 |
 
+
+## 2026-08-17 — Correction: the capture harness was the problem
+
+`harness/jm3-ontrack.txt` does not drive the bike. It wedges it against terrain
+in the first seconds and holds it there. On the capture this investigation ran
+against, the HUD reads `8:39.76` on lap `1/3` and the picture barely changes over
+225 game-frames. The camera was clipped into a wall for the whole run.
+
+A camera inside geometry renders exactly like a broken renderer: culled
+backfaces, world visible through surfaces, nonsensical silhouettes. Those frames
+were reported as evidence of missing polygons. They were not evidence of
+anything.
+
+Retracted as a result:
+
+- "The dark wedges are the river." Drawn from stuck-camera frames. A wireframe
+  of the same viewpoint shows continuous rock and no water in frame. Open again.
+- Every missing-polygon claim sourced from `jm3-ontrack.txt`, in both directions.
+
+Replaced by `harness/jm3-demo.txt`: zero input, let the title screen time out
+into the game's own attract demo. The game drives, along the developers' racing
+line, with the camera where they put it. Captures from it look correct — bike and
+rider well-formed, terrain continuous, sky and HUD intact, lap and place counters
+advancing — with some frames around demo crashes still to be explained.
+
+What is measured and still stands: `dropped=0`, `stretched=61` against
+`poly=118692`, no exceptions across a 420 s run, and a continuous quad mesh under
+the wireframe. The `[gte]` and `[otz]` counters read zero throughout and are not
+wired in this build; they are not evidence.
+
+
 ## Jet Moto 3
 
 A different studio and a different engine, and it needed more of the runtime

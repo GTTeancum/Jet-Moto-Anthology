@@ -716,3 +716,44 @@ Two secondary lessons, both about tests that cannot fail:
 Both times the error was checking whether the result was consistent with the
 hypothesis rather than asking what the test would show if the hypothesis were
 false.
+
+## 2026-08-17 — The missing-geometry investigation was run against a wedged bike
+
+**Decision:** `harness/jm3-ontrack.txt` is retired as an evidence source. Visual
+judgements about Jet Moto 3 are made from `harness/jm3-demo.txt` (attract mode)
+or from a viewpoint whose validity is independently established.
+
+**What happened.** `jm3-ontrack.txt` holds throttle and taps steering on a fixed
+schedule. That does not drive a Jet Moto bike. It wedges it against terrain in
+the first seconds and holds it there for the rest of the run. Measured on the
+capture used for days of this investigation: at dump 360 the HUD reads `8:39.76`
+on lap `1/3`, and the mean luma change between dumps 225 game-frames apart is
+about 5/255. The bike is stationary against a wall with the camera clipped into
+or against geometry.
+
+A camera inside geometry renders exactly like a broken renderer. Backfaces are
+culled, so surfaces vanish; the world behind them is visible through the gap;
+silhouettes make no sense. Every one of those symptoms was reported, in good
+faith, as evidence of missing polygons in the port — including the frames handed
+to the user.
+
+**What this invalidates.**
+
+- The "dark wedges are the river" conclusion. It was drawn from stuck-camera
+  frames. A wireframe capture of the same viewpoint shows continuous rock mesh
+  and no water anywhere in frame. Not established either way; treat as open.
+- Every "missing polygon" and "nonsensical geometry" claim sourced from
+  `jm3-ontrack.txt` captures, in both directions — the claims that something was
+  broken and the claims that nothing was.
+
+**What survives.** The wireframe overlay itself is sound and produced the one
+solid negative result here: over the visible terrain in the captured frame the
+mesh is continuous, a regular grid of quads split into triangles, with no gaps.
+Whatever is or is not wrong, that surface was not full of holes. The GPU
+counters also stand: `dropped=0`, and `stretched=61` against `poly=118692`.
+
+**Cost.** Days. The root error is methodological and worth stating plainly: I
+built a capture harness, never verified that it produced a valid viewpoint, and
+then spent the entire investigation instrumenting the renderer to explain
+artefacts that the harness was creating. The check that would have caught it —
+read the lap timer on my own screenshot — was available in every single frame.
