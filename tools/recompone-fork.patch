@@ -1,3 +1,59 @@
+diff --git a/RecompOne.Recompiler/Analysis/JumpTableAnalyzer.cs b/RecompOne.Recompiler/Analysis/JumpTableAnalyzer.cs
+index f1629e0..8f09538 100644
+--- a/RecompOne.Recompiler/Analysis/JumpTableAnalyzer.cs
++++ b/RecompOne.Recompiler/Analysis/JumpTableAnalyzer.cs
+@@ -141,13 +141,33 @@ public static class JumpTableAnalyzer
+             regs[rd].Invalidate();
+     }
+ 
++    /// <summary>
++    /// [jetmoto-fork] Reports tables that stop on a word which is still a
++    /// plausible code address, just outside the function the detector settled
++    /// on. That is the signature of a truncated switch: every case past the cut
++    /// silently stops dispatching, and whatever those cases drew disappears.
++    /// Function ends are detected heuristically, so this is not a rare shape.
++    /// </summary>
++    public static readonly List<string> Suspect = [];
++
+     static uint[] ReadEntries(FunctionInfo elf, uint tableVram, MipsFunction func)
+     {
+         var  entries = new List<uint>();
+         uint vram = tableVram;
+         while (TryReadWord(elf, vram, out uint word))
+         {
+-            if (word < func.Start || word >= func.End) break;
++            if (word < func.Start || word >= func.End)
++            {
++                // Does the rejected word look like code at all? Word-aligned and
++                // inside the text segment means the table probably continues and
++                // the function's end is what is wrong.
++                if (entries.Count > 0 && (word & 3) == 0 &&
++                    word >= 0x80010000u && word < 0x80100000u)
++                    Suspect.Add(
++                        $"jumptable at 0x{tableVram:X8} in func 0x{func.Start:X8}-0x{func.End:X8}: " +
++                        $"{entries.Count} entries, stopped at 0x{word:X8} which still looks like code");
++                break;
++            }
+             entries.Add(word);
+             vram += 4;
+         }
+diff --git a/RecompOne.Recompiler/CodeGen/OverlayWriter.cs b/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
+index bf6dec1..fd1d339 100644
+--- a/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
++++ b/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
+@@ -432,6 +432,12 @@ public static class OverlayWriter
+         }
+         if (funcsWithTables > 0)
+             Console.WriteLine($"[Recompiler] {name}: found jump tables in {funcsWithTables} function(s), {totalEntries} entries in total");
++            if (Analysis.JumpTableAnalyzer.Suspect.Count > 0)
++            {
++                Console.WriteLine($"[Recompiler] {name}: {Analysis.JumpTableAnalyzer.Suspect.Count} jump table(s) may be truncated:");
++                foreach (var w in Analysis.JumpTableAnalyzer.Suspect) Console.WriteLine($"[Recompiler]   {w}");
++                Analysis.JumpTableAnalyzer.Suspect.Clear();
++            }
+     }
+     
+     static bool PatchNameMatches(MipsFunction func, string? patchFunction)
 diff --git a/RecompOne.Recompiler/RecompOne.Recompiler.csproj b/RecompOne.Recompiler/RecompOne.Recompiler.csproj
 index c79184b..2be70bd 100644
 --- a/RecompOne.Recompiler/RecompOne.Recompiler.csproj
@@ -1098,10 +1154,10 @@ index 0000000..4b8a1e3
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..f1dacb5
+index 0000000..4bbf94e
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,79 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1144,6 +1200,9 @@ index 0000000..f1dacb5
 +    /// <summary>Triangles stretched beyond the display -- clamped-vertex smears.</summary>
 +    public static long Stretched;
 +
++    /// <summary>Ordering-table DMAs whose address is above the 2 MB hardware mask.</summary>
++    public static long OtAbove2Mb;
++
 +    /// <summary>Textured polygons per CLUT address, so a palette that is all
 +    /// black can be spotted by cross-referencing a VRAM dump.</summary>
 +    public static readonly Dictionary<int, long> Clut = [];
@@ -1171,15 +1230,15 @@ index 0000000..f1dacb5
 +
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} degen={Degenerate} stretched={Stretched} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
-+        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = Degenerate = Stretched = 0;
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} degen={Degenerate} stretched={Stretched} otHigh={OtAbove2Mb} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = Degenerate = Stretched = OtAbove2Mb = 0;
 +        HuntCalls = HuntSkipDone = HuntSkipEarly = 0;
 +        System.Array.Clear(Blend);
 +        return s;
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..988517b 100644
+index 8b55b53..f43da23 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1221,7 +1280,7 @@ index 8b55b53..988517b 100644
 +        System.Globalization.NumberStyles.HexNumber, null, out var _hc) ? _hc : (ushort)0;
 +    static readonly double HuntAfter =
 +        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_HUNT_AFTER"), out var _ha) ? _ha : 0;
-+    static readonly System.Diagnostics.Stopwatch _huntClock = System.Diagnostics.Stopwatch.StartNew();
++    static System.Diagnostics.Stopwatch _huntClock => Runtime.Clock;
 +    static bool _hunted;
 +    static ushort HuntTarget;
 +
@@ -1380,10 +1439,10 @@ index 8b55b53..988517b 100644
              case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
              case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..cc3f515 100644
+index 9900095..6d1f1ef 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
-@@ -44,11 +44,20 @@ public sealed partial class Gpu
+@@ -44,16 +44,31 @@ public sealed partial class Gpu
          switch (op)
          {
              case 0x02: FillRect(); break;
@@ -1409,7 +1468,45 @@ index 9900095..cc3f515 100644
              case >= 0xC0 and <= 0xDF: BeginImageRead(); break;
              case 0xE1: SetDrawMode(word); break;
              case 0xE2: SetTextureWindow(word); break;
-@@ -80,9 +89,24 @@ public sealed partial class Gpu
+-            case 0xE3: _drawAreaLeft = (int)(word & 0x3FF); _drawAreaTop = (int)((word >> 10) & 0x3FF); break;
+-            case 0xE4: _drawAreaRight = (int)(word & 0x3FF); _drawAreaBottom = (int)((word >> 10) & 0x3FF); break;
++            case 0xE3:
++                _drawAreaLeft = (int)(word & 0x3FF); _drawAreaTop = (int)((word >> 10) & 0x3FF);
++                TraceClip();
++                break;
++            case 0xE4:
++                _drawAreaRight = (int)(word & 0x3FF); _drawAreaBottom = (int)((word >> 10) & 0x3FF);
++                TraceClip();
++                break;
+             case 0xE5:
+                 _drawOffsetX = SignExtend11(word & 0x7FF);
+                 _drawOffsetY = SignExtend11((word >> 11) & 0x7FF);
+@@ -62,6 +77,24 @@ public sealed partial class Gpu
+         }
+     }
+ 
++    // [jetmoto-fork] RECOMPONE_LOG_CLIP=1 reports the drawing rectangle and
++    // offset whenever they change. Geometry vanishing along one screen edge is
++    // what a clip rectangle that is too small looks like, and this is the only
++    // way to see the values the game actually set.
++    static readonly bool TraceClip_ =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_CLIP") is "1" or "true";
++    string _lastClip = "";
++
++    void TraceClip()
++    {
++        if (!TraceClip_) return;
++        string now = $"clip=({_drawAreaLeft},{_drawAreaTop})-({_drawAreaRight},{_drawAreaBottom}) " +
++                     $"offset=({_drawOffsetX},{_drawOffsetY})";
++        if (now == _lastClip) return;
++        _lastClip = now;
++        Console.Error.WriteLine($"[clip] {now}");
++    }
++
+     void SetDrawMode(uint word)
+     {
+         _texPageX = (int)(word & 0xF) * 64;
+@@ -80,9 +113,24 @@ public sealed partial class Gpu
          _texWinOffY = (int)((word >> 15) & 0x1F);
      }
  
@@ -1434,7 +1531,7 @@ index 9900095..cc3f515 100644
          int x = (int)(_fifo[1] & 0x3F0);
          int y = (int)((_fifo[1] >> 16) & 0x1FF);
          int w = (int)(((_fifo[2] & 0x3FF) + 0xF) & ~0xF);
-@@ -117,6 +141,30 @@ public sealed partial class Gpu
+@@ -117,6 +165,30 @@ public sealed partial class Gpu
              }
      }
  
@@ -1465,7 +1562,7 @@ index 9900095..cc3f515 100644
      void BeginImageLoad()
      {
          _loadX = (int)(_fifo[1] & 0x3FF);
-@@ -125,6 +173,24 @@ public sealed partial class Gpu
+@@ -125,6 +197,24 @@ public sealed partial class Gpu
          _loadH = (int)((_fifo[2] >> 16) & 0xFFFF); if (_loadH == 0) _loadH = 0x200; else _loadH &= 0x1FF; if (_loadH == 0) _loadH = 0x200;
          _loadPx = 0;
          _loadImage = true;
@@ -1490,7 +1587,7 @@ index 9900095..cc3f515 100644
          HleLoadBegin();
          _fifo.Clear();
      }
-@@ -133,7 +199,12 @@ public sealed partial class Gpu
+@@ -133,7 +223,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
          ushort stored = _setMask ? (ushort)(value | 0x8000) : value;
@@ -1536,10 +1633,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..2850e5b 100644
+index 6f7a426..4d54965 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,67 @@ public sealed partial class Gpu
+@@ -17,6 +17,73 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1556,7 +1653,7 @@ index 6f7a426..2850e5b 100644
 +    /// than on a loading screen.</summary>
 +    static readonly double TrapBlackAfter =
 +        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_BLACK_AFTER"), out var _tbaf) ? _tbaf : 0;
-+    static readonly System.Diagnostics.Stopwatch _trapClock = System.Diagnostics.Stopwatch.StartNew();
++    static System.Diagnostics.Stopwatch _trapClock => Runtime.Clock;
 +    int _blackReports;
 +
 +    static readonly long TrapDarkArea =
@@ -1590,6 +1687,12 @@ index 6f7a426..2850e5b 100644
 +            ? (x & 15) + (y & 1) * 16 : -1;
 +    }
 +
++    static readonly int TrapPrim =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_PRIM"), out var _tp) ? _tp : 0;
++
++    static bool _primTrapped;
++    static int _primsSinceGate;
++
 +    static readonly bool TrapSky =
 +        Environment.GetEnvironmentVariable("RECOMPONE_TRAP_SKY") is "1" or "true";
 +    int _skyReports;
@@ -1607,7 +1710,7 @@ index 6f7a426..2850e5b 100644
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +87,15 @@ public sealed partial class Gpu
+@@ -26,6 +93,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1623,7 +1726,7 @@ index 6f7a426..2850e5b 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +138,134 @@ public sealed partial class Gpu
+@@ -68,6 +144,149 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1753,31 +1856,67 @@ index 6f7a426..2850e5b 100644
 +            }
 +        }
 +
++        // [jetmoto-fork] RECOMPONE_TRAP_PRIM=<n> throws while drawing the nth
++        // textured polygon of a frame, once the race is running. The exception
++        // unwinds through the recompiled code that submitted it, which names the
++        // game's own terrain-drawing function. Reading generated MIPS by hand to
++        // find that function is hopeless; the stack just says it.
++        if (TrapPrim > 0 && tex && !_primTrapped
++            && _trapClock.Elapsed.TotalSeconds >= TrapBlackAfter
++            && ++_primsSinceGate >= TrapPrim)
++        {
++            _primTrapped = true;
++            throw new InvalidOperationException(
++                $"[trap] primitive {_primsSinceGate}: page=({_texPageX},{_texPageY}) " +
++                $"verts={n} x={v[0].X},{v[1].X} y={v[0].Y},{v[1].Y}");
++        }
++
 +        if (FlatShade) { tex = false; raw = false; }
 +
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -86,8 +284,17 @@ public sealed partial class Gpu
+@@ -84,10 +303,37 @@ public sealed partial class Gpu
+     {
+         int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
-         if (spanX > 1023 || spanY > 511) return;
- 
+-        if (spanX > 1023 || spanY > 511) return;
++        if (spanX > 1023 || spanY > 511)
++        {
++            // [jetmoto-fork] This used to return in silence, which meant a
++            // triangle could vanish from the frame without incrementing any
++            // counter. RECOMPONE_MARK_DROP=1 outlines it in magenta so a hole in
++            // the ground can be attributed to this path or ruled out.
++            GpuCounters.DroppedSpan++;
++            if (MarkDrop) { EdgeLine(a.X,a.Y,b.X,b.Y,0x7C1F); EdgeLine(b.X,b.Y,c.X,c.Y,0x7C1F); EdgeLine(c.X,c.Y,a.X,a.Y,0x7C1F); }
++            return;
++        }
++
 +        if (WatchPixelX >= 0)
 +            _curPrim = $"tri tex={tex} raw={raw} semi={semi} gouraud={gouraud} " +
 +                       $"colour=({a.R},{a.G},{a.B}) page=({_texPageX},{_texPageY}) depth={_texDepth} " +
 +                       $"clut=({(clut & 0x3F) * 16},{(clut >> 6) & 0x1FF}) " +
 +                       $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V})";
-+
+ 
          long area = (long)(b.X - a.X) * (c.Y - a.Y) - (long)(b.Y - a.Y) * (c.X - a.X);
 -        if (area == 0) return;
 +        // [jetmoto-fork] A triangle whose three vertices are collinear covers no
 +        // pixels. Counted because a hole in a mesh is exactly what a run of these
 +        // looks like, and vertices collapse together when the GTE saturates.
-+        if (area == 0) { GpuCounters.Degenerate++; return; }
++        if (area == 0)
++        {
++            // RECOMPONE_MARK_DROP=1 outlines these in cyan. A run of them landing
++            // exactly where the ground has holes is the difference between
++            // "collinear triangles legitimately cover nothing" and "vertices are
++            // collapsing that should not be".
++            GpuCounters.Degenerate++;
++            if (MarkDrop) { EdgeLine(a.X,a.Y,b.X,b.Y,0x7FE0); EdgeLine(b.X,b.Y,c.X,c.Y,0x7FE0); EdgeLine(c.X,c.Y,a.X,a.Y,0x7FE0); }
++            return;
++        }
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +306,7 @@ public sealed partial class Gpu
+@@ -99,7 +345,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1786,7 +1925,7 @@ index 6f7a426..2850e5b 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,11 +341,59 @@ public sealed partial class Gpu
+@@ -134,11 +380,62 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1828,6 +1967,9 @@ index 6f7a426..2850e5b 100644
 +        Environment.GetEnvironmentVariable("RECOMPONE_WIREFRAME") is "1" or "true";
 +
 +    /// <summary>Bright green triangle edge, straight into VRAM, clip-respecting.</summary>
++    static readonly bool MarkDrop =
++        Environment.GetEnvironmentVariable("RECOMPONE_MARK_DROP") is "1" or "true";
++
 +    void EdgeLine(int x0, int y0, int x1, int y1, ushort col)
 +    {
 +        int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
@@ -1847,7 +1989,7 @@ index 6f7a426..2850e5b 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +440,10 @@ public sealed partial class Gpu
+@@ -185,6 +482,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -1858,7 +2000,7 @@ index 6f7a426..2850e5b 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +511,7 @@ public sealed partial class Gpu
+@@ -252,7 +553,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1867,7 +2009,7 @@ index 6f7a426..2850e5b 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +521,7 @@ public sealed partial class Gpu
+@@ -262,7 +563,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1876,7 +2018,7 @@ index 6f7a426..2850e5b 100644
          }
      }
  
-@@ -294,6 +553,13 @@ public sealed partial class Gpu
+@@ -294,6 +595,13 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
@@ -3153,10 +3295,23 @@ index ebd353f..d4a1d87 100644
      {
          if (MdecOn) Console.WriteLine($"[MDEC] {m}");
 diff --git a/RecompOne.Runtime/Memory/Dma.cs b/RecompOne.Runtime/Memory/Dma.cs
-index c376f15..b9285d3 100644
+index c376f15..c793f07 100644
 --- a/RecompOne.Runtime/Memory/Dma.cs
 +++ b/RecompOne.Runtime/Memory/Dma.cs
-@@ -131,7 +131,10 @@ public sealed class Dma
+@@ -72,6 +72,12 @@ public sealed class Dma
+         uint sync = (chcr >> 9) & 3u;
+         if (sync == 2)
+         {
++            // [jetmoto-fork] The hardware masks list addresses to 2 MB. This
++            // runtime hands games an 8 MB window, so an ordering table built
++            // above 2 MB would be walked at a wrapped address -- reading someone
++            // else's memory as a display list, which loses whole chunks of a
++            // scene. Counted so the possibility is measured, not assumed.
++            if ((madr & 0x1FFFFFFFu) >= 0x00200000u) GpuCounters.OtAbove2Mb++;
+             uint addr = madr & 0x1FFFFCu;
+             for (int guard = 0; guard < 0x100000; guard++)
+             {
+@@ -131,7 +137,10 @@ public sealed class Dma
      {
          bool master = (_dicr & (1u << 23)) != 0;
          bool enabled = (_dicr & (1u << (16 + channel))) != 0;
@@ -3417,10 +3572,23 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..281f20f 100644
+index fdf7b6b..9221ba3 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
-@@ -14,6 +14,8 @@ public static class Runtime
+@@ -9,11 +9,21 @@ public enum RunMode { Retail, Devkit }
+ 
+ public static class Runtime
+ {
++    // [jetmoto-fork] One clock for every time-gated trap, started when the
++    // runtime does. Each trap used to hold its own static Stopwatch, which C#
++    // starts on first use of that class -- and Jet Moto 3 draws no polygons for
++    // its first two and a half minutes, so a gate of "150 seconds" in the
++    // rasteriser never opened. Several results were recorded as "did not fire"
++    // when the test had simply never run.
++    public static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
++
+     public static CpuContext? Cpu { get; private set; }
+     public static IMemory? Mem { get; private set; }
      public static Gpu? Gpu;
      public static Spu? Spu;
      public static Cdrom.CdController? Cd;
@@ -3429,7 +3597,7 @@ index fdf7b6b..281f20f 100644
  
      public static RunMode Mode { get; private set; } = RunMode.Retail;
      public static void SetMode(RunMode mode) => Mode = mode; //devkit vs retail, devkits reads from sim and has more ram
-@@ -49,7 +51,19 @@ public static class Runtime
+@@ -49,7 +59,19 @@ public static class Runtime
          HostWindow.Initialize(title);
          LoadMemoryCards();
          Audio.Initialize();
@@ -3450,7 +3618,7 @@ index fdf7b6b..281f20f 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +95,61 @@ public static class Runtime
+@@ -81,14 +103,61 @@ public static class Runtime
          Mem = m;
      }
  
@@ -3513,7 +3681,7 @@ index fdf7b6b..281f20f 100644
  
      public static void DispatchIrq(int irq)
 diff --git a/RecompOne.Runtime/sdk/LibCd.cs b/RecompOne.Runtime/sdk/LibCd.cs
-index 6432fa4..f635500 100644
+index 6432fa4..b543868 100644
 --- a/RecompOne.Runtime/sdk/LibCd.cs
 +++ b/RecompOne.Runtime/sdk/LibCd.cs
 @@ -1,3 +1,4 @@
@@ -3549,19 +3717,37 @@ index 6432fa4..f635500 100644
      }
  
      public static void CdReset(CpuContext c, IMemory m)
-@@ -113,6 +126,11 @@ public static class LibCd
+@@ -99,6 +112,9 @@ public static class LibCd
+         c.V0 = (uint)_lastIntr;
+     }
+ 
++    static readonly int TrapCdReadLba =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_TRAP_CDREAD_LBA"), out var _tcl) ? _tcl : -1;
++
+     public static void CdRead(CpuContext c, IMemory m)
+     {
+         int sectors = (int)c.A0;
+@@ -113,6 +129,19 @@ public static class LibCd
              return;
          }
          int size = SectorSize(_mode);
 +        // [jetmoto-fork][temporary] RECOMPONE_TRAP_CDREAD=<n> throws on the nth
 +        // CdRead so the recompiled game-side call stack becomes visible.
++        // [jetmoto-fork] RECOMPONE_TRAP_CDREAD_LBA=<lba> throws on the read of
++        // one specific file, so the recompiled caller shows up in the stack.
++        // That is how a game function gets a name when there are no symbols:
++        // trap something only it does, and read who called.
++        if (TrapCdReadLba >= 0 && lba == TrapCdReadLba)
++            throw new InvalidOperationException(
++                $"[trap] CdRead of lba={lba} sectors={sectors} buf=0x{buf:X8}");
++
 +        if (++_cdReadCount == TrapCdRead)
 +            throw new InvalidOperationException(
 +                $"[trap] CdRead #{_cdReadCount} lba={lba} sectors={sectors}");
          Dispatcher.LoadByLba(lba);
          Log.Sdk($"CdRead sectors={sectors} buf=0x{buf:X8} mode=0x{_mode:X2} lba={lba} size={size}");
  
-@@ -125,6 +143,13 @@ public static class LibCd
+@@ -125,6 +154,13 @@ public static class LibCd
                  m.WriteU8(buf + (uint)(i * size + j), data[j]);
          }
          _lastIntr = Complete;
@@ -3575,7 +3761,7 @@ index 6432fa4..f635500 100644
          c.V0 = 1;
      }
  
-@@ -143,13 +168,39 @@ public static class LibCd
+@@ -143,13 +179,39 @@ public static class LibCd
          if (c == null || m == null) return;
  
          var snap = c.Snapshot();
@@ -3617,7 +3803,7 @@ index 6432fa4..f635500 100644
          }
          c.Restore(snap);
      }
-@@ -212,8 +263,20 @@ public static class LibCd
+@@ -212,8 +274,20 @@ public static class LibCd
          int words = (int)c.A1;
          int lba = CurrentLba;
          byte[] data;
@@ -3639,7 +3825,7 @@ index 6432fa4..f635500 100644
          for (int j = 0; j < bytes; j++)
              m.WriteU8(madr + (uint)j, data[j]);
          c.V0 = 1;
-@@ -221,11 +284,45 @@ public static class LibCd
+@@ -221,11 +295,45 @@ public static class LibCd
  
      public static void CdDataSync(CpuContext c, IMemory m) => c.V0 = 0;
  
@@ -3685,7 +3871,7 @@ index 6432fa4..f635500 100644
          if (Runtime.Cd == null || !Runtime.Cd.Fs.Locate(name, out int lba, out uint size))
          {
              Log.Sdk($"CdSearchFile '{name}'wasnt found");
-@@ -252,10 +349,14 @@ public static class LibCd
+@@ -252,10 +360,14 @@ public static class LibCd
          c.V0 = fp;
      }
  
@@ -3704,7 +3890,7 @@ index 6432fa4..f635500 100644
  
      public static void CdStatus(CpuContext c, IMemory m) => c.V0 = _status;
      public static void CdMode(CpuContext c, IMemory m) => c.V0 = _mode;
-@@ -271,7 +372,7 @@ public static class LibCd
+@@ -271,7 +383,7 @@ public static class LibCd
  
      static void CdResetState()
      {
@@ -3713,7 +3899,7 @@ index 6432fa4..f635500 100644
          _status = StatMotor; //drive aways spin
          _mode = 0;
          _com = 0;
-@@ -300,6 +401,23 @@ public static class LibCd
+@@ -300,6 +412,23 @@ public static class LibCd
          return ExecCommand(m, com, param, result);
      }
  
@@ -3737,7 +3923,7 @@ index 6432fa4..f635500 100644
      static int ExecCommand(IMemory m, byte com, uint param, uint result)
      {
          _com = com;
-@@ -312,9 +430,16 @@ public static class LibCd
+@@ -312,9 +441,16 @@ public static class LibCd
                  if (param != 0)
                      lock (_posGate)
                          for (int i = 0; i < 4; i++) _pos[i] = m.ReadU8(param + (uint)i);
@@ -3754,7 +3940,7 @@ index 6432fa4..f635500 100644
                  break;
              case Setfilter:
                  if (param != 0) { _filterFile = m.ReadU8(param); _filterChannel = m.ReadU8(param + 1); }
-@@ -351,6 +476,11 @@ public static class LibCd
+@@ -351,6 +487,11 @@ public static class LibCd
              case Play:
                  _readActive = false;
                  _status = (byte)(StatMotor | StatPlay);
@@ -3766,7 +3952,7 @@ index 6432fa4..f635500 100644
                  break;
              case Getparam:
                  _lastResult[0] = _status;
-@@ -423,12 +553,14 @@ public static class LibCd
+@@ -423,12 +564,14 @@ public static class LibCd
                  return 0;
              }
              case Pause: case Stop: case Init:
