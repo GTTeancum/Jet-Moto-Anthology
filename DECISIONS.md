@@ -795,3 +795,38 @@ bike, a watched pixel under the HUD, and a colour hunt that never fired. Each
 cost a full run. Before the next probe, verify it fires on a case with a known
 answer -- the primitive trap was only trusted after it was made to fire at a
 5 s gate first.
+
+## 2026-08-17 — PCSX-Redux as the reference renderer
+
+The user approved installing a reference PS1 emulator, which is what
+OPEN-QUESTIONS.md asked for. PCSX-Redux was chosen because it has Lua scripting,
+a GDB server, memory watchpoints and a VRAM viewer, so the same attract demo can
+be driven and dumped on a schedule and diffed frame-for-frame against ours.
+Cloned to `tools/pcsx-redux/` and gitignored, same treatment as
+`tools/RecompOne/`.
+
+**Three local build fixes.** The checkout is gitignored, so a re-clone loses
+these. Recorded here so they survive.
+
+1. **NuGet packages are not restored by a plain build.** These are
+   packages.config projects, so `-t:restore` alone is not enough:
+   `MSBuild vsprojects/pcsx-redux.sln -t:restore -p:RestorePackagesConfig=true`.
+2. **The repo targets platform toolset v145**, newer than VS2022's v143. Build
+   with `-p:PlatformToolset=v143`. Retargeting the projects on disk would work
+   too but the override keeps the tree clean.
+3. **`src/core/isoffi.lua` exceeds MSVC's C2026 string literal limit** at 18169
+   bytes. The file is embedded as one raw string via `#include` inside
+   `static const char* isoFFI = ( ... );`, using a trick where the first line
+   reads as `--lualoader, R"EOF(--` — a C++ pre-decrement plus comma operator in
+   C++, and a comment in Lua. Fixed by inserting the same trick at the blank
+   line 178 to split it into two adjacent literals, which C++ concatenates:
+   `-- )EOF" R"EOF(--`. The Lua bytes are unchanged; the inserted line is a Lua
+   comment.
+
+Do not build the `.vcxproj` files directly. Include paths use `$(SolutionDir)`,
+which is empty outside a solution build, and every include fails. Build the
+`.sln`.
+
+**Also note for future build checks:** piping MSBuild through `tail` makes `$?`
+report tail's status, not MSBuild's. Two builds here were read as succeeding
+when they had failed.

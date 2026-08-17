@@ -59,3 +59,6 @@ harness/captures2/
 JetMoto3_loose/
 JetMoto3/generated/
 dist/
+
+# Reference PS1 emulator, built locally for frame-diffing. Not ours, not committed.
+tools/pcsx-redux/
