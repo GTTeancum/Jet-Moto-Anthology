@@ -830,3 +830,30 @@ which is empty outside a solution build, and every include fails. Build the
 **Also note for future build checks:** piping MSBuild through `tail` makes `$?`
 report tail's status, not MSBuild's. Two builds here were read as succeeding
 when they had failed.
+
+## 2026-08-17 — OpenBIOS built; reference capture not yet dumping frames
+
+OpenBIOS builds and works. PCSX-Redux boots Jet Moto 3 from the disc: CD-ROM ID
+`SCUS94555`, label `JM3_FINAL1V4`, `OpenBIOS detected (87c3ec0f)`.
+
+**Toolchain version matters.** MIPS GCC 16.2.0 fails to link the `shell`
+subproject: newer binutils rejects the same linker script passed twice, and
+`common.mk` passes both `nooverlay.ld` and `shell.ld`. GCC **12.2.0** builds it
+clean. Install with `./mips.ps1 install 12.2.0` (no leading `v`, the script adds
+it). Use the `install` command, never `self-install` -- the latter is the only
+path that calls `Add-Path` and writes the user's persistent PATH. `install`
+stays inside `tools/pcsx-redux/`.
+
+**Run flags that matter.** `-no-ui` segfaults with the GL backend (no window, no
+GL context), so headless requires `-softgpu`. Without `-dynarec` the CPU runs
+`Interpreted`, which is the slowdown this emulator is known for. Lua `print` is
+unavailable inside an event listener and errors surface only as "Error in event
+listener" with no detail -- use `PCSX.log`, and read the GUI's Lua console,
+which showed the real message (`unfinished string`) when `-logfile` did not.
+
+**Where it stands:** `harness/jm3-refcap.lua` loads without error and its
+`[refcap] armed` line appears, but zero frames are written and no failure is
+logged. The listener is either not firing or `takeScreenShot` is failing inside
+a `pcall` whose false branch returns silently -- a blind spot built into the
+script, and the same class of mistake as every other dead probe in this
+investigation. Fix that logging first, before anything else.
