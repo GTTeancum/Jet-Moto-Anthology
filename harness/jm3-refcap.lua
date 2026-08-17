@@ -62,8 +62,7 @@ listener = PCSX.Events.createEventListener('GPU::Vsync', function()
     end
     dumped = dumped + 1
     if dumped % 25 == 0 then
-        PCSX.log(string.format('[refcap] %d dumps, %dx%d bpp=%d\n',
-                               dumped, ss.width, ss.height, ss.bpp))
+        PCSX.log(string.format('[refcap] %d dumps, %dx%d bpp=%d', dumped, w, h, bpp) .. LF)
     end
     if dumped >= max then
         PCSX.log('[refcap] done, ' .. dumped .. ' frames\n')
