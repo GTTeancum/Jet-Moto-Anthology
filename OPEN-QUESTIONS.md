@@ -101,3 +101,30 @@ two, since that is one cheap probe that distinguishes them.
 Caveat on the null: the traced run may simply have been on a track without that
 colour, since attract cycles tracks. Confirm the colour is present in the same
 run's dumps before treating the zero as meaningful.
+
+### Uploads do land in the framebuffer region, as 24-pixel vertical strips
+
+`RECOMPONE_LOG_UPLOAD=1` over a full demo run: 753 distinct uploads, **216** of
+them landing at x<512, y<480. The largest are **24x256 and 24x240 vertical
+strips** at x=72, 96 and similar, written to both y=0 and y=256.
+
+Strip-wise column uploads at a fixed 24-pixel pitch are what a scrolling
+panoramic backdrop looks like. That makes option 1 from the previous entry live:
+something *is* uploaded into that region, so "stale framebuffer content" is no
+longer the only candidate.
+
+**Do not run ahead of this.** Two things are genuinely unresolved and were not
+determined:
+
+- Whether x=72..120 is inside the *display* window at the moment those uploads
+  happen. At 320 wide the display buffer spans x 0..319, so these coordinates
+  are ambiguous between framebuffer and texture memory without knowing the
+  display origin at that instant. Log the display origin alongside the upload
+  before concluding anything.
+- Whether the strips are correct. A wrong stride, a wrong destination, or
+  skipped strips would all show as banding, and the observed defect is wedges
+  below a horizon rather than vertical bands. That mismatch is a reason for
+  caution, not a reason to dismiss it.
+
+Next probe: log display origin and width at each upload, then check whether any
+upload actually intersects the live display window.
