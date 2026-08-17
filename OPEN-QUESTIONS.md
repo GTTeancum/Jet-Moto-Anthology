@@ -45,3 +45,32 @@ unilaterally — it means putting third-party software on the user's machine, an
 CLAUDE.md's autonomy grant covers work *inside this repo*, not that.
 
 Until answered, JM3 visual claims should be stated as unverified.
+
+## The remaining dark regions are 0x0C20, not black
+
+Measured 2026-08-17 on `/tmp/fixed` frame-0470 (320x240), after the texture
+modulation saturation fix landed:
+
+- Dominant colour is **(0,8,24) = 0x0C20 BGR555**, 16.2% of the frame.
+- It is *not* pure black, and no row is more than 90% pure black. So this is a
+  specific colour being drawn or cleared, not an empty framebuffer.
+
+That matters because it makes the question answerable without guessing at
+coordinates. `RECOMPONE_HUNT_COLOUR` takes a 15-bit target and points the pixel
+watcher at a matching pixel itself:
+
+```
+RECOMPONE_HEADLESS=1 RECOMPONE_NO_HLE=1 RECOMPONE_HUNT_COLOUR=3104 \
+RECOMPONE_HUNT_AFTER=250 RECOMPONE_INPUT=@harness/jm3-demo.txt \
+RECOMPONE_UNPACED=1 dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll "Jet Moto 3 (USA).cue"
+```
+
+3104 is 0x0C20. Note the earlier run of this tool with the auto target (0xFFFF)
+produced zero `[pixel]` lines and the cause was never established -- verify the
+hunt actually fires before trusting a null result from it. That rule is now
+written down because five investigations here died on probes that failed
+silently.
+
+**Do not compare frames across runs by index.** The attract demo cycles tracks,
+so two runs land on different courses. A wireframe run and a normal run at the
+same frame number showed different tracks. Pairs must be aligned by HUD content.
