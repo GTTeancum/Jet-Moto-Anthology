@@ -1176,7 +1176,7 @@ index 0000000..f7ce097
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..f6efb38 100644
+index 8b55b53..988517b 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1318,7 +1318,7 @@ index 8b55b53..f6efb38 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +273,50 @@ public sealed partial class Gpu
+@@ -155,11 +273,56 @@ public sealed partial class Gpu
          }
      }
  
@@ -1363,6 +1363,12 @@ index 8b55b53..f6efb38 100644
 +                    // a distinction I got wrong twice by reading screenshots.
 +                    if (MarkUndrawn) FillBackBuffer(ny);
 +                    if (HuntColour != 0) HuntForColour(ny);
++                    if (Environment.GetEnvironmentVariable("RECOMPONE_LOG_ORDER") is "1" or "true")
++                    {
++                        if (GpuRasterOrder.LastFrameCount > 0)
++                            Console.Error.WriteLine($"[order] frame ended after {GpuRasterOrder.LastFrameCount} primitives");
++                        GpuRasterOrder.Reset();
++                    }
 +                }
 +                _dispVramX = nx; _dispVramY = ny;
 +                break;
@@ -1527,10 +1533,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..fabf39a 100644
+index 6f7a426..bf4b3f5 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,56 @@ public sealed partial class Gpu
+@@ -17,6 +17,63 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1581,13 +1587,20 @@ index 6f7a426..fabf39a 100644
 +            ? (x & 15) + (y & 1) * 16 : -1;
 +    }
 +
++    static readonly bool TraceOrder =
++        Environment.GetEnvironmentVariable("RECOMPONE_LOG_ORDER") is "1" or "true";
++    internal static int _primIndex;
++    public static int PrimIndexForOrder => _primIndex;
++    public static void ResetPrimIndex() => _primIndex = 0;
++    static int _orderReports;
++
 +    static readonly bool FlatShade =
 +        Environment.GetEnvironmentVariable("RECOMPONE_FLAT") is "1" or "true";
 +
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +76,15 @@ public sealed partial class Gpu
+@@ -26,6 +83,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1603,7 +1616,7 @@ index 6f7a426..fabf39a 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +127,77 @@ public sealed partial class Gpu
+@@ -68,6 +134,106 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1676,12 +1689,41 @@ index 6f7a426..fabf39a 100644
 +            }
 +        }
 +
++        // [jetmoto-fork] RECOMPONE_LOG_ORDER=1 reports where the big backdrop
++        // quad falls in a frame's draw order. On a console with no depth buffer
++        // the ordering table is the only thing keeping far behind near, so a
++        // backdrop drawn late paints over everything -- which is what "the
++        // distance is missing" would look like.
++        _primIndex++;
++        if (TraceOrder && tex && _orderReports < 40)
++        {
++            int maxU = 0, maxV = 0, spanX = 0;
++            int minX = v[0].X, maxX = v[0].X;
++            for (int i = 0; i < n; i++)
++            {
++                if (v[i].U > maxU) maxU = v[i].U;
++                if (v[i].V > maxV) maxV = v[i].V;
++                if (v[i].X < minX) minX = v[i].X;
++                if (v[i].X > maxX) maxX = v[i].X;
++            }
++            spanX = maxX - minX;
++            // The backdrop is the one primitive that stretches a whole texture
++            // page across most of the screen.
++            if (maxU >= 250 && maxV >= 250 && spanX >= 200)
++            {
++                _orderReports++;
++                Console.Error.WriteLine(
++                    $"[order] backdrop is primitive {_primIndex} this frame, " +
++                    $"page=({_texPageX},{_texPageY}) spanX={spanX} verts={n}");
++            }
++        }
++
 +        if (FlatShade) { tex = false; raw = false; }
 +
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -86,8 +216,17 @@ public sealed partial class Gpu
+@@ -86,8 +252,17 @@ public sealed partial class Gpu
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
          if (spanX > 1023 || spanY > 511) return;
  
@@ -1700,7 +1742,7 @@ index 6f7a426..fabf39a 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +238,7 @@ public sealed partial class Gpu
+@@ -99,7 +274,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1709,7 +1751,7 @@ index 6f7a426..fabf39a 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,9 +273,14 @@ public sealed partial class Gpu
+@@ -134,11 +309,51 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1724,8 +1766,45 @@ index 6f7a426..fabf39a 100644
 +                }
              }
          }
++
++        // [jetmoto-fork] RECOMPONE_WIREFRAME=1 outlines every triangle after it
++        // is filled. Filled, a hole in a mesh and a dark surface look identical;
++        // outlined, a hole is a gap with no edges crossing it while a surface is
++        // a grid. This is how "is that geometry missing" gets answered rather
++        // than argued about from a screenshot.
++        if (Wireframe)
++        {
++            EdgeLine(a.X, a.Y, b.X, b.Y);
++            EdgeLine(b.X, b.Y, c.X, c.Y);
++            EdgeLine(c.X, c.Y, a.X, a.Y);
++        }
++    }
++
++
++    static readonly bool Wireframe =
++        Environment.GetEnvironmentVariable("RECOMPONE_WIREFRAME") is "1" or "true";
++
++    /// <summary>Bright green triangle edge, straight into VRAM, clip-respecting.</summary>
++    void EdgeLine(int x0, int y0, int x1, int y1)
++    {
++        int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
++        int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
++        int err = dx + dy;
++        for (int guard = 0; guard < 4096; guard++)
++        {
++            if (x0 >= _drawAreaLeft && x0 <= _drawAreaRight &&
++                y0 >= _drawAreaTop && y0 <= _drawAreaBottom &&
++                x0 >= 0 && x0 < VramWidth && y0 >= 0 && y0 < VramHeight)
++                Vram[y0 * VramWidth + x0] = 0x03E0;
++            if (x0 == x1 && y0 == y1) break;
++            int e2 = err * 2;
++            if (e2 >= dy) { err += dy; x0 += sx; }
++            if (e2 <= dx) { err += dx; y0 += sy; }
++        }
      }
-@@ -185,6 +329,10 @@ public sealed partial class Gpu
+ 
+     static bool IsTopLeft(in Vert p0, in Vert p1)
+@@ -185,6 +400,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -1736,7 +1815,7 @@ index 6f7a426..fabf39a 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +400,7 @@ public sealed partial class Gpu
+@@ -252,7 +471,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1745,7 +1824,7 @@ index 6f7a426..fabf39a 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +410,7 @@ public sealed partial class Gpu
+@@ -262,7 +481,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1754,13 +1833,13 @@ index 6f7a426..fabf39a 100644
          }
      }
  
-@@ -294,6 +442,13 @@ public sealed partial class Gpu
+@@ -294,6 +513,13 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
 +        // Match either framebuffer: the game alternates between y and y+240,
 +        // and pinning one of them is why the first attempt saw nothing in a race.
-+        if (WatchPixelX == x && WatchPixelY == y && _pixelWrites < 60)
++        if (WatchPixelX == x && (WatchPixelY == y || WatchPixelY + 240 == y) && _pixelWrites < 60)
 +        {
 +            _pixelWrites++;
 +            Console.Error.WriteLine($"[pixel] rgb=({r},{g},{b}) semi={semi} <- {_curPrim}");
@@ -1768,6 +1847,20 @@ index 6f7a426..fabf39a 100644
          if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) return;
          if (x < 0 || x >= VramWidth || y < 0 || y >= VramHeight) return;
  
+diff --git a/RecompOne.Runtime/Gpu/GpuRasterOrder.cs b/RecompOne.Runtime/Gpu/GpuRasterOrder.cs
+new file mode 100644
+index 0000000..9d8bb1d
+--- /dev/null
++++ b/RecompOne.Runtime/Gpu/GpuRasterOrder.cs
+@@ -0,0 +1,8 @@
++namespace RecompOne.Runtime;
++
++/// <summary>[jetmoto-fork] Per-frame primitive counter for the draw-order trace.</summary>
++public static class GpuRasterOrder
++{
++    public static int LastFrameCount => Gpu.PrimIndexForOrder;
++    public static void Reset() => Gpu.ResetPrimIndex();
++}
 diff --git a/RecompOne.Runtime/Gpu/GpuRasterWatch.cs b/RecompOne.Runtime/Gpu/GpuRasterWatch.cs
 new file mode 100644
 index 0000000..67a5f0d
@@ -1888,10 +1981,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Gte.cs b/RecompOne.Runtime/Hardware/Gte.cs
-index e13c28a..b5e404b 100644
+index e13c28a..a508e19 100644
 --- a/RecompOne.Runtime/Hardware/Gte.cs
 +++ b/RecompOne.Runtime/Hardware/Gte.cs
-@@ -40,7 +40,32 @@ public static class Gte
+@@ -40,7 +40,56 @@ public static class Gte
          return t;
      }
  
@@ -1913,6 +2006,30 @@ index e13c28a..b5e404b 100644
 +
 +    static void Flag(int bit) { FlagHits[bit]++; FLAG |= 1u << bit; }
 +
++    // [jetmoto-fork] OTZ is the ordering-table index a game computes for a
++    // polygon, and a game drops anything whose index falls outside its table.
++    // If these come out too large, far geometry is discarded by the game itself
++    // -- which looks exactly like a port that stops drawing past a short
++    // distance. Bucketed by magnitude so the shape is visible at a glance.
++    public static readonly long[] OtzBuckets = new long[8];
++    public static long OtzMax;
++
++    static void NoteOtz()
++    {
++        int b = OTZ >= 4096 ? 7 : OTZ >= 2048 ? 6 : OTZ >= 1024 ? 5 : OTZ >= 512 ? 4
++              : OTZ >= 256 ? 3 : OTZ >= 128 ? 2 : OTZ >= 64 ? 1 : 0;
++        OtzBuckets[b]++;
++        if (OTZ > OtzMax) OtzMax = OTZ;
++    }
++
++    public static string TakeOtzSummary()
++    {
++        var s = $"<64:{OtzBuckets[0]} <128:{OtzBuckets[1]} <256:{OtzBuckets[2]} <512:{OtzBuckets[3]} " +
++                $"<1k:{OtzBuckets[4]} <2k:{OtzBuckets[5]} <4k:{OtzBuckets[6]} >=4k:{OtzBuckets[7]} max={OtzMax}";
++        Array.Clear(OtzBuckets); OtzMax = 0;
++        return s;
++    }
++
 +    public static string TakeFlagSummary()
 +    {
 +        string s = $"sx={FlagHits[14]} sy={FlagHits[13]} div={FlagHits[17]} " +
@@ -1925,7 +2042,7 @@ index e13c28a..b5e404b 100644
  
      static int SatIR(int n, int v, bool lm)
      {
-@@ -213,8 +238,19 @@ public static class Gte
+@@ -213,15 +262,28 @@ public static class Gte
                  Rtp(V[6], V[7], V[8], sf, lm, true);
                  break;
              case 0x06:
@@ -1946,6 +2063,15 @@ index e13c28a..b5e404b 100644
              case 0x2D:
                  MAC0 = (int)CheckMac0((long)ZSF3 * (SZ[1] + SZ[2] + SZ[3]));
                  OTZ = (ushort)SatSZ(MAC0 >> 12);
++                NoteOtz();
+                 break;
+             case 0x2E:
+                 MAC0 = (int)CheckMac0((long)ZSF4 * (SZ[0] + SZ[1] + SZ[2] + SZ[3]));
+                 OTZ = (ushort)SatSZ(MAC0 >> 12);
++                NoteOtz();
+                 break;
+             case 0x12: Mvmva(sf, lm, mx, vn, cv); break;
+             case 0x28:
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
 index 6027c49..50aedfc 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
@@ -3248,7 +3374,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..50b2704 100644
+index fdf7b6b..281f20f 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -14,6 +14,8 @@ public static class Runtime
@@ -3281,7 +3407,7 @@ index fdf7b6b..50b2704 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +95,60 @@ public static class Runtime
+@@ -81,14 +95,61 @@ public static class Runtime
          Mem = m;
      }
  
@@ -3336,6 +3462,7 @@ index fdf7b6b..50b2704 100644
 +        Console.Error.WriteLine(
 +            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present, {GpuCounters.TakeSummary()}");
 +        Console.Error.WriteLine($"[gte] {Gte.TakeFlagSummary()}");
++        Console.Error.WriteLine($"[otz] {Gte.TakeOtzSummary()}");
 +        Console.Error.WriteLine($"[tex] {GpuCounters.TakeTexPages()}");
 +        Console.Error.WriteLine($"[clut] {GpuCounters.TakeCluts()}");
 +        _fpsMark = now; _presentTicks = 0; _presents = 0;
