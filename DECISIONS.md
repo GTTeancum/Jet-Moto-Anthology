@@ -1070,3 +1070,45 @@ The cheapest next probe is per-frame primitive counts alongside the holes
 percentage. If polygon submission collapses on the empty frames, the fault is
 upstream in the OT or its DMA; if the polygons are submitted but not drawn, it
 is in the rasteriser's handling of them.
+
+### The polygons never reach the GPU, and the HUD proves it is selective
+
+Per-frame primitive counts alongside the holes percentage. `GpuCounters.Polys`
+is incremented on GP0 command dispatch, so its delta is what actually arrived at
+the GPU that frame.
+
+```
+  0% clear-owned   polys=2818  rects=49
+  0% clear-owned   polys=1631  rects=49
+  0% clear-owned   polys=4171  rects=45
+ 33% clear-owned   polys=767   rects=45
+ 41% clear-owned   polys=900   rects=49
+ 56% clear-owned   polys=255   rects=49
+ 85% clear-owned   polys=1180  rects=49
+```
+
+Strong inverse correlation, and **`rects` is the control**: the HUD submits an
+identical 45-49 rectangles every single frame while polygon counts collapse from
+~2800-4200 to ~250-1200. Whatever fails, it fails only for the 3D scene, and it
+fails before the GPU sees the work rather than during rasterisation.
+
+**Both DMA paths were read and are correct**, so the fault is not there:
+
+- The linked-list walk terminates only on `next == 0xFFFFFF` or bit 23 set, which
+  are the hardware end markers; RAM addresses are below 0x200000 so bit 23 is
+  never legitimately set. Its guard allows 0x100000 nodes, far above any real
+  chain.
+- `ClearOrderingTable` builds the standard reverse chain, each entry pointing at
+  `addr - 4` masked to 24 bits, with `0x00FFFFFF` written as the terminator.
+
+One thing left unmeasured that the code itself flags: `madr & 0x1FFFFCu` masks
+the ordering-table address to 2 MB, which is right for retail hardware but wraps
+if the table sits in the 8 MB window this runtime hands out.
+`GpuCounters.OtAbove2Mb` exists for exactly this and previously read zero -- but
+that reading came from a run whose counters were later shown unreliable, so it
+should be re-taken rather than trusted.
+
+**Next:** re-measure `otHigh` on a run where the counters are known good, then,
+if it is genuinely zero, move to the game side -- find the call that submits the
+3D ordering table and check whether it runs on the empty frames. The HUD path
+running perfectly every frame gives a working comparison to trace against.

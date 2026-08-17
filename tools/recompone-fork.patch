@@ -1238,7 +1238,7 @@ index 0000000..4bbf94e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..517df19 100644
+index 8b55b53..909c456 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1256,7 +1256,7 @@ index 8b55b53..517df19 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,147 @@ public sealed partial class Gpu
+@@ -50,6 +58,161 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
@@ -1265,6 +1265,7 @@ index 8b55b53..517df19 100644
 +
 +    static bool _vramDumped;
 +    static int _holeFrames;
++    static long _lastPolys, _lastRects;
 +
 +    /// <summary>
 +    /// Count pixels in the just-finished frame still owned by the screen-clear
@@ -1288,10 +1289,23 @@ index 8b55b53..517df19 100644
 +            }
 +        }
 +        if (total == 0) return;
-+        if (++_holeFrames % 60 == 0)
++        long pct = held * 100 / total;
++
++        // GpuCounters.Polys is incremented on GP0 command dispatch, so the delta
++        // is the number of polygons that actually reached the GPU this frame.
++        // On an empty frame this separates the two remaining explanations:
++        // a normal count means they were submitted and the rasteriser dropped
++        // them; near zero means they never arrived, and the fault is upstream in
++        // the ordering table or its DMA.
++        long polys = GpuCounters.Polys, dp = polys - _lastPolys;
++        long rects = GpuCounters.Rects, dr = rects - _lastRects;
++        _lastPolys = polys; _lastRects = rects;
++
++        _holeFrames++;
++        if (pct >= 30 || _holeFrames % 60 == 0)
 +            Console.Error.WriteLine(
-+                $"[holes] t={Runtime.Clock.Elapsed.TotalSeconds:F1} {held * 100 / total}% of the "
-+                + $"{w}x{h} frame still owned by the clear ({held}/{total})");
++                $"[holes] t={Runtime.Clock.Elapsed.TotalSeconds:F1} {pct,3}% clear-owned "
++                + $"({held}/{total})  polys={dp} rects={dr}");
 +    }
 +    static double _lastColourReport;
 +
@@ -1404,7 +1418,7 @@ index 8b55b53..517df19 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +294,7 @@ public sealed partial class Gpu
+@@ -145,6 +308,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1412,7 +1426,7 @@ index 8b55b53..517df19 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +305,80 @@ public sealed partial class Gpu
+@@ -155,11 +319,80 @@ public sealed partial class Gpu
          }
      }
  
