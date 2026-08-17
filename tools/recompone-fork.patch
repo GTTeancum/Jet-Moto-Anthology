@@ -1098,10 +1098,10 @@ index 0000000..4b8a1e3
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..f7ce097
+index 0000000..f1dacb5
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,76 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1141,6 +1141,9 @@ index 0000000..f7ce097
 +    /// <summary>Triangles with three collinear vertices -- they cover nothing.</summary>
 +    public static long Degenerate;
 +
++    /// <summary>Triangles stretched beyond the display -- clamped-vertex smears.</summary>
++    public static long Stretched;
++
 +    /// <summary>Textured polygons per CLUT address, so a palette that is all
 +    /// black can be spotted by cross-referencing a VRAM dump.</summary>
 +    public static readonly Dictionary<int, long> Clut = [];
@@ -1168,8 +1171,8 @@ index 0000000..f7ce097
 +
 +    public static string TakeSummary()
 +    {
-+        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} degen={Degenerate} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
-+        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = Degenerate = 0;
++        var s = $"poly={Polys} line={Lines} rect={Rects} load={Loads} dropped={DroppedSpan} degen={Degenerate} stretched={Stretched} hunt={HuntCalls}/{HuntSkipEarly}/{HuntSkipDone} pageWrites={PageWrites} semi={Semi} blend={Blend[0]}/{Blend[1]}/{Blend[2]}/{Blend[3]}";
++        Polys = Lines = Rects = Loads = DroppedSpan = Semi = PageWrites = Degenerate = Stretched = 0;
 +        HuntCalls = HuntSkipDone = HuntSkipEarly = 0;
 +        System.Array.Clear(Blend);
 +        return s;
@@ -1533,10 +1536,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..bf4b3f5 100644
+index 6f7a426..2850e5b 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,63 @@ public sealed partial class Gpu
+@@ -17,6 +17,67 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1587,6 +1590,10 @@ index 6f7a426..bf4b3f5 100644
 +            ? (x & 15) + (y & 1) * 16 : -1;
 +    }
 +
++    static readonly bool TrapSky =
++        Environment.GetEnvironmentVariable("RECOMPONE_TRAP_SKY") is "1" or "true";
++    int _skyReports;
++
 +    static readonly bool TraceOrder =
 +        Environment.GetEnvironmentVariable("RECOMPONE_LOG_ORDER") is "1" or "true";
 +    internal static int _primIndex;
@@ -1600,7 +1607,7 @@ index 6f7a426..bf4b3f5 100644
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +83,15 @@ public sealed partial class Gpu
+@@ -26,6 +87,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1616,7 +1623,7 @@ index 6f7a426..bf4b3f5 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +134,106 @@ public sealed partial class Gpu
+@@ -68,6 +138,134 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1718,12 +1725,40 @@ index 6f7a426..bf4b3f5 100644
 +            }
 +        }
 +
++        // [jetmoto-fork] RECOMPONE_TRAP_SKY=1 reports textured polygons drawn
++        // entirely in the upper part of the frame -- the "floating slab" region.
++        // Knowing which texture page and which screen coordinates they carry is
++        // the difference between misplaced terrain and a legitimate overhang.
++        if (TrapSky && tex && _skyReports < 20 &&
++            _trapClock.Elapsed.TotalSeconds >= TrapBlackAfter)
++        {
++            int top = _drawAreaTop, bot = _drawAreaBottom;
++            int maxY = v[0].Y, minY = v[0].Y, minX = v[0].X, maxX = v[0].X;
++            for (int i = 1; i < n; i++)
++            {
++                if (v[i].Y > maxY) maxY = v[i].Y;
++                if (v[i].Y < minY) minY = v[i].Y;
++                if (v[i].X < minX) minX = v[i].X;
++                if (v[i].X > maxX) maxX = v[i].X;
++            }
++            int third = top + (bot - top) / 3;
++            if (maxY < third && maxX - minX > 30 && maxY - minY > 15)
++            {
++                _skyReports++;
++                Console.Error.WriteLine(
++                    $"[sky] page=({_texPageX},{_texPageY}) depth={_texDepth} " +
++                    $"clut=({(clut & 0x3F) * 16},{(clut >> 6) & 0x1FF}) verts={n} " +
++                    $"x={minX}..{maxX} y={minY}..{maxY} area={(maxX - minX) * (maxY - minY)} " +
++                    $"draw={top}..{bot}");
++            }
++        }
++
 +        if (FlatShade) { tex = false; raw = false; }
 +
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -86,8 +252,17 @@ public sealed partial class Gpu
+@@ -86,8 +284,17 @@ public sealed partial class Gpu
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
          if (spanX > 1023 || spanY > 511) return;
  
@@ -1742,7 +1777,7 @@ index 6f7a426..bf4b3f5 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +274,7 @@ public sealed partial class Gpu
+@@ -99,7 +306,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1751,7 +1786,7 @@ index 6f7a426..bf4b3f5 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,11 +309,51 @@ public sealed partial class Gpu
+@@ -134,11 +341,59 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1774,9 +1809,17 @@ index 6f7a426..bf4b3f5 100644
 +        // than argued about from a screenshot.
 +        if (Wireframe)
 +        {
-+            EdgeLine(a.X, a.Y, b.X, b.Y);
-+            EdgeLine(b.X, b.Y, c.X, c.Y);
-+            EdgeLine(c.X, c.Y, a.X, a.Y);
++            // Red marks a triangle stretched wider or taller than the display.
++            // That is what a vertex clamped at the projection limit produces:
++            // the polygon is smeared from its real position out to a screen
++            // edge. Green is an ordinary triangle.
++            int wSpan = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
++            int hSpan = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
++            ushort col = (wSpan > 400 || hSpan > 300) ? (ushort)0x001F : (ushort)0x03E0;
++            if (col == 0x001F) GpuCounters.Stretched++;
++            EdgeLine(a.X, a.Y, b.X, b.Y, col);
++            EdgeLine(b.X, b.Y, c.X, c.Y, col);
++            EdgeLine(c.X, c.Y, a.X, a.Y, col);
 +        }
 +    }
 +
@@ -1785,7 +1828,7 @@ index 6f7a426..bf4b3f5 100644
 +        Environment.GetEnvironmentVariable("RECOMPONE_WIREFRAME") is "1" or "true";
 +
 +    /// <summary>Bright green triangle edge, straight into VRAM, clip-respecting.</summary>
-+    void EdgeLine(int x0, int y0, int x1, int y1)
++    void EdgeLine(int x0, int y0, int x1, int y1, ushort col)
 +    {
 +        int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
 +        int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
@@ -1795,7 +1838,7 @@ index 6f7a426..bf4b3f5 100644
 +            if (x0 >= _drawAreaLeft && x0 <= _drawAreaRight &&
 +                y0 >= _drawAreaTop && y0 <= _drawAreaBottom &&
 +                x0 >= 0 && x0 < VramWidth && y0 >= 0 && y0 < VramHeight)
-+                Vram[y0 * VramWidth + x0] = 0x03E0;
++                Vram[y0 * VramWidth + x0] = col;
 +            if (x0 == x1 && y0 == y1) break;
 +            int e2 = err * 2;
 +            if (e2 >= dy) { err += dy; x0 += sx; }
@@ -1804,7 +1847,7 @@ index 6f7a426..bf4b3f5 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +400,10 @@ public sealed partial class Gpu
+@@ -185,6 +440,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -1815,7 +1858,7 @@ index 6f7a426..bf4b3f5 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +471,7 @@ public sealed partial class Gpu
+@@ -252,7 +511,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -1824,7 +1867,7 @@ index 6f7a426..bf4b3f5 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +481,7 @@ public sealed partial class Gpu
+@@ -262,7 +521,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -1833,7 +1876,7 @@ index 6f7a426..bf4b3f5 100644
          }
      }
  
-@@ -294,6 +513,13 @@ public sealed partial class Gpu
+@@ -294,6 +553,13 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
