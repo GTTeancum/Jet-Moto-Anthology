@@ -903,3 +903,52 @@ and it caught this one. But a *positive* result needs the same treatment: I
 verified the fix by eyeballing two captures and computing a statistic across
 them, without checking they showed the same scene. A fix is not demonstrated
 until the code path it touches is shown to execute.
+
+## 2026-08-17 — UN-RETRACT: the saturation fix is live. The retraction was my bug.
+
+The previous entry retracted the saturation fix on the grounds that
+`RECOMPONE_MARK_WRAP` never fired. **That retraction was wrong and is itself
+withdrawn.**
+
+The probe writes its marker as `(0,255,0)`, but 15-bit packing sends 255 through
+`>> 3` to 31 and back to **248**. The dumped PPMs can never contain `(0,255,0)`.
+I scanned for a colour that cannot exist. Rescanning the same captures for
+`(0,248,0)`:
+
+| threshold | frames marked | sampled px |
+|-----------|---------------|------------|
+| 255 (real wrap point) | 75 of 413 | 3851 |
+| 100 | 115 of 261 | 378213 |
+| 1 | 118 of 260 | 780515 |
+
+So the modulation product does exceed 255, the pre-fix code did wrap those to
+black, and the fix corrects real pixels. It is not dead code.
+
+**But the scale matters, and this is the part to keep straight.** Sampling every
+third pixel in both axes covers a ninth of the frame, so 3851 marks is roughly
+34000 real pixels spread over 75 frames -- a few hundred per affected frame. The
+fix is real and minor. It does **not** explain the large dark regions, which run
+from 16% to 90% of a frame. The claim that it made sky, rock and sand match the
+reference stays withdrawn; that comparison was two different scenes.
+
+## 2026-08-17 — What actually paints the dark regions
+
+`RECOMPONE_LOG_COLOUR=3104`, now deduplicating by primitive so its cap is not
+spent on 40 copies of the first painter. Distinct painters of 0x0C20:
+
+- **24x textured triangles, `colour=(128,128,128)`, `page=(512,256)`,
+  `clut=(768,387)`, 8-bit.** Neutral modulation means output equals the texel,
+  so the sampled texture data is itself dark navy.
+- **14x untextured flat triangles, `colour=(0,13,25)`.** `To15(0,13,25)` is
+  exactly 3104. The game specifies this colour itself.
+- 2x full-screen textured backdrop rects, `page=(320,0)`, `clut=(768,385)`.
+
+The untextured ones are the game's own choice of colour and we reproduce it
+faithfully; they are only wrong if the reference shows them brighter. The
+textured ones are the real suspect: if the texture page or CLUT address is off,
+we sample dark texels where the art is bright.
+
+**Next step, and it is now a direct comparison rather than a guess:** dump VRAM
+page (512,256) with CLUT (768,387) from our runtime and from PCSX-Redux and put
+them side by side. Same texture, same CLUT, two renderers. If ours is dark and
+the reference is not, the addressing is wrong and that is the bug.

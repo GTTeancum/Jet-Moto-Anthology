@@ -1645,10 +1645,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..63075f5 100644
+index 6f7a426..f0036b3 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,84 @@ public sealed partial class Gpu
+@@ -17,6 +17,85 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1699,6 +1699,7 @@ index 6f7a426..63075f5 100644
 +    static readonly double LogColourAfter =
 +        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_LOG_COLOUR_AFTER"), out var _lca) ? _lca : 0;
 +    static int _colourLogs;
++    static readonly HashSet<string> _seenColourPrims = [];
 +
 +    static readonly int SkipPage = ParseSkipPage();
 +    static int ParseSkipPage()
@@ -1733,7 +1734,7 @@ index 6f7a426..63075f5 100644
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +104,15 @@ public sealed partial class Gpu
+@@ -26,6 +105,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1749,7 +1750,7 @@ index 6f7a426..63075f5 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +155,149 @@ public sealed partial class Gpu
+@@ -68,6 +156,149 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1899,7 +1900,7 @@ index 6f7a426..63075f5 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -84,10 +314,44 @@ public sealed partial class Gpu
+@@ -84,10 +315,44 @@ public sealed partial class Gpu
      {
          int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -1946,7 +1947,7 @@ index 6f7a426..63075f5 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +363,7 @@ public sealed partial class Gpu
+@@ -99,7 +364,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1955,7 +1956,7 @@ index 6f7a426..63075f5 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -133,12 +397,93 @@ public sealed partial class Gpu
+@@ -133,12 +398,93 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2051,7 +2052,7 @@ index 6f7a426..63075f5 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +530,10 @@ public sealed partial class Gpu
+@@ -185,6 +531,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2062,7 +2063,7 @@ index 6f7a426..63075f5 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -198,7 +547,13 @@ public sealed partial class Gpu
+@@ -198,7 +548,13 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2077,7 +2078,7 @@ index 6f7a426..63075f5 100644
                      Plot(px, py, tr, tg, tb, semi && stp, false, stp);
                  }
                  else Plot(px, py, cr, cg, cb, semi, false);
-@@ -252,7 +607,7 @@ public sealed partial class Gpu
+@@ -252,7 +608,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -2086,7 +2087,7 @@ index 6f7a426..63075f5 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +617,7 @@ public sealed partial class Gpu
+@@ -262,7 +618,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2095,7 +2096,7 @@ index 6f7a426..63075f5 100644
          }
      }
  
-@@ -294,6 +649,26 @@ public sealed partial class Gpu
+@@ -294,6 +650,33 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
@@ -2115,8 +2116,15 @@ index 6f7a426..63075f5 100644
 +            && Runtime.Clock.Elapsed.TotalSeconds >= LogColourAfter
 +            && To15(r, g, b) == LogColour)
 +        {
-+            _colourLogs++;
-+            Console.Error.WriteLine($"[colour] t={Runtime.Clock.Elapsed.TotalSeconds:F1} <- {_curPrim}");
++            // Dedupe by primitive description. Without this the cap is spent on
++            // 40 copies of whichever primitive happens to be drawn first, and
++            // every later painter of the same colour goes unseen -- which is
++            // exactly what happened on the first run of this probe.
++            if (_seenColourPrims.Add(_curPrim))
++            {
++                _colourLogs++;
++                Console.Error.WriteLine($"[colour] t={Runtime.Clock.Elapsed.TotalSeconds:F1} <- {_curPrim}");
++            }
 +        }
 +
          if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) return;
