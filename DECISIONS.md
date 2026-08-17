@@ -757,3 +757,41 @@ built a capture harness, never verified that it produced a valid viewpoint, and
 then spent the entire investigation instrumenting the renderer to explain
 artefacts that the harness was creating. The check that would have caught it —
 read the lap timer on my own screenshot — was available in every single frame.
+
+## 2026-08-17 — "Oversized triangles overdraw the terrain" is NOT proven
+
+Stated to the user with more confidence than the evidence carried. Three tests
+were run to prove it. All three were invalidated by setup errors of mine, not by
+the game:
+
+1. **Suppression A/B** (`RECOMPONE_SKIP_BIG=250`, compare frame 0410 with and
+   without). Invalid: the two runs were not the same moment or even the same
+   track -- baseline `0:50.86`, suppressed `0:48.80`, different minimaps. The
+   claim that the attract demo is deterministic by frame index is wrong; it was
+   based on two runs happening to land on the same track.
+2. **Pixel watcher** at (60,180). Invalid: that coordinate is inside the 64x64
+   HUD speed gauge. The log contains the black clear and the gauge, and no
+   terrain primitive at all.
+3. **Self-targeting colour hunt** (`RECOMPONE_HUNT_COLOUR`), added specifically
+   to stop me choosing coordinates by hand. Produced zero `[pixel]` lines across
+   a 400 s run. The hunt path did not fire; cause not yet established.
+
+**What is actually established:** one wireframe frame (`0:50.86`) in which the
+corrupted region carries long red oversized-triangle edges and almost no green
+mesh, while correct terrain in the same frame is dense green. That is
+suggestive. It is one frame and it is my interpretation of it. It is not proof,
+and the user was right to refuse it.
+
+**What is still true and measured:** the defect is real and reproducible in
+attract mode, on a viewpoint that cannot be blamed on the input harness. The
+software rasterizer's span-drop is now counted (360/sample, previously reported
+as 0 because `DroppedSpan` was only wired in the GL path). Both silent rejection
+paths were ruled out as the cause of the holes via `RECOMPONE_MARK_DROP`.
+
+**The pattern to stop repeating.** Five consecutive investigations here have
+died on instrumentation defects rather than findings: a trap clock that never
+started, a counter wired to the wrong render path, a viewpoint from a wedged
+bike, a watched pixel under the HUD, and a colour hunt that never fired. Each
+cost a full run. Before the next probe, verify it fires on a case with a known
+answer -- the primitive trap was only trusted after it was made to fire at a
+5 s gate first.

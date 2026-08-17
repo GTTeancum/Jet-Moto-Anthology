@@ -1633,7 +1633,7 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..4d54965 100644
+index 6f7a426..c78c565 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
 @@ -17,6 +17,73 @@ public sealed partial class Gpu
@@ -1876,7 +1876,7 @@ index 6f7a426..4d54965 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -84,10 +303,37 @@ public sealed partial class Gpu
+@@ -84,10 +303,44 @@ public sealed partial class Gpu
      {
          int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -1897,6 +1897,13 @@ index 6f7a426..4d54965 100644
 +                       $"colour=({a.R},{a.G},{a.B}) page=({_texPageX},{_texPageY}) depth={_texDepth} " +
 +                       $"clut=({(clut & 0x3F) * 16},{(clut >> 6) & 0x1FF}) " +
 +                       $"xy=({a.X},{a.Y})({b.X},{b.Y})({c.X},{c.Y}) uv=({a.U},{a.V})({b.U},{b.V})({c.U},{c.V})";
++
++        // [jetmoto-fork] RECOMPONE_SKIP_BIG=<px> drops triangles wider or taller
++        // than <px>. This is the falsifiable half of the "oversized triangles are
++        // painted over correct terrain" claim: if the claim holds, suppressing them
++        // reveals ordinary terrain underneath. If the corrupted region stays empty,
++        // the claim is wrong and the geometry really is absent.
++        if (SkipBig > 0 && (spanX > SkipBig || spanY > SkipBig)) return;
  
          long area = (long)(b.X - a.X) * (c.Y - a.Y) - (long)(b.Y - a.Y) * (c.X - a.X);
 -        if (area == 0) return;
@@ -1916,7 +1923,7 @@ index 6f7a426..4d54965 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +345,7 @@ public sealed partial class Gpu
+@@ -99,7 +352,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1925,7 +1932,7 @@ index 6f7a426..4d54965 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,11 +380,62 @@ public sealed partial class Gpu
+@@ -134,11 +387,68 @@ public sealed partial class Gpu
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
                      if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
@@ -1967,6 +1974,12 @@ index 6f7a426..4d54965 100644
 +        Environment.GetEnvironmentVariable("RECOMPONE_WIREFRAME") is "1" or "true";
 +
 +    /// <summary>Bright green triangle edge, straight into VRAM, clip-respecting.</summary>
++    static readonly double WatchAfter =
++        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_WATCH_AFTER"), out var _wa) ? _wa : 0;
++
++    static readonly int SkipBig =
++        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_SKIP_BIG"), out var _sb) ? _sb : 0;
++
 +    static readonly bool MarkDrop =
 +        Environment.GetEnvironmentVariable("RECOMPONE_MARK_DROP") is "1" or "true";
 +
@@ -1989,7 +2002,7 @@ index 6f7a426..4d54965 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +482,10 @@ public sealed partial class Gpu
+@@ -185,6 +495,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2000,7 +2013,7 @@ index 6f7a426..4d54965 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +553,7 @@ public sealed partial class Gpu
+@@ -252,7 +566,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -2009,7 +2022,7 @@ index 6f7a426..4d54965 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +563,7 @@ public sealed partial class Gpu
+@@ -262,7 +576,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2018,16 +2031,21 @@ index 6f7a426..4d54965 100644
          }
      }
  
-@@ -294,6 +595,13 @@ public sealed partial class Gpu
+@@ -294,6 +608,18 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
 +        // Match either framebuffer: the game alternates between y and y+240,
 +        // and pinning one of them is why the first attempt saw nothing in a race.
-+        if (WatchPixelX == x && (WatchPixelY == y || WatchPixelY + 240 == y) && _pixelWrites < 60)
++        if (WatchPixelX == x && (WatchPixelY == y || WatchPixelY + 240 == y)
++            && Runtime.Clock.Elapsed.TotalSeconds >= WatchAfter && _pixelWrites < 400)
 +        {
++            // [jetmoto-fork] RECOMPONE_WATCH_AFTER holds the log shut until a race
++            // is actually running. Without it the 60-write cap is spent on the boot
++            // logo and the watcher never reaches the thing being investigated.
 +            _pixelWrites++;
-+            Console.Error.WriteLine($"[pixel] rgb=({r},{g},{b}) semi={semi} <- {_curPrim}");
++            Console.Error.WriteLine(
++                $"[pixel] t={Runtime.Clock.Elapsed.TotalSeconds:F1} rgb=({r},{g},{b}) semi={semi} <- {_curPrim}");
 +        }
          if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) return;
          if (x < 0 || x >= VramWidth || y < 0 || y >= VramHeight) return;
