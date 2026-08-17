@@ -1439,7 +1439,7 @@ index 8b55b53..f43da23 100644
              case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
              case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..6d1f1ef 100644
+index 9900095..3c3c5db 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
 @@ -44,16 +44,31 @@ public sealed partial class Gpu
@@ -1562,7 +1562,7 @@ index 9900095..6d1f1ef 100644
      void BeginImageLoad()
      {
          _loadX = (int)(_fifo[1] & 0x3FF);
-@@ -125,6 +197,24 @@ public sealed partial class Gpu
+@@ -125,6 +197,36 @@ public sealed partial class Gpu
          _loadH = (int)((_fifo[2] >> 16) & 0xFFFF); if (_loadH == 0) _loadH = 0x200; else _loadH &= 0x1FF; if (_loadH == 0) _loadH = 0x200;
          _loadPx = 0;
          _loadImage = true;
@@ -1570,9 +1570,21 @@ index 9900095..6d1f1ef 100644
 +        {
 +            long key = ((long)_loadX << 40) | ((long)_loadY << 24) | ((long)_loadW << 12) | (uint)_loadH;
 +            if (_seenUploads.Add(key))
++            {
++                // [jetmoto-fork] Report the live display window alongside the
++                // destination. Upload coordinates on their own are ambiguous
++                // between framebuffer and texture memory, and guessing which
++                // one they were is exactly the kind of assumption that has cost
++                // this investigation whole days.
++                int dw = DisplayWidth <= 0 ? 320 : DisplayWidth;
++                int dh = DisplayHeight <= 0 ? 240 : DisplayHeight;
++                bool hits = _loadX < DisplayX + dw && _loadX + _loadW > DisplayX
++                         && _loadY < DisplayY + dh && _loadY + _loadH > DisplayY;
 +                Console.Error.WriteLine(
 +                    $"[upload] to ({_loadX},{_loadY}) {_loadW}x{_loadH}  pages " +
-+                    $"x{_loadX / 64}..{(_loadX + _loadW - 1) / 64} y{_loadY / 256}..{(_loadY + _loadH - 1) / 256}");
++                    $"x{_loadX / 64}..{(_loadX + _loadW - 1) / 64} y{_loadY / 256}..{(_loadY + _loadH - 1) / 256}" +
++                    $"  disp=({DisplayX},{DisplayY}) {dw}x{dh}{(hits ? " INDISPLAY" : "")}");
++            }
 +        }
 +        // RECOMPONE_WATCH_PAGE=<px>,<py> reports every upload that lands in one
 +        // texture page, deduped by nothing -- so a page being rewritten on a
@@ -1587,7 +1599,7 @@ index 9900095..6d1f1ef 100644
          HleLoadBegin();
          _fifo.Clear();
      }
-@@ -133,7 +223,12 @@ public sealed partial class Gpu
+@@ -133,7 +235,12 @@ public sealed partial class Gpu
      {
          if (!_loadImage) return;
          ushort stored = _setMask ? (ushort)(value | 0x8000) : value;

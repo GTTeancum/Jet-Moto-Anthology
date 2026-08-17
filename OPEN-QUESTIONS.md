@@ -128,3 +128,36 @@ determined:
 
 Next probe: log display origin and width at each upload, then check whether any
 upload actually intersects the live display window.
+
+### Resolved: those uploads are static-screen paints, not the in-race path
+
+The upload log now reports the live display window and flags intersections, so
+the ambiguity flagged above is settled by measurement.
+
+Of 557 distinct uploads, **36** intersect the display window. They are 24x240
+vertical strips at x = 0, 24, 48, 72, 96, 120 ... tiling a full screen width.
+Every one of them lands at **dstY=0 with disp=(0,0)** -- 22 in 512x240 and 14 in
+320x240. None land in the back buffer.
+
+That is what settles it. During gameplay the game draws to the buffer it is not
+displaying. Uploads into the *displayed* buffer at the origin are static-screen
+paints: loading screens and menu backdrops, drawn once as a strip-wise
+CPU-to-VRAM blit.
+
+**So this does not explain the in-race 0x0C20 regions.** The strip uploads are a
+real mechanism and worth knowing about, but they are not the one producing the
+defect. The previous entry's suggestion that they might be is withdrawn.
+
+State of the elimination for the in-race dark regions, all measured, all with
+probes shown to fire first:
+
+- Not the rasteriser: `RECOMPONE_LOG_COLOUR=3104`, zero hits.
+- Not a fill rectangle: one fill in 400 s, and it is black.
+- Not a display-window upload: all 36 are front-buffer, static-screen.
+
+That leaves the back buffer being written by something not yet instrumented, or
+not written at all. Instrument writes to the *back* buffer specifically -- the
+one whose origin is not the current display origin -- and count how much of it
+gets covered per frame. If coverage is short of the full window, the question
+becomes what the game expected to fill it, and that is answerable against the
+PCSX-Redux reference now that it exists.
