@@ -1633,7 +1633,7 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..c78c565 100644
+index 6f7a426..a5bda6b 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
 @@ -17,6 +17,73 @@ public sealed partial class Gpu
@@ -1932,10 +1932,24 @@ index 6f7a426..c78c565 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -134,11 +387,68 @@ public sealed partial class Gpu
+@@ -133,12 +386,81 @@ public sealed partial class Gpu
+                     if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
-                     if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
+-                    if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
++                    // [jetmoto-fork] The PS1 saturates the texture/vertex-colour
++                    // product; it does not wrap. tr can reach 255*255>>7 = 508,
++                    // and Plot packs with (v >> 3) & 0x1F, so 256 came out as
++                    // 32 & 31 = 0 -- pure black. Every brightly lit texel above
++                    // 255 folded to dark, which is what produced the "missing"
++                    // wedges of terrain: they were lit, not absent.
++                    if (!raw)
++                    {
++                        tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7;
++                        if (tr > 255) tr = 255;
++                        if (tg > 255) tg = 255;
++                        if (tb > 255) tb = 255;
++                    }
 +                    if (TrapDarkArea > 0) { _darkPixels += tr + tg + tb < 96 ? 1 : 0; _litPixels++; }
                      Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
                  }
@@ -2002,7 +2016,7 @@ index 6f7a426..c78c565 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +495,10 @@ public sealed partial class Gpu
+@@ -185,6 +507,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2013,7 +2027,22 @@ index 6f7a426..c78c565 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -252,7 +566,7 @@ public sealed partial class Gpu
+@@ -198,7 +524,13 @@ public sealed partial class Gpu
+                     if (texel == 0) continue;
+                     bool stp = (texel & 0x8000) != 0;
+                     int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
+-                    if (!raw) { tr = tr * cr >> 7; tg = tg * cg >> 7; tb = tb * cb >> 7; }
++                    if (!raw)
++                    {
++                        tr = tr * cr >> 7; tg = tg * cg >> 7; tb = tb * cb >> 7;
++                        if (tr > 255) tr = 255;
++                        if (tg > 255) tg = 255;
++                        if (tb > 255) tb = 255;
++                    }
+                     Plot(px, py, tr, tg, tb, semi && stp, false, stp);
+                 }
+                 else Plot(px, py, cr, cg, cb, semi, false);
+@@ -252,7 +584,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -2022,7 +2051,7 @@ index 6f7a426..c78c565 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +576,7 @@ public sealed partial class Gpu
+@@ -262,7 +594,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2031,7 +2060,7 @@ index 6f7a426..c78c565 100644
          }
      }
  
-@@ -294,6 +608,18 @@ public sealed partial class Gpu
+@@ -294,6 +626,18 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
