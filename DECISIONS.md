@@ -952,3 +952,47 @@ we sample dark texels where the art is bright.
 page (512,256) with CLUT (768,387) from our runtime and from PCSX-Redux and put
 them side by side. Same texture, same CLUT, two renderers. If ours is dark and
 the reference is not, the addressing is wrong and that is the bug.
+
+## 2026-08-17 — FOUND: 0x0C20 is the game's clear colour, drawn as a polygon
+
+Area accounting on `RECOMPONE_LOG_COLOUR=3104` (counting matching pixels per
+primitive, not just first sighting) names the painter beyond argument. The top
+four primitives, 11% each and 44% together:
+
+```
+tri tex=False colour=(0,13,25) xy=(0,0)(320,0)(0,240)
+tri tex=False colour=(0,13,25) xy=(320,0)(0,240)(320,240)
+tri tex=False colour=(0,13,25) xy=(0,240)(320,240)(0,480)
+tri tex=False colour=(0,13,25) xy=(320,240)(0,480)(320,480)
+```
+
+Two full-screen quads, one per framebuffer, each split into two triangles,
+flat-filled with (0,13,25). `To15(0,13,25)` is exactly 3104 = 0x0C20.
+
+**That is the screen clear, and the game does it with a polygon rather than a
+fill rectangle.** Which explains the fill trace finding exactly one fill in 400
+seconds, a result that was recorded as odd and never followed up.
+
+**So the dark regions are bare background.** They are the clear colour showing
+through in places where no geometry was drawn on top. Geometry really is missing
+there. The user said so from the first screenshot and was right.
+
+## RETRACTION: "nothing is undrawn" was wrong
+
+The `MARK_UNDRAWN` result -- zero magenta across 44 frames containing the dark
+regions, including one 90% dark -- proves nothing. The marker is written to the
+back buffer at flip time, and the game's very first primitive each frame is a
+full-screen clear quad that paints over all of it. The magenta could never
+survive regardless of what geometry did or did not draw.
+
+This is the *same* objection I raised against `MARK_UNDRAWN` early on, dismissed
+after the fill trace showed only one fill rectangle. The dismissal was wrong
+because I assumed a clear must be a fill rectangle. It is a polygon here.
+
+**A working version of that probe** must distinguish "painted only by the clear
+quad" from "painted by real geometry". Tag the clear primitive -- it is
+identifiable by being untextured, flat, colour (0,13,25), and covering the whole
+framebuffer -- and count pixels whose last writer was that primitive. Those
+pixels are the hole, measured directly.
+
+That number, per frame, against the reference, is the remaining task.

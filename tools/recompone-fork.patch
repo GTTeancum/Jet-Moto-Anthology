@@ -1238,7 +1238,7 @@ index 0000000..4bbf94e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..f43da23 100644
+index 8b55b53..d7048cc 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1256,12 +1256,15 @@ index 8b55b53..f43da23 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,115 @@ public sealed partial class Gpu
+@@ -50,6 +58,118 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
 +    /// <summary>[jetmoto-fork] Counts display-origin changes, i.e. buffer swaps.</summary>
 +    public int DisplayFlips { get; private set; }
++
++    static bool _vramDumped;
++    static double _lastColourReport;
 +
 +    static readonly bool MarkUndrawn =
 +        Environment.GetEnvironmentVariable("RECOMPONE_MARK_UNDRAWN") is "1" or "true";
@@ -1372,7 +1375,7 @@ index 8b55b53..f43da23 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +262,7 @@ public sealed partial class Gpu
+@@ -145,6 +265,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1380,7 +1383,7 @@ index 8b55b53..f43da23 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +273,56 @@ public sealed partial class Gpu
+@@ -155,11 +276,79 @@ public sealed partial class Gpu
          }
      }
  
@@ -1424,6 +1427,29 @@ index 8b55b53..f43da23 100644
 +                    // dark polygon from a hole with something dark behind it --
 +                    // a distinction I got wrong twice by reading screenshots.
 +                    if (MarkUndrawn) FillBackBuffer(ny);
++                    // Periodic, because the harness kills these runs on a timeout
++                    // and a ProcessExit handler would never fire.
++                    if (Runtime.Clock.Elapsed.TotalSeconds - _lastColourReport >= 30)
++                    {
++                        _lastColourReport = Runtime.Clock.Elapsed.TotalSeconds;
++                        ReportColourArea();
++                    }
++                    // [jetmoto-fork] RECOMPONE_DUMP_VRAM=<path> writes the whole
++                    // 1024x512 VRAM shadow once, after RECOMPONE_DUMP_VRAM_AFTER
++                    // seconds. Texture pages and CLUTs are decoded offline from
++                    // it, so a claim about what a texture contains can be looked
++                    // at instead of argued about.
++                    if (!_vramDumped
++                        && Environment.GetEnvironmentVariable("RECOMPONE_DUMP_VRAM") is string vpath
++                        && Runtime.Clock.Elapsed.TotalSeconds >= (
++                            double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_DUMP_VRAM_AFTER"), out var va) ? va : 0))
++                    {
++                        _vramDumped = true;
++                        var bytes = new byte[Vram.Length * 2];
++                        Buffer.BlockCopy(Vram, 0, bytes, 0, bytes.Length);
++                        System.IO.File.WriteAllBytes(vpath, bytes);
++                        Console.Error.WriteLine($"[vram] dumped {bytes.Length} bytes to {vpath} at t={Runtime.Clock.Elapsed.TotalSeconds:F1}");
++                    }
 +                    if (HuntColour != 0) HuntForColour(ny);
 +                    if (Environment.GetEnvironmentVariable("RECOMPONE_LOG_ORDER") is "1" or "true")
 +                    {
@@ -1645,10 +1671,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..f0036b3 100644
+index 6f7a426..431aa90 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,85 @@ public sealed partial class Gpu
+@@ -17,6 +17,107 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1698,8 +1724,30 @@ index 6f7a426..f0036b3 100644
 +        int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_LOG_COLOUR"), out var _lc) ? _lc : -1;
 +    static readonly double LogColourAfter =
 +        double.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_LOG_COLOUR_AFTER"), out var _lca) ? _lca : 0;
-+    static int _colourLogs;
-+    static readonly HashSet<string> _seenColourPrims = [];
++    static long _colourLogs;
++    static readonly Dictionary<string, long> _colourArea = [];
++    static string? _areaKey;
++    static long _areaCount;
++
++    static void FlushColourArea()
++    {
++        if (_areaKey is null || _areaCount == 0) { _areaCount = 0; return; }
++        _colourArea.TryGetValue(_areaKey, out var prev);
++        _colourArea[_areaKey] = prev + _areaCount;
++        _areaCount = 0;
++    }
++
++    public static void ReportColourArea()
++    {
++        FlushColourArea();
++        if (_colourArea.Count == 0) return;
++        long total = 0; foreach (var v in _colourArea.Values) total += v;
++        Console.Error.WriteLine($"[colour] {total} matching pixels across {_colourArea.Count} distinct primitives");
++        var top = new List<KeyValuePair<string, long>>(_colourArea);
++        top.Sort((a, b) => b.Value.CompareTo(a.Value));
++        for (int i = 0; i < top.Count && i < 8; i++)
++            Console.Error.WriteLine($"[colour] {top[i].Value * 100 / total,3}%  {top[i].Value,9}px  {top[i].Key}");
++    }
 +
 +    static readonly int SkipPage = ParseSkipPage();
 +    static int ParseSkipPage()
@@ -1734,7 +1782,7 @@ index 6f7a426..f0036b3 100644
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +105,15 @@ public sealed partial class Gpu
+@@ -26,6 +127,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1750,7 +1798,7 @@ index 6f7a426..f0036b3 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +156,149 @@ public sealed partial class Gpu
+@@ -68,6 +178,149 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1900,7 +1948,7 @@ index 6f7a426..f0036b3 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -84,10 +315,44 @@ public sealed partial class Gpu
+@@ -84,10 +337,44 @@ public sealed partial class Gpu
      {
          int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -1947,7 +1995,7 @@ index 6f7a426..f0036b3 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -99,7 +364,7 @@ public sealed partial class Gpu
+@@ -99,7 +386,7 @@ public sealed partial class Gpu
          int bias0 = IsTopLeft(b, c) ? 0 : -1;
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
@@ -1956,7 +2004,7 @@ index 6f7a426..f0036b3 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -133,12 +398,93 @@ public sealed partial class Gpu
+@@ -133,12 +420,93 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2052,7 +2100,7 @@ index 6f7a426..f0036b3 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +531,10 @@ public sealed partial class Gpu
+@@ -185,6 +553,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2063,7 +2111,7 @@ index 6f7a426..f0036b3 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -198,7 +548,13 @@ public sealed partial class Gpu
+@@ -198,7 +570,13 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2078,7 +2126,7 @@ index 6f7a426..f0036b3 100644
                      Plot(px, py, tr, tg, tb, semi && stp, false, stp);
                  }
                  else Plot(px, py, cr, cg, cb, semi, false);
-@@ -252,7 +608,7 @@ public sealed partial class Gpu
+@@ -252,7 +630,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -2087,7 +2135,7 @@ index 6f7a426..f0036b3 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +618,7 @@ public sealed partial class Gpu
+@@ -262,7 +640,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2096,7 +2144,7 @@ index 6f7a426..f0036b3 100644
          }
      }
  
-@@ -294,6 +650,33 @@ public sealed partial class Gpu
+@@ -294,6 +672,41 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
@@ -2112,7 +2160,7 @@ index 6f7a426..f0036b3 100644
 +            Console.Error.WriteLine(
 +                $"[pixel] t={Runtime.Clock.Elapsed.TotalSeconds:F1} rgb=({r},{g},{b}) semi={semi} <- {_curPrim}");
 +        }
-+        if (LogColour >= 0 && _colourLogs < 40
++        if (LogColour >= 0 && _colourLogs < long.MaxValue
 +            && Runtime.Clock.Elapsed.TotalSeconds >= LogColourAfter
 +            && To15(r, g, b) == LogColour)
 +        {
@@ -2120,11 +2168,19 @@ index 6f7a426..f0036b3 100644
 +            // 40 copies of whichever primitive happens to be drawn first, and
 +            // every later painter of the same colour goes unseen -- which is
 +            // exactly what happened on the first run of this probe.
-+            if (_seenColourPrims.Add(_curPrim))
++            // Count matching pixels per primitive, not just first sighting.
++            // Presence tells you a primitive produced the colour once; only area
++            // tells you which primitive owns a region covering most of a frame.
++            // One dictionary write per primitive, not per pixel. Keying a
++            // string-hashed dictionary on every matching pixel was slow enough
++            // to break the game's timing and crash the run.
++            if (!ReferenceEquals(_curPrim, _areaKey))
 +            {
-+                _colourLogs++;
-+                Console.Error.WriteLine($"[colour] t={Runtime.Clock.Elapsed.TotalSeconds:F1} <- {_curPrim}");
++                FlushColourArea();
++                _areaKey = _curPrim;
 +            }
++            _areaCount++;
++            _colourLogs++;
 +        }
 +
          if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) return;
