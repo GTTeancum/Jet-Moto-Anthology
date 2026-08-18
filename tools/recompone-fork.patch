@@ -1154,10 +1154,10 @@ index 0000000..4b8a1e3
 +}
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
-index 0000000..4bbf94e
+index 0000000..6501310
 --- /dev/null
 +++ b/RecompOne.Runtime/Gpu/Counters.cs
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,90 @@
 +namespace RecompOne.Runtime;
 +
 +/// <summary>
@@ -1177,6 +1177,17 @@ index 0000000..4bbf94e
 +        Environment.GetEnvironmentVariable("RECOMPONE_FPS") is "1" or "true";
 +
 +    public static long Polys, Lines, Rects, Loads;
++    public static long TotalPolys, TotalRects;
++    public static uint MaxOtAddr;
++
++    // Monotonic counters used by the per-display-frame diagnostic. Unlike the
++    // FPS counters above, these are never reset by the one-second reporter.
++    public static long TotalGpuDmaCalls, TotalGpuDmaNodes, TotalGpuDmaWords;
++    public static long TotalGpuDmaEndMarker, TotalGpuDmaBit23End, TotalGpuDmaGuardEnd;
++    public static uint LastGpuDmaHead;
++
++    public static long TotalTrianglePieces, TotalHugeTriangles;
++    public static long TotalDegenerateTriangles, TotalProjectionLimitVertices;
 +
 +    /// <summary>Primitives the 1023x511 extent rule threw away before drawing.</summary>
 +    public static long DroppedSpan;
@@ -1238,7 +1249,7 @@ index 0000000..4bbf94e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..909c456 100644
+index 8b55b53..c458264 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
 @@ -19,6 +19,14 @@ public sealed partial class Gpu
@@ -1256,7 +1267,7 @@ index 8b55b53..909c456 100644
      bool _texDisable;
  
      int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,161 @@ public sealed partial class Gpu
+@@ -50,6 +58,187 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
@@ -1266,6 +1277,11 @@ index 8b55b53..909c456 100644
 +    static bool _vramDumped;
 +    static int _holeFrames;
 +    static long _lastPolys, _lastRects;
++    static long _lastDmaCalls, _lastDmaNodes, _lastDmaWords;
++    static long _lastDmaEnd, _lastDmaBit23, _lastDmaGuard;
++    static long _lastTrianglePieces, _lastHugeTriangles, _lastDegenerateTriangles, _lastProjectionLimitVertices;
++    static readonly bool TraceDmaFrames =
++        Environment.GetEnvironmentVariable("RECOMPONE_TRACE_DMA_FRAMES") is "1" or "true";
 +
 +    /// <summary>
 +    /// Count pixels in the just-finished frame still owned by the screen-clear
@@ -1297,15 +1313,36 @@ index 8b55b53..909c456 100644
 +        // a normal count means they were submitted and the rasteriser dropped
 +        // them; near zero means they never arrived, and the fault is upstream in
 +        // the ordering table or its DMA.
-+        long polys = GpuCounters.Polys, dp = polys - _lastPolys;
-+        long rects = GpuCounters.Rects, dr = rects - _lastRects;
++        long polys = GpuCounters.TotalPolys, dp = polys - _lastPolys;
++        long rects = GpuCounters.TotalRects, dr = rects - _lastRects;
 +        _lastPolys = polys; _lastRects = rects;
 +
++        long dmaCalls = GpuCounters.TotalGpuDmaCalls, dd = dmaCalls - _lastDmaCalls;
++        long dmaNodes = GpuCounters.TotalGpuDmaNodes, dn = dmaNodes - _lastDmaNodes;
++        long dmaWords = GpuCounters.TotalGpuDmaWords, dw = dmaWords - _lastDmaWords;
++        long dmaEnd = GpuCounters.TotalGpuDmaEndMarker, de = dmaEnd - _lastDmaEnd;
++        long dmaBit23 = GpuCounters.TotalGpuDmaBit23End, db = dmaBit23 - _lastDmaBit23;
++        long dmaGuard = GpuCounters.TotalGpuDmaGuardEnd, dg = dmaGuard - _lastDmaGuard;
++        _lastDmaCalls = dmaCalls; _lastDmaNodes = dmaNodes; _lastDmaWords = dmaWords;
++        _lastDmaEnd = dmaEnd; _lastDmaBit23 = dmaBit23; _lastDmaGuard = dmaGuard;
++
++        long tri = GpuCounters.TotalTrianglePieces, dt = tri - _lastTrianglePieces;
++        long huge = GpuCounters.TotalHugeTriangles, dh = huge - _lastHugeTriangles;
++        long degen = GpuCounters.TotalDegenerateTriangles, dz = degen - _lastDegenerateTriangles;
++        long limits = GpuCounters.TotalProjectionLimitVertices, dl = limits - _lastProjectionLimitVertices;
++        _lastTrianglePieces = tri; _lastHugeTriangles = huge;
++        _lastDegenerateTriangles = degen; _lastProjectionLimitVertices = limits;
++
 +        _holeFrames++;
++        if (TraceDmaFrames)
++            Console.Error.WriteLine(
++                $"[dmaframe] flip={_holeFrames} t={Runtime.Clock.Elapsed.TotalSeconds:F1} clear={pct}% "
++                + $"poly={dp} rect={dr} tri={dt} huge={dh} degen={dz} limitV={dl} "
++                + $"dma={dd} nodes={dn} words={dw} end={de}/{db}/{dg} head=0x{GpuCounters.LastGpuDmaHead:X6}");
 +        if (pct >= 30 || _holeFrames % 60 == 0)
 +            Console.Error.WriteLine(
 +                $"[holes] t={Runtime.Clock.Elapsed.TotalSeconds:F1} {pct,3}% clear-owned "
-+                + $"({held}/{total})  polys={dp} rects={dr}");
++                + $"({held}/{total})  polys={dp} rects={dr} maxOT=0x{GpuCounters.MaxOtAddr:X6} otHigh={GpuCounters.OtAbove2Mb}");
 +    }
 +    static double _lastColourReport;
 +
@@ -1418,7 +1455,7 @@ index 8b55b53..909c456 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +308,7 @@ public sealed partial class Gpu
+@@ -145,6 +334,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1426,7 +1463,7 @@ index 8b55b53..909c456 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +319,80 @@ public sealed partial class Gpu
+@@ -155,11 +345,80 @@ public sealed partial class Gpu
          }
      }
  
@@ -1509,7 +1546,7 @@ index 8b55b53..909c456 100644
              case 0x07: _vRange1 = (int)(p & 0x3FF); _vRange2 = (int)((p >> 10) & 0x3FF); break;
              case 0x08:
 diff --git a/RecompOne.Runtime/Gpu/GpuCommands.cs b/RecompOne.Runtime/Gpu/GpuCommands.cs
-index 9900095..3c3c5db 100644
+index 9900095..de58973 100644
 --- a/RecompOne.Runtime/Gpu/GpuCommands.cs
 +++ b/RecompOne.Runtime/Gpu/GpuCommands.cs
 @@ -44,16 +44,31 @@ public sealed partial class Gpu
@@ -1521,9 +1558,9 @@ index 9900095..3c3c5db 100644
 -            case >= 0x60 and <= 0x7F: DrawRectangle(); break;
 -            case >= 0x80 and <= 0x9F: CopyVramToVram(); break;
 -            case >= 0xA0 and <= 0xBF: BeginImageLoad(); break;
-+            case >= 0x20 and <= 0x3F: GpuCounters.Polys++; DrawPolygon(); break;
++            case >= 0x20 and <= 0x3F: GpuCounters.Polys++; GpuCounters.TotalPolys++; DrawPolygon(); break;
 +            case >= 0x40 and <= 0x5F: GpuCounters.Lines++; DrawLine(); break;
-+            case >= 0x60 and <= 0x7F: GpuCounters.Rects++; DrawRectangle(); break;
++            case >= 0x60 and <= 0x7F: GpuCounters.Rects++; GpuCounters.TotalRects++; DrawRectangle(); break;
 +            case >= 0x80 and <= 0x9F:
 +                if (TraceBlit)
 +                {
@@ -1715,10 +1752,10 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..e1fe1ee 100644
+index 6f7a426..1c86570 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,112 @@ public sealed partial class Gpu
+@@ -17,6 +17,132 @@ public sealed partial class Gpu
          {  3, -1,  2, -2 },
      };
  
@@ -1828,10 +1865,30 @@ index 6f7a426..e1fe1ee 100644
 +    static readonly bool FlatShade =
 +        Environment.GetEnvironmentVariable("RECOMPONE_FLAT") is "1" or "true";
 +
++    void NoteTriangleShape(in Vert a, in Vert b, in Vert c)
++    {
++        GpuCounters.TotalTrianglePieces++;
++        long area = (long)(b.X - a.X) * (c.Y - a.Y) - (long)(b.Y - a.Y) * (c.X - a.X);
++        if (area == 0) GpuCounters.TotalDegenerateTriangles++;
++
++        int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
++        int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
++        if (spanX > 400 || spanY > 300) GpuCounters.TotalHugeTriangles++;
++
++        static bool AtProjectionLimit(in Vert v, int ox, int oy)
++        {
++            int x = v.X - ox, y = v.Y - oy;
++            return x is -0x400 or 0x3FF || y is -0x400 or 0x3FF;
++        }
++        if (AtProjectionLimit(a, _drawOffsetX, _drawOffsetY)) GpuCounters.TotalProjectionLimitVertices++;
++        if (AtProjectionLimit(b, _drawOffsetX, _drawOffsetY)) GpuCounters.TotalProjectionLimitVertices++;
++        if (AtProjectionLimit(c, _drawOffsetX, _drawOffsetY)) GpuCounters.TotalProjectionLimitVertices++;
++    }
++
      void DrawPolygon()
      {
          uint cmd = _fifo[0];
-@@ -26,6 +132,15 @@ public sealed partial class Gpu
+@@ -26,6 +152,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1847,7 +1904,7 @@ index 6f7a426..e1fe1ee 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +183,149 @@ public sealed partial class Gpu
+@@ -68,6 +203,152 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -1994,10 +2051,13 @@ index 6f7a426..e1fe1ee 100644
 +
 +        if (FlatShade) { tex = false; raw = false; }
 +
++        NoteTriangleShape(v[0], v[1], v[2]);
++        if (quad) NoteTriangleShape(v[1], v[2], v[3]);
++
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -84,10 +342,44 @@ public sealed partial class Gpu
+@@ -84,10 +365,44 @@ public sealed partial class Gpu
      {
          int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -2044,7 +2104,7 @@ index 6f7a426..e1fe1ee 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -96,10 +388,22 @@ public sealed partial class Gpu
+@@ -96,10 +411,22 @@ public sealed partial class Gpu
          int maxY = Math.Min(_drawAreaBottom, Math.Max(a.Y, Math.Max(b.Y, c.Y)));
          if (minX > maxX || minY > maxY) return;
  
@@ -2068,7 +2128,7 @@ index 6f7a426..e1fe1ee 100644
  
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -133,12 +437,93 @@ public sealed partial class Gpu
+@@ -133,12 +460,93 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2164,7 +2224,7 @@ index 6f7a426..e1fe1ee 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +570,10 @@ public sealed partial class Gpu
+@@ -185,6 +593,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2175,7 +2235,7 @@ index 6f7a426..e1fe1ee 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -198,7 +587,13 @@ public sealed partial class Gpu
+@@ -198,7 +610,13 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
@@ -2190,7 +2250,7 @@ index 6f7a426..e1fe1ee 100644
                      Plot(px, py, tr, tg, tb, semi && stp, false, stp);
                  }
                  else Plot(px, py, cr, cg, cb, semi, false);
-@@ -252,7 +647,7 @@ public sealed partial class Gpu
+@@ -252,7 +670,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
@@ -2199,7 +2259,7 @@ index 6f7a426..e1fe1ee 100644
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +657,7 @@ public sealed partial class Gpu
+@@ -262,7 +680,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
@@ -2208,7 +2268,7 @@ index 6f7a426..e1fe1ee 100644
          }
      }
  
-@@ -294,10 +689,46 @@ public sealed partial class Gpu
+@@ -294,10 +712,46 @@ public sealed partial class Gpu
  
      void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
      {
@@ -2389,10 +2449,10 @@ index 0000000..f8e64da
 +    }
 +}
 diff --git a/RecompOne.Runtime/Hardware/Gte.cs b/RecompOne.Runtime/Hardware/Gte.cs
-index e13c28a..a508e19 100644
+index e13c28a..2bb3e57 100644
 --- a/RecompOne.Runtime/Hardware/Gte.cs
 +++ b/RecompOne.Runtime/Hardware/Gte.cs
-@@ -40,7 +40,56 @@ public static class Gte
+@@ -40,7 +40,79 @@ public static class Gte
          return t;
      }
  
@@ -2403,14 +2463,13 @@ index e13c28a..a508e19 100644
 +    // past the GPU's extent rule is what a missing one looks like -- so the two
 +    // symptoms share a counter, and it is worth knowing which is firing.
 +    public static readonly long[] FlagHits = new long[32];
-+
-+    static readonly int NclipMode =
-+        Environment.GetEnvironmentVariable("RECOMPONE_NCLIP") switch
-+        {
-+            "flip" => 1,
-+            "off" => 2,
-+            _ => 0,
-+        };
++    public static readonly long[] CommandHits = new long[64];
++    public static readonly long[] MvmvaModeHits = new long[64];
++    static long RtpHits;
++    static int RtpMinX = int.MaxValue, RtpMaxX = int.MinValue;
++    static int RtpMinY = int.MaxValue, RtpMaxY = int.MinValue;
++    static int RtpMinZ = int.MaxValue, RtpMaxZ = int.MinValue;
++    static int RtpMinH = int.MaxValue, RtpMaxH = int.MinValue;
 +
 +    static void Flag(int bit) { FlagHits[bit]++; FLAG |= 1u << bit; }
 +
@@ -2447,10 +2506,59 @@ index e13c28a..a508e19 100644
 +        Array.Clear(FlagHits);
 +        return s;
 +    }
++
++    public static string TakeCommandSummary()
++    {
++        var commands = new List<string>();
++        for (int i = 0; i < CommandHits.Length; i++)
++            if (CommandHits[i] != 0) commands.Add($"{i:X2}:{CommandHits[i]}");
++        var modes = new List<string>();
++        for (int i = 0; i < MvmvaModeHits.Length; i++)
++            if (MvmvaModeHits[i] != 0)
++                modes.Add($"{i >> 4}/{(i >> 2) & 3}/{i & 3}:{MvmvaModeHits[i]}");
++        string range = RtpHits == 0 ? "none" :
++            $"n={RtpHits} x={RtpMinX}..{RtpMaxX} y={RtpMinY}..{RtpMaxY} " +
++            $"z={RtpMinZ}..{RtpMaxZ} h={RtpMinH}..{RtpMaxH}";
++        string camera = $"of=({OFX},{OFY}) tr=({TR[0]},{TR[1]},{TR[2]}) " +
++            $"rt=[{string.Join(',', RT)}]";
++        string s = $"ops={string.Join(',', commands)} mvmva={string.Join(',', modes)} " +
++                   $"rtp={range} {camera}";
++        Array.Clear(CommandHits);
++        Array.Clear(MvmvaModeHits);
++        RtpHits = 0;
++        RtpMinX = RtpMinY = RtpMinZ = RtpMinH = int.MaxValue;
++        RtpMaxX = RtpMaxY = RtpMaxZ = RtpMaxH = int.MinValue;
++        return s;
++    }
  
      static int SatIR(int n, int v, bool lm)
      {
-@@ -213,15 +262,28 @@ public static class Gte
+@@ -184,6 +256,11 @@ public static class Gte
+         long sy = CheckMac0((long)div * IR2 + OFY); MAC0 = (int)sy;
+         int nx = SatX((int)(sx >> 16));
+         int ny = SatY((int)(sy >> 16));
++        RtpHits++;
++        RtpMinX = Math.Min(RtpMinX, nx); RtpMaxX = Math.Max(RtpMaxX, nx);
++        RtpMinY = Math.Min(RtpMinY, ny); RtpMaxY = Math.Max(RtpMaxY, ny);
++        RtpMinZ = Math.Min(RtpMinZ, sz); RtpMaxZ = Math.Max(RtpMaxZ, sz);
++        RtpMinH = Math.Min(RtpMinH, H); RtpMaxH = Math.Max(RtpMaxH, H);
+         SX[0] = SX[1]; SX[1] = SX[2]; SX[2] = (short)nx;
+         SY[0] = SY[1]; SY[1] = SY[2]; SY[2] = (short)ny;
+ 
+@@ -203,8 +280,11 @@ public static class Gte
+         int mx = (int)((cmd >> 17) & 3);
+         int vn = (int)((cmd >> 15) & 3);
+         int cv = (int)((cmd >> 13) & 3);
++        int op = (int)(cmd & 0x3F);
++        CommandHits[op]++;
++        if (op == 0x12) MvmvaModeHits[(mx << 4) | (vn << 2) | cv]++;
+ 
+-        switch (cmd & 0x3F)
++        switch (op)
+         {
+             case 0x01: Rtp(V[0], V[1], V[2], sf, lm, true); break;
+             case 0x30:
+@@ -213,15 +293,22 @@ public static class Gte
                  Rtp(V[6], V[7], V[8], sf, lm, true);
                  break;
              case 0x06:
@@ -2459,12 +2567,6 @@ index e13c28a..a508e19 100644
 +                long nclip = (long)SX[0] * (SY[1] - SY[2])
 +                           + (long)SX[1] * (SY[2] - SY[0])
 +                           + (long)SX[2] * (SY[0] - SY[1]);
-+                // [jetmoto-fork] RECOMPONE_NCLIP=flip negates the backface test,
-+                // =off makes it always say "front". A game culls its own
-+                // polygons on this sign, so if holes in the scene are a winding
-+                // problem these two turn them inside out or fill them in.
-+                if (NclipMode == 1) nclip = -nclip;
-+                else if (NclipMode == 2) nclip = 0x1000;
 +                MAC0 = (int)CheckMac0(nclip);
                  break;
 +            }
@@ -2480,6 +2582,29 @@ index e13c28a..a508e19 100644
                  break;
              case 0x12: Mvmva(sf, lm, mx, vn, cv); break;
              case 0x28:
+@@ -230,10 +317,19 @@ public static class Gte
+                 SetMac(3, (long)IR3 * IR3, sf, lm);
+                 break;
+             case 0x0C:
+-                SetMac(1, (long)RT[4] * IR3 - (long)RT[8] * IR2, sf, lm);
+-                SetMac(2, (long)RT[8] * IR1 - (long)RT[0] * IR3, sf, lm);
+-                SetMac(3, (long)RT[0] * IR2 - (long)RT[4] * IR1, sf, lm);
++            {
++                int in1 = IR1, in2 = IR2, in3 = IR3;
++                int d1 = RT[0], d2 = RT[4], d3 = RT[8];
++                // [jetmoto-fork] OP's products are parallel. Snapshot every
++                // input before SetMac updates the corresponding IR register.
++                long out1 = (long)d2 * in3 - (long)d3 * in2;
++                long out2 = (long)d3 * in1 - (long)d1 * in3;
++                long out3 = (long)d1 * in2 - (long)d2 * in1;
++                SetMac(1, out1, sf, lm);
++                SetMac(2, out2, sf, lm);
++                SetMac(3, out3, sf, lm);
+                 break;
++            }
+             case 0x3D:
+                 SetMac(1, (long)IR0 * IR1, sf, lm);
+                 SetMac(2, (long)IR0 * IR2, sf, lm);
 diff --git a/RecompOne.Runtime/Hardware/Interrupts.cs b/RecompOne.Runtime/Hardware/Interrupts.cs
 index 6027c49..50aedfc 100644
 --- a/RecompOne.Runtime/Hardware/Interrupts.cs
@@ -2986,10 +3111,10 @@ index edd260b..a506418 100644
          double wait = _nextFrameMs - now;
 diff --git a/RecompOne.Runtime/Host/RamDump.cs b/RecompOne.Runtime/Host/RamDump.cs
 new file mode 100644
-index 0000000..86a9225
+index 0000000..446b057
 --- /dev/null
 +++ b/RecompOne.Runtime/Host/RamDump.cs
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,51 @@
 +using RecompOne.Runtime.Memory;
 +
 +namespace RecompOne.Runtime.Host;
@@ -3001,13 +3126,15 @@ index 0000000..86a9225
 +///
 +///   RECOMPONE_RAMDUMP_DIR=&lt;dir&gt;    where to write ram-NNNN.bin
 +///   RECOMPONE_RAMDUMP_EVERY=&lt;n&gt;    presented frames between snapshots (default 600)
++///   RECOMPONE_RAMDUMP_START=&lt;n&gt;    first presented frame to capture
++///   RECOMPONE_RAMDUMP_END=&lt;n&gt;      last presented frame to capture
 +///
 +/// 2 MB per snapshot, so keep the interval coarse for long runs.
 +/// </summary>
 +public static class RamDump
 +{
 +    static string? _dir;
-+    static int _every = 600, _frame, _count;
++    static int _every = 600, _start, _end = int.MaxValue, _frame, _count;
 +    static bool _init;
 +
 +    public static void Tick(IMemory? mem)
@@ -3018,17 +3145,22 @@ index 0000000..86a9225
 +            _dir = Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_DIR");
 +            if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_EVERY"), out var n) && n > 0)
 +                _every = n;
++            if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_START"), out n) && n >= 0)
++                _start = n;
++            if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RAMDUMP_END"), out n) && n >= 0)
++                _end = n;
 +            if (!string.IsNullOrEmpty(_dir)) Directory.CreateDirectory(_dir);
 +        }
 +        if (string.IsNullOrEmpty(_dir) || mem is not PSMemory ps) return;
-+        if (_frame++ % _every != 0) return;
++        int frame = _frame++;
++        if (frame < _start || frame > _end || (frame - _start) % _every != 0) return;
 +
 +        try
 +        {
 +            var path = Path.Combine(_dir!, $"ram-{_count:D4}.bin");
 +            using var f = File.Create(path);
 +            f.Write(ps.Ram);
-+            Console.Error.WriteLine($"[RamDump] frame {_frame - 1} -> {path}");
++            Console.Error.WriteLine($"[RamDump] frame {frame} -> {path}");
 +            _count++;
 +        }
 +        catch (Exception e) { Console.Error.WriteLine($"[RamDump] failed: {e.Message}"); }
@@ -3036,10 +3168,10 @@ index 0000000..86a9225
 +}
 diff --git a/RecompOne.Runtime/Host/ScriptedInput.cs b/RecompOne.Runtime/Host/ScriptedInput.cs
 new file mode 100644
-index 0000000..014912e
+index 0000000..c38f32d
 --- /dev/null
 +++ b/RecompOne.Runtime/Host/ScriptedInput.cs
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,221 @@
 +using RecompOne.Runtime.Hardware;
 +
 +namespace RecompOne.Runtime.Host;
@@ -3078,6 +3210,7 @@ index 0000000..014912e
 +    static (int Frame, ushort Mask)[]? _steps;
 +    static int _frame = -1;
 +    static int _next;
++    static readonly string? Jm3Track = Environment.GetEnvironmentVariable("RECOMPONE_TRACK");
 +
 +    public static bool Active => _steps is { Length: > 0 };
 +    public static int Frame => _frame;
@@ -3085,6 +3218,69 @@ index 0000000..014912e
 +    static void Load()
 +    {
 +        var spec = Environment.GetEnvironmentVariable("RECOMPONE_INPUT");
++        if (string.IsNullOrWhiteSpace(spec) && !string.IsNullOrWhiteSpace(Jm3Track))
++        {
++            // Drive the shell to Single Race without an external harness. The
++            // movie hook advances the intro states; the early alternating input
++            // handles title and rider select. At Race Mode we deliberately move
++            // from Season to Single, then advance to the requested course.
++            var fast = new List<string>();
++            for (int frame = 1; frame <= 301; frame += 60)
++            {
++                fast.Add($"{frame}:start");
++                fast.Add($"{frame + 8}:");
++                fast.Add($"{frame + 16}:cross");
++                fast.Add($"{frame + 24}:");
++            }
++
++            string[] tracks =
++            [
++                "canyon", "ice", "volcano"
++            ];
++            int trackIndex = Array.FindIndex(tracks,
++                t => t.Equals(Jm3Track, StringComparison.OrdinalIgnoreCase));
++            int cursor;
++            if (trackIndex == 0)
++            {
++                // Canyon is the first Novice season race, which avoids the
++                // slower Single Race carousel entirely.
++                fast.Add("361:cross");
++                fast.Add("369:");
++                cursor = 421;
++            }
++            else
++            {
++                fast.Add("361:down");
++                fast.Add("369:");
++                fast.Add("377:cross");
++                fast.Add("385:");
++                cursor = 481;
++                for (int i = 0; i < trackIndex; i++)
++                {
++                    fast.Add($"{cursor}:right");
++                    // The carousel moves once per sampled tick; an eight-tick
++                    // menu press skips across several courses here.
++                    fast.Add($"{cursor + 1}:");
++                    // Course previews load asynchronously. Do not move again
++                    // until TRKSEL commits the descriptor behind the title.
++                    cursor += 60;
++                }
++                cursor += 60;
++                fast.Add($"{cursor}:cross");
++                fast.Add($"{cursor + 8}:");
++                cursor += 60;
++            }
++
++            // Confirm the course briefing/loading screen, then leave the pad
++            // released once gameplay has begun.
++            for (int frame = cursor; frame <= cursor + 600; frame += 60)
++            {
++                fast.Add($"{frame}:cross");
++                fast.Add($"{frame + 8}:");
++            }
++            spec = string.Join(';', fast);
++            Console.Error.WriteLine($"[FastTrack] built-in navigation for {Jm3Track}");
++        }
 +        if (string.IsNullOrWhiteSpace(spec)) { _steps = []; return; }
 +
 +        if (spec.StartsWith('@'))
@@ -3123,6 +3319,12 @@ index 0000000..014912e
 +        steps.Sort((a, b) => a.Item1.CompareTo(b.Item1));
 +        _steps = steps.ToArray();
 +        Console.Error.WriteLine($"[Input] {_steps.Length} scripted step(s)");
++    }
++
++    public static void NotifyJm3Movie(string path)
++    {
++        if (!string.IsNullOrWhiteSpace(Jm3Track))
++            Console.Error.WriteLine($"[FastTrack] shell movie: {path}");
 +    }
 +
 +    // [jetmoto-fork] RECOMPONE_INPUT_LIVE=<path> reads the current button state
@@ -3192,7 +3394,7 @@ index 0000000..014912e
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..743de96 100644
+index 8a62627..b9b7e1f 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -3411,7 +3613,18 @@ index 8a62627..743de96 100644
      }
  
      internal static void Pump()
-@@ -285,13 +463,34 @@ public static class HostWindow
+@@ -258,7 +436,9 @@ public static class HostWindow
+         while (true)
+         {
+             var path = ConfigManager.Game.CdPath;
+-            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path) && Runtime.ValidateDisc(path) == null)
++            if (!string.IsNullOrWhiteSpace(path) &&
++                (File.Exists(path) || Cdrom.LooseDisc.Is(path)) &&
++                Runtime.ValidateDisc(path) == null)
+                 return;
+ 
+             try { _window.DoEvents(); } catch { }
+@@ -285,13 +465,34 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -3449,7 +3662,18 @@ index 8a62627..743de96 100644
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -372,7 +571,12 @@ public static class HostWindow
+@@ -319,7 +520,9 @@ public static class HostWindow
+         ConfigManager.ApplyViewToPanels(PanelManager.Panels);
+ 
+         var cdPath = ConfigManager.Game.CdPath;
+-        if (string.IsNullOrWhiteSpace(cdPath) || !File.Exists(cdPath) || Runtime.ValidateDisc(cdPath) != null)
++        if (string.IsNullOrWhiteSpace(cdPath) ||
++            (!File.Exists(cdPath) && !Cdrom.LooseDisc.Is(cdPath)) ||
++            Runtime.ValidateDisc(cdPath) != null)
+             _discPicker.Show();
+     }
+ 
+@@ -372,7 +575,12 @@ public static class HostWindow
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
                      outW: wf.X, outH: wf.Y);
@@ -3463,7 +3687,7 @@ index 8a62627..743de96 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +759,25 @@ public static class HostWindow
+@@ -555,6 +763,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -3518,23 +3742,58 @@ index ebd353f..d4a1d87 100644
      {
          if (MdecOn) Console.WriteLine($"[MDEC] {m}");
 diff --git a/RecompOne.Runtime/Memory/Dma.cs b/RecompOne.Runtime/Memory/Dma.cs
-index c376f15..c793f07 100644
+index c376f15..34a558b 100644
 --- a/RecompOne.Runtime/Memory/Dma.cs
 +++ b/RecompOne.Runtime/Memory/Dma.cs
-@@ -72,6 +72,12 @@ public sealed class Dma
+@@ -72,17 +72,46 @@ public sealed class Dma
          uint sync = (chcr >> 9) & 3u;
          if (sync == 2)
          {
++            GpuCounters.TotalGpuDmaCalls++;
++            GpuCounters.LastGpuDmaHead = madr & 0x1FFFFCu;
 +            // [jetmoto-fork] The hardware masks list addresses to 2 MB. This
 +            // runtime hands games an 8 MB window, so an ordering table built
 +            // above 2 MB would be walked at a wrapped address -- reading someone
 +            // else's memory as a display list, which loses whole chunks of a
 +            // scene. Counted so the possibility is measured, not assumed.
 +            if ((madr & 0x1FFFFFFFu) >= 0x00200000u) GpuCounters.OtAbove2Mb++;
++            // [jetmoto-fork] Record the highest ordering-table address actually
++            // seen. A zero counter is not evidence -- that lesson was expensive
++            // here -- but a maximum is self-verifying: it cannot come back zero
++            // if any list was walked at all, so the reading proves itself.
++            uint phys = madr & 0x1FFFFFFFu;
++            if (phys > GpuCounters.MaxOtAddr) GpuCounters.MaxOtAddr = phys;
              uint addr = madr & 0x1FFFFCu;
++            bool terminated = false;
              for (int guard = 0; guard < 0x100000; guard++)
              {
-@@ -131,7 +137,10 @@ public sealed class Dma
++                GpuCounters.TotalGpuDmaNodes++;
+                 uint header = _mem.ReadU32(addr);
+                 uint count = header >> 24;
++                GpuCounters.TotalGpuDmaWords += count;
+                 for (uint i = 0; i < count; i++)
+                     _gpu.WriteGp0(_mem.ReadU32(addr + 4u + i * 4u));
+                 uint next = header & 0xFFFFFFu;
+-                if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
++                if (next == 0xFFFFFFu)
++                {
++                    GpuCounters.TotalGpuDmaEndMarker++;
++                    terminated = true;
++                    break;
++                }
++                if ((next & 0x800000u) != 0)
++                {
++                    GpuCounters.TotalGpuDmaBit23End++;
++                    terminated = true;
++                    break;
++                }
+                 addr = next & 0x1FFFFCu;
+             }
++            if (!terminated) GpuCounters.TotalGpuDmaGuardEnd++;
+         }
+         else if ((chcr & 1u) != 0)
+         {
+@@ -131,7 +160,10 @@ public sealed class Dma
      {
          bool master = (_dicr & (1u << 23)) != 0;
          bool enabled = (_dicr & (1u << (16 + channel))) != 0;
@@ -3795,7 +4054,7 @@ index a60f6a9..b7c3f96 100644
        <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
        <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.22.0" />
 diff --git a/RecompOne.Runtime/Runtime.cs b/RecompOne.Runtime/Runtime.cs
-index fdf7b6b..9221ba3 100644
+index fdf7b6b..bd83211 100644
 --- a/RecompOne.Runtime/Runtime.cs
 +++ b/RecompOne.Runtime/Runtime.cs
 @@ -9,11 +9,21 @@ public enum RunMode { Retail, Devkit }
@@ -3841,7 +4100,7 @@ index fdf7b6b..9221ba3 100644
          if (Event.HasAnyListeners<RuntimeReadyEvent>())
          {
              Event.Dispatch(new RuntimeReadyEvent());
-@@ -81,14 +103,61 @@ public static class Runtime
+@@ -81,14 +103,62 @@ public static class Runtime
          Mem = m;
      }
  
@@ -3896,6 +4155,7 @@ index fdf7b6b..9221ba3 100644
 +        Console.Error.WriteLine(
 +            $"[fps] {_presents} presented, {_presentTicks * 1000.0 / freq:F0} ms of {(now - _fpsMark) * 1000.0 / freq:F0} in present, {GpuCounters.TakeSummary()}");
 +        Console.Error.WriteLine($"[gte] {Gte.TakeFlagSummary()}");
++        Console.Error.WriteLine($"[gtecmd] {Gte.TakeCommandSummary()}");
 +        Console.Error.WriteLine($"[otz] {Gte.TakeOtzSummary()}");
 +        Console.Error.WriteLine($"[tex] {GpuCounters.TakeTexPages()}");
 +        Console.Error.WriteLine($"[clut] {GpuCounters.TakeCluts()}");

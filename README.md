@@ -157,6 +157,16 @@ That clones RecompOne, applies the fork patch, recompiles your disc's executable
 and builds the port into `JetMoto/bin/Release/net10.0/`. To build the launcher
 the release ships:
 
+For repeated Jet Moto 3 graphics work, the development binary can skip its FMV
+wrappers and drive directly to a named track:
+
+```bash
+dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll --canyon
+dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll --track ice
+```
+
+The available track switches are `--canyon`, `--ice`, and `--volcano`.
+
 ```bash
 dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
 ```

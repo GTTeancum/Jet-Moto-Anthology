@@ -10,27 +10,37 @@ Three ports, one shared RecompOne fork (`tools/recompone-fork.patch`).
 
 
 
-## 2026-08-17 — A real rendering bug, found by comparison
+## 2026-08-18 — Current JM3 rendering check
 
-`GpuRaster` wrapped the texture/vertex-colour product instead of saturating it.
-`tr` reaches `255*255>>7 = 508`, `Plot` packs with `(v >> 3) & 0x1F`, so 256
-became `32 & 31 = 0` -- pure black. Every texel lit past 255 folded to dark.
+One real renderer bug remains fixed: `GpuRaster` now saturates the
+texture/vertex-colour product instead of wrapping it. `tr` can reach
+`255*255>>7 = 508`, and the old pack path folded values past 255 back into dark
+15-bit colours. That was PS1-inaccurate and produced real bad pixels.
 
-The effect is brightness-dependent, so it tracked lighting, which tracks surface
-orientation, which looks exactly like polygons being dropped along facet edges.
-That is why days of "is this geometry submitted?" probes all came back clean:
-the geometry was always there. Fixed at both modulation sites.
+That fix does not explain the missing-terrain screenshots. Recompiling JM3 from
+the disc on branch `codex/jm3-rerecomp` produced the same generated source and
+the rebuilt port still reproduces the visual failure.
 
-**Found only by comparison.** PCSX-Redux is built and runs the same attract demo
-(`harness/jm3-refcap.lua`, `harness/ref2png.py`). Its Devil's Canyon shows blue
-sky, blue river and fully lit rock; ours showed murk. After the fix ours matches
-on brightness and colour. Four earlier conclusions reached without a reference
-were all wrong, in both directions.
+Visual proof from 2026-08-18:
 
-**Still open:** hard-edged black regions remain, notably below the horizon at
-race start. Colour wrapping is now ruled out as their cause by test rather than
-assumed. Next step is a like-for-like frame pair -- the attract demo cycles
-tracks between runs, so pairs must be aligned by HUD content, not frame index.
+- `harness/captures/jm3-proof-drive-default-20260818-0001/frame-0017.png`
+  shows disconnected terrain pieces and clear/sky through the track. This route
+  is a harsh manual-driving script and is not, by itself, trustworthy past
+  `frame-0014`, because the bike/camera crashes into bad poses.
+- `harness/captures/jm3-proof-demo-rerecomp-20260818-0001/contact.png` uses
+  `harness/jm3-demo.txt`, no controller input, and reaches the game's own demo
+  race camera. It still shows missing-looking terrain and reports clear-owned
+  spikes: first `>=30%` at t=132.0, max `89%` at t=142.2, with
+  `maxOT=0x1FFF2C`, `otHigh=0`.
+- The same bad route through the software rasterizer
+  (`jm3-proof-drive-soft-20260818-0001`) still fails, so this is not a GL-only
+  triangle coverage issue.
+- A trial route of `0x800786B0` as `DrawOTag` raised the reimplementation count
+  from 16 to 17 but did not fix the demo: max stayed about `90%` clear-owned.
+  That config change was backed out.
+
+Do not call any JM3 rendering change fixed without visual before/after proof
+from a game-controlled capture or a reference-emulator frame pair.
 
 **Reference emulator run recipe** (details in DECISIONS.md):
 
@@ -64,7 +74,7 @@ Replaced by `harness/jm3-demo.txt`: zero input, let the title screen time out
 into the game's own attract demo. The game drives, along the developers' racing
 line, with the camera where they put it. Captures from it look correct — bike and
 rider well-formed, terrain continuous, sky and HUD intact, lap and place counters
-advancing — with some frames around demo crashes still to be explained.
+advancing. A 2026-08-17 t=400.7 measured run produced no clear-owned holes.
 
 What is measured and still stands: `dropped=0`, `stretched=61` against
 `poly=118692`, no exceptions across a 420 s run, and a continuous quad mesh under

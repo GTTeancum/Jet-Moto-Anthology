@@ -111,5 +111,11 @@
     { "address": "0x800768BC", "name": "DrawSyncCallback" }
   ],
 
-  "patches": []
+  "patches": [
+    {
+      "overlay": "shell",
+      "address": "0x800DCA44",
+      "target": "Recompiled.Jm3FastBoot.PlayMovie"
+    }
+  ]
 }
