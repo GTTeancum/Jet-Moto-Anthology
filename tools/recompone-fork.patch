@@ -1153,10 +1153,23 @@ index 0000000..4b8a1e3
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
-index d2ab6f5..9a72734 100644
+index d2ab6f5..b07450c 100644
 --- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 +++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
-@@ -273,13 +273,10 @@ public sealed class GlCore : IGpuBackend
+@@ -50,6 +50,12 @@ public sealed class GlCore : IGpuBackend
+ 
+     public unsafe void InitGl()
+     {
++        // OpenGL enables framebuffer dithering by default. Our render targets
++        // are RGB5_A1, so leaving this on can reintroduce a driver-level pattern
++        // even though the emulated PS1 dither path is absent.
++        _gl.Disable(EnableCap.Dither);
++        Console.Error.WriteLine($"[Gpu] OpenGL framebuffer dither: {(_gl.IsEnabled(EnableCap.Dither) ? "on" : "off")}");
++
+         _vram.Init();
+ 
+         _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim");
+@@ -273,13 +279,10 @@ public sealed class GlCore : IGpuBackend
          _kClipX0 = _env.ClipX0; _kClipY0 = _env.ClipY0; _kClipX1 = _env.ClipX1; _kClipY1 = _env.ClipY1;
      }
  
@@ -1171,7 +1184,7 @@ index d2ab6f5..9a72734 100644
          return new GlVertex
          {
              X = v.X, Y = v.Y,
-@@ -293,8 +290,7 @@ public sealed class GlCore : IGpuBackend
+@@ -293,8 +296,7 @@ public sealed class GlCore : IGpuBackend
      public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
      {
          Begin(f, 3);
@@ -1181,7 +1194,7 @@ index d2ab6f5..9a72734 100644
      }
  
      public void DrawRect(in HleRect r, in PrimFlags f)
-@@ -304,22 +300,21 @@ public sealed class GlCore : IGpuBackend
+@@ -304,22 +306,21 @@ public sealed class GlCore : IGpuBackend
          var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
          var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
          var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
@@ -1208,7 +1221,7 @@ index d2ab6f5..9a72734 100644
              return;
          }
  
-@@ -327,14 +322,14 @@ public sealed class GlCore : IGpuBackend
+@@ -327,14 +328,14 @@ public sealed class GlCore : IGpuBackend
          if (Math.Abs(dx) > Math.Abs(dy)) { xo = 0; yo = 1; if (dx > 0) x2++; else x1++; }
          else { xo = 1; yo = 0; if (dy > 0) y2++; else y1++; }
  
