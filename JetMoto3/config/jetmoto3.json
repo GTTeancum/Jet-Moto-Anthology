@@ -111,6 +111,55 @@
     { "address": "0x800768BC", "name": "DrawSyncCallback" }
   ],
 
+  // These are screen-space world culls, not viewport clips. Keep their original
+  // 4:3 values when widescreen is off and widen them with the render target.
+  // This belongs in the recompiler config so a fresh generated tree gets the
+  // same fix without hand-editing generated/main.cs.
+  "instructionPatches": [
+    { "address": "0x8001A830", "condition": "(int)c.T8 < Jm3Widescreen.CullLeftPacked" },
+    { "address": "0x8001B1C0", "condition": "(int)c.S5 <= Jm3Widescreen.CullLeft" },
+    { "address": "0x8001CEC8", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001D5A0", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001DDA8", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001E814", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001ED70", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001F87C", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x8001FD94", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x800202AC", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+    { "address": "0x800205BC", "condition": "(int)c.T9 < Jm3Widescreen.CullLeft" },
+
+    { "address": "0x8001A834", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001B1C4", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001CECC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001CEDC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001CEEC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001D5A4", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001D5B4", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001D5C4", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001DDAC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001DDBC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001DDCC", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001E818", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001E828", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001E838", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001ED74", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001ED84", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001ED94", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001F880", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001F890", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001F8A0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001FD98", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001FDA8", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x8001FDB8", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800202B0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800202C0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800202D0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800205C0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800205D0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x800205E0", "immediate": "Jm3Widescreen.CullRightExclusive" },
+    { "address": "0x80053E10", "immediate": "Jm3Widescreen.CullRightExclusive" }
+  ],
+
   "patches": [
     {
       "overlay": "shell",

@@ -37,11 +37,136 @@ index f1629e0..8f09538 100644
              entries.Add(word);
              vram += 4;
          }
+diff --git a/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs b/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs
+index 47e000e..3219f31 100644
+--- a/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs
++++ b/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs
+@@ -79,7 +79,7 @@ public static class FunctionEmitter
+                 InstructionEmitter.EmitWithDelaySlot(sb, instr, delaySlot, ctx, ind);
+             }else
+             {
+-                string line = InstructionEmitter.EmitSingle(instr);
++                string line = InstructionEmitter.EmitSingle(instr, ctx);
+                 if (!string.IsNullOrEmpty(line))
+                     sb.AppendLine(ctx.Trail(instr, $"{ind}{line}"));
+             }
+diff --git a/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs b/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs
+index 9ac9043..8e61af4 100644
+--- a/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs
++++ b/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs
+@@ -50,7 +50,7 @@ public static class InstructionEmitter
+         _ =>  $"/* MTC0 r{rd} ignored */"
+     };
+ 
+-    public static string EmitSingle(MipsInstruction i)
++    public static string EmitSingle(MipsInstruction i, FunctionContext ctx)
+     {
+         uint op = i.Word >> 26;
+         uint fn = i.Word & 0x3F;
+@@ -124,7 +124,7 @@ public static class InstructionEmitter
+         return (int)op switch
+         {
+             8  or 9 =>  rt == 0 ? "" : rs == 0 ? $"{RT} = 0x{unchecked((uint)(int)imm):X8}u;" : imm >= 0 ? $"{RT} = {RS} + 0x{(uint)imm:X}u;" : $"{RT} = {RS} - 0x{unchecked((uint)(-(int)imm)):X}u;",
+-            10 => rt == 0 ? "" : $"{RT} = (int){RS} < {(int)imm} ? 1u : 0u;",
++            10 => rt == 0 ? "" : $"{RT} = (int){RS} < {ctx.Immediate(i.Vram, (int)imm)} ? 1u : 0u;",
+             11 => rt == 0 ? "" : $"{RT} = {RS} < 0x{(uint)(int)imm:X8}u ? 1u : 0u;",
+             12 => rt == 0 ? "" : $"{RT} = {RS} & 0x{immU:X4}u;",
+             13 => rt == 0 ? "" : immU == 0 ? $"{RT} = {RS};" : $"{RT} = {RS} | 0x{immU:X4}u;",
+@@ -177,14 +177,14 @@ public static class InstructionEmitter
+         {
+             if (ds == null) return;
+             //fixes delay slot as branch target bug
+-            string line = EmitSingle(ds);
++            string line = EmitSingle(ds, ctx);
+             if (!string.IsNullOrEmpty(line)) sb.AppendLine(ctx.Trail(ds, $"{indent}{line}"));
+         }
+ 
+         void DsInline()
+         {
+             if (ds == null) return;
+-            string line = EmitSingle(ds);
++            string line = EmitSingle(ds, ctx);
+             if (!string.IsNullOrEmpty(line)) sb.AppendLine(ctx.Trail(ds, $"{ind2}{line}"));
+         }
+ 
+@@ -230,6 +230,7 @@ public static class InstructionEmitter
+                 6 => $"(int){RS} <= 0",
+                 _ => $"(int){RS} > 0",
+             };
++            cond = ctx.Condition(pc, cond);
+             Conditional(cond, target);
+             return;
+         }
+@@ -245,6 +246,7 @@ public static class InstructionEmitter
+                 0x01 or 0x11 => $"(int){RS} >= 0",
+                 _ => "false"
+             };
++            cond = ctx.Condition(pc, cond);
+             if (link)
+             {
+                 Ds();
+@@ -323,9 +325,17 @@ public sealed class FunctionContext
+     public Dictionary<uint, JumpTable> JumpTablesByJr = [];
+     public HashSet<uint> RaReturnJrs = [];
+     public MipsInstruction[] AllInstructions = [];
++    public Dictionary<uint, string> ImmediateOverrides = [];
++    public Dictionary<uint, string> ConditionOverrides = [];
+ 
+     const int CommentColumn = 64;
+ 
++    public string Immediate(uint address, int fallback) =>
++        ImmediateOverrides.TryGetValue(address, out var value) ? value : fallback.ToString();
++
++    public string Condition(uint address, string fallback) =>
++        ConditionOverrides.TryGetValue(address, out var value) ? value : fallback;
++
+     public string Trail(MipsInstruction i, string line)
+     {
+         if (!AddressComments && !DisasmComments) return line;
 diff --git a/RecompOne.Recompiler/CodeGen/OverlayWriter.cs b/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
-index bf6dec1..fd1d339 100644
+index bf6dec1..10b69ea 100644
 --- a/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
 +++ b/RecompOne.Recompiler/CodeGen/OverlayWriter.cs
-@@ -432,6 +432,12 @@ public static class OverlayWriter
+@@ -244,7 +244,8 @@ public static class OverlayWriter
+         foreach (var result in overlayResults)
+         {
+             Console.WriteLine($"[Recompiler] emiting {result.Name}.cs ({result.Functions.Count} functions)");
+-            EmitOverlayFile(result.Name, result.Functions, className, knownFuncs, config.Debug, config.AddressComments, config.DisasmComments, result.LbaStart,  result.Base, result.Size, result.Instructions, outDir);
++            EmitOverlayFile(result.Name, result.Functions, className, knownFuncs, config.Debug, config.AddressComments, config.DisasmComments,
++                config.InstructionPatches, result.LbaStart, result.Base, result.Size, result.Instructions, outDir);
+         }
+ 
+         Console.WriteLine("[Recompiler] Emitting Entry.cs");
+@@ -294,8 +295,16 @@ public static class OverlayWriter
+         Console.WriteLine($"[Recompiler] linear sweep found {swept.Count} function(s) (+{callees.Count} callees) in {overlayName}");
+     }
+ 
+-    static void EmitOverlayFile(string overlayName, List<MipsFunction> funcs, string className, Dictionary<uint, string> knownFuncs, bool debug, bool addressComments, bool disasmComments, int lbaStart, uint ovlBase, uint ovlSize, MipsInstruction[] instrs, string outDir)
++    static void EmitOverlayFile(string overlayName, List<MipsFunction> funcs, string className, Dictionary<uint, string> knownFuncs,
++        bool debug, bool addressComments, bool disasmComments, Config.InstructionPatchEntry[] patches,
++        int lbaStart, uint ovlBase, uint ovlSize, MipsInstruction[] instrs, string outDir)
+     {
++        var overlayPatches = patches.Where(p => p.MatchesOverlay(overlayName)).ToArray();
++        var immediates = overlayPatches.Where(p => !string.IsNullOrWhiteSpace(p.Immediate))
++            .ToDictionary(p => Convert.ToUInt32(p.Address, 16), p => p.Immediate);
++        var conditions = overlayPatches.Where(p => !string.IsNullOrWhiteSpace(p.Condition))
++            .ToDictionary(p => Convert.ToUInt32(p.Address, 16), p => p.Condition);
++
+         var sb = new StringBuilder();
+         sb.AppendLine("using RecompOne.Runtime.Context;");
+         sb.AppendLine("using RecompOne.Runtime.Dispatch;");
+@@ -320,7 +329,9 @@ public static class OverlayWriter
+                 DisasmComments = disasmComments,
+                 JumpTablesByJr = func.JumpTables.ToDictionary(j => j.JrVram),
+                 RaReturnJrs = FunctionDetector.ComputeRaReturnJrs(func),
+-                AllInstructions = instrs
++                AllInstructions = instrs,
++                ImmediateOverrides = immediates,
++                ConditionOverrides = conditions
+             };
+             sb.Append(FunctionEmitter.Emit(func, ctx));
+         }
+@@ -432,6 +443,12 @@ public static class OverlayWriter
          }
          if (funcsWithTables > 0)
              Console.WriteLine($"[Recompiler] {name}: found jump tables in {funcsWithTables} function(s), {totalEntries} entries in total");
@@ -54,6 +179,35 @@ index bf6dec1..fd1d339 100644
      }
      
      static bool PatchNameMatches(MipsFunction func, string? patchFunction)
+diff --git a/RecompOne.Recompiler/Config/ConfigLoader.cs b/RecompOne.Recompiler/Config/ConfigLoader.cs
+index 5101a1f..bec3a68 100644
+--- a/RecompOne.Recompiler/Config/ConfigLoader.cs
++++ b/RecompOne.Recompiler/Config/ConfigLoader.cs
+@@ -20,6 +20,24 @@ public sealed class RecompOneConfig
+     [JsonPropertyName("stubs")] public string[] Stubs { get; set; } = [];
+     [JsonPropertyName("ignored")] public string[] Ignored { get; set; } = [];
+     [JsonPropertyName("patches")] public PatchEntry[] Patches { get; set; } = [];
++    [JsonPropertyName("instructionPatches")] public InstructionPatchEntry[] InstructionPatches { get; set; } = [];
++}
++
++public sealed class InstructionPatchEntry
++{
++    [JsonPropertyName("overlay")]
++    [JsonConverter(typeof(StringOrArrayConverter))]
++    public string[] Overlay { get; set; } = [];
++
++    [JsonPropertyName("address")] public string Address { get; set; } = "";
++    [JsonPropertyName("immediate")] public string Immediate { get; set; } = "";
++    [JsonPropertyName("condition")] public string Condition { get; set; } = "";
++
++    public bool MatchesOverlay(string overlayName)
++    {
++        if (Overlay.Length == 0) return true;
++        return Overlay.Any(o => o == "*" || string.Equals(o, overlayName, StringComparison.OrdinalIgnoreCase));
++    }
+ }
+ 
+ public sealed class PatchEntry
 diff --git a/RecompOne.Recompiler/RecompOne.Recompiler.csproj b/RecompOne.Recompiler/RecompOne.Recompiler.csproj
 index c79184b..2be70bd 100644
 --- a/RecompOne.Recompiler/RecompOne.Recompiler.csproj
@@ -847,10 +1001,10 @@ index 0000000..18909ba
 +    }
 +}
 diff --git a/RecompOne.Runtime/Config/ViewConfig.cs b/RecompOne.Runtime/Config/ViewConfig.cs
-index f875641..f1b93f4 100644
+index f875641..9b5b03c 100644
 --- a/RecompOne.Runtime/Config/ViewConfig.cs
 +++ b/RecompOne.Runtime/Config/ViewConfig.cs
-@@ -50,6 +50,39 @@ public class ViewConfig
+@@ -50,6 +50,45 @@ public class ViewConfig
          set => SetBool("NativeResolution", value);
      }
  
@@ -885,6 +1039,12 @@ index f875641..f1b93f4 100644
 +    {
 +        get => GetBool("Fxaa", true);
 +        set => SetBool("Fxaa", value);
++    }
++
++    public bool Widescreen
++    {
++        get => GetBool("Widescreen");
++        set => SetBool("Widescreen", value);
 +    }
 +
      public bool VSync
@@ -1197,7 +1357,7 @@ index 0000000..4b8a1e3
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
-index d2ab6f5..8bdd463 100644
+index d2ab6f5..4885029 100644
 --- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 +++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 @@ -42,7 +42,7 @@ public sealed class GlCore : IGpuBackend
@@ -1245,7 +1405,7 @@ index d2ab6f5..8bdd463 100644
          return new GlVertex
          {
              X = v.X, Y = v.Y,
-@@ -293,8 +297,7 @@ public sealed class GlCore : IGpuBackend
+@@ -293,33 +297,40 @@ public sealed class GlCore : IGpuBackend
      public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
      {
          Begin(f, 3);
@@ -1255,12 +1415,27 @@ index d2ab6f5..8bdd463 100644
      }
  
      public void DrawRect(in HleRect r, in PrimFlags f)
-@@ -304,22 +307,21 @@ public sealed class GlCore : IGpuBackend
-         var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
-         var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
-         var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
+     {
+         Begin(f, 6);
+-        var a = new HleVertex { X = r.X, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
+-        var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
+-        var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
+-        var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
 -        _verts[_count++] = V(a, f, false); _verts[_count++] = V(b, f, false); _verts[_count++] = V(c, f, false);
 -        _verts[_count++] = V(b, f, false); _verts[_count++] = V(d, f, false); _verts[_count++] = V(c, f, false);
++        float x = r.X;
++        if (_kTarget is { Margin: > 0 } rt)
++        {
++            int leftAnchor = rt.X + rt.W / 3;
++            int rightAnchor = rt.X + rt.W * 2 / 3;
++            if (r.X + r.W <= leftAnchor) x -= rt.Margin;
++            else if (r.X >= rightAnchor) x += rt.Margin;
++        }
++
++        var a = new HleVertex { X = x, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
++        var b = new HleVertex { X = x + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
++        var c = new HleVertex { X = x, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
++        var d = new HleVertex { X = x + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
 +        _verts[_count++] = V(a, f); _verts[_count++] = V(b, f); _verts[_count++] = V(c, f);
 +        _verts[_count++] = V(b, f); _verts[_count++] = V(d, f); _verts[_count++] = V(c, f);
      }
@@ -1282,7 +1457,7 @@ index d2ab6f5..8bdd463 100644
              return;
          }
  
-@@ -327,14 +329,14 @@ public sealed class GlCore : IGpuBackend
+@@ -327,14 +338,14 @@ public sealed class GlCore : IGpuBackend
          if (Math.Abs(dx) > Math.Abs(dy)) { xo = 0; yo = 1; if (dx > 0) x2++; else x1++; }
          else { xo = 1; yo = 0; if (dy > 0) y2++; else y1++; }
  
@@ -1301,7 +1476,7 @@ index d2ab6f5..8bdd463 100644
      }
  
      public void FillRect(int x, int y, int w, int h, ushort color15)
-@@ -431,7 +433,13 @@ public sealed class GlCore : IGpuBackend
+@@ -431,7 +442,13 @@ public sealed class GlCore : IGpuBackend
          GpuGlAccess.TargetOriginX = rt == null ? 0 : rt.X;
          GpuGlAccess.TargetOriginY = rt == null ? 0 : rt.Y;
          GpuGlAccess.TargetMargin = rt == null ? 0 : rt.Margin;
@@ -1316,7 +1491,7 @@ index d2ab6f5..8bdd463 100644
  
          _gl.Disable(EnableCap.DepthTest);
          _gl.Disable(EnableCap.CullFace);
-@@ -495,7 +503,8 @@ public sealed class GlCore : IGpuBackend
+@@ -495,7 +512,8 @@ public sealed class GlCore : IGpuBackend
                  SetBlend(0f, 1f);
                  _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
  
@@ -1326,7 +1501,7 @@ index d2ab6f5..8bdd463 100644
                  _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
                  SetBlend(1f, 1f);
                  _gl.Uniform4(_uBlendOpaque, 0f, 0f, 0f, 1f);
-@@ -518,7 +527,7 @@ public sealed class GlCore : IGpuBackend
+@@ -518,7 +536,7 @@ public sealed class GlCore : IGpuBackend
  
      public void Present(in HleDispEnv disp) => PresentDisplay(disp.X, disp.Y, disp.W, disp.H, disp.Rgb24);
  
@@ -1335,7 +1510,7 @@ index d2ab6f5..8bdd463 100644
      {
          if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
          _frame++;
-@@ -575,12 +584,14 @@ public sealed class GlCore : IGpuBackend
+@@ -575,12 +593,14 @@ public sealed class GlCore : IGpuBackend
              _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X), dispY - src.Y);
              _gl.Uniform2(_uPresentSize, (float)w1x, h1x);
              _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
@@ -3724,7 +3899,7 @@ index 0000000..c38f32d
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..fbe25e9 100644
+index 8a62627..3141104 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -1,4 +1,5 @@
@@ -3999,7 +4174,7 @@ index 8a62627..fbe25e9 100644
                  return;
  
              try { _window.DoEvents(); } catch { }
-@@ -285,13 +483,37 @@ public static class HostWindow
+@@ -285,13 +483,44 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -4022,6 +4197,12 @@ index 8a62627..fbe25e9 100644
 +            scale = rs;
 +        Hle.GlVram.Scale = scale;
 +        nativeRes = scale == 1;
++
++        bool widescreen = ConfigManager.View.Widescreen;
++        if (Environment.GetEnvironmentVariable("RECOMPONE_WIDESCREEN") is { } wideOverride)
++            widescreen = wideOverride is "1" or "true";
++        SetWidescreen(widescreen);
++
          _glBackend = (Hle.GlCore)Hle.GpuBackendFactory.Create(_gl,
              Hle.GpuBackendFactory.Parse(ConfigManager.View.GpuBackend));
          _glBackend.InitGl();
@@ -4036,11 +4217,12 @@ index 8a62627..fbe25e9 100644
 -        Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
 +        Hle.GpuHle.NativeResolution = nativeRes;
 +        Console.Error.WriteLine(
-+            $"[Gpu] display: {ConfigManager.View.WindowWidth}x{ConfigManager.View.WindowHeight}, internal {scale}x, FXAA {(ConfigManager.View.Fxaa ? "on" : "off")}");
++            $"[Gpu] display: {ConfigManager.View.WindowWidth}x{ConfigManager.View.WindowHeight}, internal {scale}x, " +
++            $"{(widescreen ? "16:9 widescreen" : "4:3")}, FXAA {(ConfigManager.View.Fxaa ? "on" : "off")}");
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -319,7 +541,9 @@ public static class HostWindow
+@@ -319,7 +548,9 @@ public static class HostWindow
          ConfigManager.ApplyViewToPanels(PanelManager.Panels);
  
          var cdPath = ConfigManager.Game.CdPath;
@@ -4051,7 +4233,21 @@ index 8a62627..fbe25e9 100644
              _discPicker.Show();
      }
  
-@@ -371,8 +595,14 @@ public static class HostWindow
+@@ -344,6 +575,13 @@ public static class HostWindow
+         if (_window != null) _window.VSync = on;
+     }
+ 
++    public static void SetWidescreen(bool enabled)
++    {
++        // A zero wide aspect keeps the original display target. At 16:9 the
++        // backend adds equal renderable margins instead of stretching 4:3.
++        Hle.GpuHle.WideAspect = enabled ? 16f / 9f : 0f;
++    }
++
+     static void OnRender(double dt)
+     {
+         var gl = _gl!;
+@@ -371,8 +609,14 @@ public static class HostWindow
                      gpu.DisplayX, gpu.DisplayY,
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
@@ -4068,7 +4264,7 @@ index 8a62627..fbe25e9 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -403,6 +633,20 @@ public static class HostWindow
+@@ -403,6 +647,20 @@ public static class HostWindow
          gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
          gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
          _imgui.Render();
@@ -4089,7 +4285,7 @@ index 8a62627..fbe25e9 100644
      }
  
      static void DrawDockspace()
-@@ -555,6 +799,25 @@ public static class HostWindow
+@@ -555,6 +813,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -4116,7 +4312,7 @@ index 8a62627..fbe25e9 100644
      {
          var vram = gpu.Vram;
 diff --git a/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs b/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
-index 2f5f1f6..0e2c28a 100644
+index 2f5f1f6..7dfdf6f 100644
 --- a/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
 +++ b/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
 @@ -5,6 +5,13 @@ namespace RecompOne.Runtime.Host.Window;
@@ -4133,7 +4329,7 @@ index 2f5f1f6..0e2c28a 100644
      public string Id => "display";
      public string Title => "Display";
      public int Order => 5;
-@@ -28,17 +35,38 @@ internal sealed class DisplaySettingsSection : ISettingsSection
+@@ -28,17 +35,46 @@ internal sealed class DisplaySettingsSection : ISettingsSection
          }
          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Syncs with refresh rate");
  
@@ -4155,6 +4351,14 @@ index 2f5f1f6..0e2c28a 100644
 -            NoticePopup.Show("You need to restart the application to apply this configuration");
          }
 -        if (ConfigManager.View.NativeResolution != (Hle.GlVram.Scale == 1))
++
++        bool widescreen = ConfigManager.View.Widescreen;
++        if (ImGui.Checkbox("Widescreen (16:9)", ref widescreen))
++        {
++            ConfigManager.View.Widescreen = widescreen;
++            HostWindow.SetWidescreen(widescreen);
++            ConfigManager.SaveView(PanelManager.Panels);
++        }
 +
 +        int scaleIndex = Array.IndexOf(RenderScales, ConfigManager.View.RenderScale);
 +        if (scaleIndex < 0) scaleIndex = 2;
