@@ -1197,7 +1197,7 @@ index 0000000..4b8a1e3
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
-index d2ab6f5..02f009c 100644
+index d2ab6f5..8bdd463 100644
 --- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 +++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 @@ -42,7 +42,7 @@ public sealed class GlCore : IGpuBackend
@@ -1301,7 +1301,32 @@ index d2ab6f5..02f009c 100644
      }
  
      public void FillRect(int x, int y, int w, int h, ushort color15)
-@@ -518,7 +520,7 @@ public sealed class GlCore : IGpuBackend
+@@ -431,7 +433,13 @@ public sealed class GlCore : IGpuBackend
+         GpuGlAccess.TargetOriginX = rt == null ? 0 : rt.X;
+         GpuGlAccess.TargetOriginY = rt == null ? 0 : rt.Y;
+         GpuGlAccess.TargetMargin = rt == null ? 0 : rt.Margin;
+-        destTex = _vram.BeginDestRead(destTex, destW, destH, 0, 0, destW, destH);
++        // A display RT samples PS1 textures from the separate VRAM surface.
++        // Only mask checking reads the display destination itself, so forcing
++        // a texture barrier for every ordinary batch needlessly serializes the
++        // GPU. Direct-to-VRAM draws still need the barrier for texture feedback.
++        bool readsTarget = rt == null || _kCheckMask != 0;
++        if (readsTarget)
++            destTex = _vram.BeginDestRead(destTex, destW, destH, 0, 0, destW, destH);
+ 
+         _gl.Disable(EnableCap.DepthTest);
+         _gl.Disable(EnableCap.CullFace);
+@@ -495,7 +503,8 @@ public sealed class GlCore : IGpuBackend
+                 SetBlend(0f, 1f);
+                 _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+ 
+-                _vram.BeginDestRead(destTex, destW, destH, 0, 0, destW, destH);
++                if (readsTarget)
++                    _vram.BeginDestRead(destTex, destW, destH, 0, 0, destW, destH);
+                 _gl.BlendEquationSeparate(BlendEquationModeEXT.FuncReverseSubtract, BlendEquationModeEXT.FuncAdd);
+                 SetBlend(1f, 1f);
+                 _gl.Uniform4(_uBlendOpaque, 0f, 0f, 0f, 1f);
+@@ -518,7 +527,7 @@ public sealed class GlCore : IGpuBackend
  
      public void Present(in HleDispEnv disp) => PresentDisplay(disp.X, disp.Y, disp.W, disp.H, disp.Rgb24);
  
@@ -1310,7 +1335,7 @@ index d2ab6f5..02f009c 100644
      {
          if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
          _frame++;
-@@ -575,12 +577,14 @@ public sealed class GlCore : IGpuBackend
+@@ -575,12 +584,14 @@ public sealed class GlCore : IGpuBackend
              _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X), dispY - src.Y);
              _gl.Uniform2(_uPresentSize, (float)w1x, h1x);
              _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
@@ -4892,18 +4917,22 @@ index 6432fa4..b543868 100644
                  if (IsAudioRegion(CurrentLba))
                  {
 diff --git a/RecompOne.Runtime/sdk/LibCdStream.cs b/RecompOne.Runtime/sdk/LibCdStream.cs
-index ad79811..0222801 100644
+index ad79811..1ae0680 100644
 --- a/RecompOne.Runtime/sdk/LibCdStream.cs
 +++ b/RecompOne.Runtime/sdk/LibCdStream.cs
-@@ -19,6 +19,7 @@ public static class LibCdStream
+@@ -17,8 +17,11 @@ public static class LibCdStream
+ 
+     static volatile bool _active;
      static volatile bool _reading;
++    static long _lastConsumerActivity;
++    static readonly long ConsumerIdleTimeout = Stopwatch.Frequency / 2;
      static int _pendingLba = -1;
      static int _streamLba = -1;
 +    static int _emptyRun;
      static int _streamStartLba;
      static readonly Stopwatch _clock = new();
  
-@@ -74,8 +75,35 @@ public static class LibCdStream
+@@ -74,8 +77,49 @@ public static class LibCdStream
  
      public static void StSetMask(CpuContext c, IMemory m) { c.V0 = 0; Log.Sdk("StSetMask"); }
  
@@ -4911,16 +4940,30 @@ index ad79811..0222801 100644
 +        Environment.GetEnvironmentVariable("RECOMPONE_SKIP_FMV") is "1" or "true";
 +
 +    /// <summary>
-+    /// True only while a movie is actually being fed. [jetmoto-fork] This used
-+    /// to be just _active, which a game sets once and may never clear -- Jet
-+    /// Moto 3 leaves the ring configured for the whole session, so the reduced
-+    /// streaming vblank rate applied to the menus and to racing as well as to
-+    /// the movies, and the game ran at a few frames a second everywhere.
++    /// True only while a movie is actively consuming frames. [jetmoto-fork]
++    /// Jet Moto 3 can leave both the ring and its CD read configured after a
++    /// movie exits, so neither _active nor _reading proves that the player is
++    /// still running. Without the activity timeout, that stale state applies
++    /// the movie's reduced vblank rate to menus and races indefinitely.
 +    /// </summary>
-+    public static bool Streaming => _active && _reading;
++    public static bool Streaming
++    {
++        get
++        {
++            if (!_active || !_reading) return false;
++            if (Stopwatch.GetTimestamp() - Volatile.Read(ref _lastConsumerActivity) <= ConsumerIdleTimeout)
++                return true;
++
++            OnStopStream("consumer idle");
++            return false;
++        }
++    }
 +
      public static void StGetNext(CpuContext c, IMemory m)
      {
++        if (_active && _reading)
++            Volatile.Write(ref _lastConsumerActivity, Stopwatch.GetTimestamp());
++
 +        // [jetmoto-fork] This is a wait loop's inner call, and a starved one
 +        // touches no memory: Jet Moto 3's movie player spins here up to eight
 +        // million times, and the vblank clock hangs off memory reads, so nothing
@@ -4939,7 +4982,7 @@ index ad79811..0222801 100644
          if (!_active) { c.V0 = 1; return; }
  
          lock (_lock)
-@@ -86,7 +114,7 @@ public static class LibCdStream
+@@ -86,7 +130,7 @@ public static class LibCdStream
                  _prevStart = -1;
              }
  
@@ -4948,7 +4991,7 @@ index ad79811..0222801 100644
  
              var (start, n) = _ready.Dequeue();
              uint dataPtr = _dataBase + (uint)(start * SlotData);
-@@ -95,6 +123,7 @@ public static class LibCdStream
+@@ -95,6 +139,7 @@ public static class LibCdStream
              m.WriteU32(c.A1, hdrPtr);
              _prevStart = start;
              _prevN = n;
@@ -4956,7 +4999,7 @@ index ad79811..0222801 100644
              c.V0 = 0;
          }
      }
-@@ -104,6 +133,14 @@ public static class LibCdStream
+@@ -104,17 +149,43 @@ public static class LibCdStream
      public static void StGetBackloc(CpuContext c, IMemory m) { c.V0 = 0xFFFFFFFFu; Log.Sdk("StGetBackloc"); }
  
  
@@ -4971,11 +5014,16 @@ index ad79811..0222801 100644
      internal static void OnReadStream(int lba)
      {
          if (!InUse) return;
-@@ -112,9 +149,22 @@ public static class LibCdStream
+         _pendingLba = lba;
+         _reading = true;
++        Volatile.Write(ref _lastConsumerActivity, Stopwatch.GetTimestamp());
          EnsureThread();
      }
  
 -    internal static void OnStopStream()
++    /// <summary>Ends movie timing when a game bypasses its normal player.</summary>
++    public static void StopMoviePlayback(string why) => OnStopStream(why);
++
 +    internal static void OnStopStream(string why = "?")
      {
 +        if (TraceFeed && _reading)
@@ -4983,6 +5031,7 @@ index ad79811..0222801 100644
 +                $"[feed] stop({why}) lba={_streamLba} scanned={_dbgScan} audio={_dbgAudio} " +
 +                $"notVideo={_dbgNotVid} queued={_dbgQueued} took={_dbgTook} empty={_dbgEmpty}");
          _reading = false;
++        Volatile.Write(ref _lastConsumerActivity, 0);
 +        // [jetmoto-fork] Forget where the finished stream was reading. The
 +        // feeder thread runs continuously, and StSetStream for the next movie
 +        // lands before that movie seeks -- so a surviving pending LBA let the
@@ -4995,7 +5044,7 @@ index ad79811..0222801 100644
      }
  
      static void ResetRing(IMemory m)
-@@ -152,6 +202,9 @@ public static class LibCdStream
+@@ -152,6 +223,9 @@ public static class LibCdStream
              {
                  _streamLba = _pendingLba >= 0 ? _pendingLba : LibCd.CurrentLba;
                  _streamStartLba = _streamLba;
@@ -5005,7 +5054,7 @@ index ad79811..0222801 100644
                  _clock.Restart();
              }
  
-@@ -159,14 +212,43 @@ public static class LibCdStream
+@@ -159,14 +233,43 @@ public static class LibCdStream
              try { lock (LibCd.DiscLock) sec = cd.ReadSectorData(_streamLba, 2336); }
              catch { Thread.Sleep(2); continue; }
  
@@ -5053,7 +5102,7 @@ index ad79811..0222801 100644
  
              int start;
              lock (_lock)
-@@ -183,7 +265,7 @@ public static class LibCdStream
+@@ -183,7 +286,7 @@ public static class LibCdStream
              lock (_lock)
              {
                  for (int i = 0; i < n; i++) _busy[start + i] = true;

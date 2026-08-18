@@ -1,6 +1,7 @@
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Host;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Sdk;
 
 namespace Recompiled;
 
@@ -19,6 +20,7 @@ public static class Jm3FastBoot
             string path = ReadCString(m, m.ReadU32(descriptor));
             Console.Error.WriteLine($"[FastTrack] skip movie {movie}: {path}");
             ScriptedInput.NotifyJm3Movie(path);
+            LibCdStream.StopMoviePlayback("fast-track movie skip");
 
             // This cleanup is also the final call made by the original wrapper.
             // Keeping it lets the shell advance its own movie/menu state safely.
