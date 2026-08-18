@@ -75,6 +75,12 @@ static class Recompile
         using var fs = CueFs.Open(disc);
         OverlayWriter.Write(config, fs, outDir);
 
+        // JM3's config redirects one movie wrapper and several screen-space
+        // culls to handwritten helpers. They are our code, embedded in the
+        // launcher and compiled beside the generated game on the player's PC.
+        foreach (string resource in game.SupportResources)
+            File.WriteAllText(Path.Combine(outDir, resource), game.ReadResource(resource));
+
         return [.. Directory.EnumerateFiles(outDir, "*.cs", SearchOption.AllDirectories)];
     }
 
@@ -175,6 +181,8 @@ static class Recompile
 
         Feed(game.Key);
         Feed(game.ReadConfig());
+        foreach (string resource in game.SupportResources)
+            Feed(game.ReadResource(resource));
         Feed(typeof(Recompile).Assembly.GetName().Version?.ToString() ?? "");
         try
         {

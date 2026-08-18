@@ -34,6 +34,8 @@
     <EmbeddedResource Include="..\JetMoto\config\jetmoto.json" LogicalName="jetmoto.json" />
     <EmbeddedResource Include="..\JetMoto2\config\jetmoto2.json" LogicalName="jetmoto2.json" />
     <EmbeddedResource Include="..\JetMoto3\config\jetmoto3.json" LogicalName="jetmoto3.json" />
+    <EmbeddedResource Include="..\JetMoto3\Jm3FastBoot.cs" LogicalName="jm3.Jm3FastBoot.cs" />
+    <EmbeddedResource Include="..\JetMoto3\Jm3Widescreen.cs" LogicalName="jm3.Jm3Widescreen.cs" />
   </ItemGroup>
 
 </Project>

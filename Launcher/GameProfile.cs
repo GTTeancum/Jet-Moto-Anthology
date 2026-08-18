@@ -3,7 +3,7 @@ using RecompOne.Runtime.Cdrom;
 namespace JetMotoLauncher;
 
 /// <summary>
-/// Which of the two ports a disc is, and the configuration that drives it.
+/// Which port a disc is, and the configuration that drives it.
 /// Detection reads the boot executable's name off the disc rather than trusting
 /// a filename, so a rip called anything at all still works.
 /// </summary>
@@ -14,19 +14,25 @@ sealed class GameProfile
     public required string Resource { get; init; }   // embedded config
     public required string BootExe { get; init; }    // SCUS_943.09 etc.
     public required string Exe { get; init; }        // the shipped executable name
+    public string[] SupportResources { get; init; } = [];
 
     static readonly GameProfile[] All =
     [
         new() { Key = "jm1", Name = "Jet Moto",   Resource = "jetmoto.json",  BootExe = "SCUS_943.09", Exe = "JetMoto" },
         new() { Key = "jm2", Name = "Jet Moto 2", Resource = "jetmoto2.json", BootExe = "SCUS_941.67", Exe = "JetMoto2" },
-        new() { Key = "jm3", Name = "Jet Moto 3", Resource = "jetmoto3.json", BootExe = "SCUS_945.55", Exe = "JetMoto3" },
+        new()
+        {
+            Key = "jm3", Name = "Jet Moto 3", Resource = "jetmoto3.json",
+            BootExe = "SCUS_945.55", Exe = "JetMoto3",
+            SupportResources = ["jm3.Jm3FastBoot.cs", "jm3.Jm3Widescreen.cs"]
+        },
     ];
 
     public static GameProfile? ForKey(string key) => All.FirstOrDefault(g => g.Key == key);
 
     /// <summary>
-    /// Which game an executable is. Both games ship as their own exe -- one
-    /// binary pinned two ways -- so the file name is the pin. Without it a
+    /// Which game an executable is. All games ship as their own exe -- one
+    /// binary pinned three ways -- so the file name is the pin. Without it a
     /// single launcher would have to guess from whichever disc it found first,
     /// which is how Jet Moto 2 became unreachable whenever both discs were
     /// present.
@@ -63,10 +69,12 @@ sealed class GameProfile
         return null;
     }
 
-    public string ReadConfig()
+    public string ReadConfig() => ReadResource(Resource);
+
+    public string ReadResource(string resource)
     {
-        using var s = typeof(GameProfile).Assembly.GetManifestResourceStream(Resource)
-            ?? throw new InvalidOperationException($"missing embedded config {Resource}");
+        using var s = typeof(GameProfile).Assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException($"missing embedded resource {resource}");
         using var r = new StreamReader(s);
         return r.ReadToEnd();
     }

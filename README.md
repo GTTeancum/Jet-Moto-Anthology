@@ -13,7 +13,7 @@ redbook audio at all.
 |------|-------|
 | **Jet Moto** | Complete — a full 3-lap race played end to end |
 | **Jet Moto 2** | Playable — boots, menus, controls, races |
-| **Jet Moto 3** | Playable — boots, menus, controls, races at a locked 60 fps, 640x480 |
+| **Jet Moto 3** | Playable — boots, menus, controls, races at 60 fps, optional true 16:9 widescreen |
 
 ## Screenshots
 
@@ -38,7 +38,7 @@ Captured from these ports, not from an emulator.
 | | |
 |---|---|
 | ![Jet Moto 3 title screen](docs/screenshots/jetmoto3-title.png) | ![The Race Mode menu](docs/screenshots/jetmoto3-racemode.png) |
-| ![Racing under the start gantry](docs/screenshots/jetmoto3-start.png) | ![Riding the canyon course past the pylons](docs/screenshots/jetmoto3-canyon.png) |
+| ![Riders launching from the canyon start](docs/screenshots/jetmoto3-start.png) | ![Jet Moto 3 rendering the canyon course in true widescreen](docs/screenshots/jetmoto3-canyon.png) |
 
 ## Get it
 
@@ -57,6 +57,7 @@ it opens a file picker and asks. Or point it straight at one:
 
 ```
 JetMoto2.exe --disc "D:\rips\Jet Moto 2 (v1.1).cue"
+JetMoto3.exe --disc "D:\rips\Jet Moto 3 (USA).cue"
 ```
 
 Install all three side by side if you like — each looks for its own disc and
@@ -75,10 +76,33 @@ A prebuilt port binary would have the game's entire executable compiled into it,
 translated line for line; that artifact is the game. Doing the translation at
 first launch is what makes a release possible.
 
-### Options
+### Running Jet Moto 3
+
+The Jet Moto 3 release supports the North American disc, **SCUS-94555**.
+Download and extract `JetMoto3-win-x64.zip`, then either:
+
+1. Put `JetMoto3.exe`, the disc's `.cue`, and every `.bin` named by that cue in
+   one folder, then double-click `JetMoto3.exe`.
+2. Keep the rip elsewhere and choose it in the file picker on first launch.
+3. Pass the cue explicitly from a terminal:
+
+```text
+JetMoto3.exe --disc "D:\rips\Jet Moto 3 (USA).cue"
+```
+
+The first run recompiles that disc locally and writes a roughly 2.5 MB DLL to
+`cache/` beside the launcher. On the tested disc this takes about 10 seconds.
+Later launches load the cached build immediately; use `--rebuild` after updating
+the launcher or when diagnosing a bad cache.
+
+The public release is the first-run launcher. The `--canyon`, `--ice`, and
+`--volcano` shortcuts documented under **Build from source** belong to the
+developer build and are intentionally not release options.
+
+### Jet Moto 3 options
 
 ```
-JetMoto.exe [--disc <path>] [--extract [folder]] [--rebuild]
+JetMoto3.exe [--disc <path>] [--extract [folder]] [--rebuild]
 ```
 
 | | |
@@ -90,11 +114,14 @@ JetMoto.exe [--disc <path>] [--extract [folder]] [--rebuild]
 Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
 `Enter` Start, `Q`/`W` L1/R1.
 
-Jet Moto 3 renders at 640x480 internally, which holds a locked 60 fps even in
-its heaviest scenes. The 4x upscale the other two default to costs twenty-four
-times as much in the presenter and drops it to about 21 fps, so it is not the
-default here; `RECOMPONE_RES_SCALE=1|2|4` overrides, and the in-game display
-settings switch it too.
+Jet Moto 3's **Settings > Display** panel provides window resolution, 1x/2x/4x
+internal resolution, FXAA, and optional true 16:9 widescreen. Widescreen extends
+the world on both sides instead of stretching the 4:3 image, and anchors the HUD
+to the new edges. The window title shows the current render FPS.
+
+Pre-rendered movies retain their original 4:3 aspect ratio. The same display
+panel can switch back to the original 4:3 gameplay view immediately. Keyboard
+and gamepad bindings are under **Settings > Input**.
 
 `RECOMPONE_FRAME_DIVIDER=2` gives the original's 30 Hz pacing. A log is written
 to `jetmoto.log` beside the binary, flushed per line so a crash still leaves a
@@ -104,11 +131,12 @@ record; the previous run is kept as `jetmoto.prev.log`.
 
 ## Loose files and the ogg soundtrack
 
-Either game will boot from an extracted tree of loose files instead of a
-bin/cue image, and prefers it when one is present:
+All three games can boot from an extracted tree of loose files instead of a
+bin/cue image, and prefer it when one is present:
 
 ```
 JetMoto.exe --disc "Jet Moto (USA).cue" --extract JetMoto_loose
+JetMoto3.exe --disc "Jet Moto 3 (USA).cue" --extract JetMoto3_loose
 ```
 
 The folder **is** the disc root — the executable and `SYSTEM.CNF` sit at the top
@@ -122,6 +150,10 @@ JetMoto_loose/
   cdaudio/*.ogg        the soundtrack, one file per CD-DA track
   .disc/               manifest and sector map, kept out of the disc root
 ```
+
+The corresponding Jet Moto 3 tree starts with `SCUS_945.55`, `SYSTEM.CNF`,
+`SHELL.BIN`, `DATA/`, `XA/`, `cdaudio/`, and `.disc/`. Put `JetMoto3.exe` at
+that root and double-click it, or pass the folder with `--disc`.
 
 Everything above the CD layer addresses the disc by **sector**, not by file —
 the game's own ISO reader, overlay loading, `CdSearchFile`, the recompiler
@@ -158,7 +190,8 @@ and builds the port into `JetMoto/bin/Release/net10.0/`. To build the launcher
 the release ships:
 
 For repeated Jet Moto 3 graphics work, the development binary can skip its FMV
-wrappers and drive directly to a named track:
+wrappers and drive directly to a named track. These switches are not part of
+the downloadable first-run launcher:
 
 ```bash
 dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll --canyon
@@ -167,17 +200,18 @@ dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll --track ice
 
 The available track switches are `--canyon`, `--ice`, and `--volcano`.
 
-To publish Jet Moto 3 as one self-contained Windows executable and place it in
-the extracted-disc directory:
+To publish the developer build as one self-contained Windows executable and
+place it in the extracted-disc directory:
 
 ```powershell
 ./tools/deploy-jetmoto3.ps1
 ```
 
 The script bundles managed and native dependencies into `JetMoto3.exe` and
-removes obsolete DLL/runtime files from the verified deployment directory.
-Window resolution, internal render scale, and FXAA are available under
-**Settings > Display**.
+removes obsolete DLL/runtime files from the verified deployment directory. That
+binary contains the locally recompiled game and is for development/testing; do
+not distribute it. Public releases are built from `Launcher/` and recompile the
+player's own disc on first launch.
 
 ```bash
 dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained

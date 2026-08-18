@@ -3,19 +3,19 @@ namespace JetMotoLauncher;
 sealed class Options
 {
     public string? Disc;
-    public string? Game;          // "jm1" / "jm2", else detected from the disc
+    public string? Game;          // "jm1" / "jm2" / "jm3", else detected from the disc
     public string? Extract;       // output folder for --extract
     public bool Rebuild;          // ignore the cache and recompile
 
     const string Help = """
         Jet Moto Anthology
 
-          JetMoto [--disc <path>] [--game jm1|jm2] [--extract [folder]] [--rebuild]
+          JetMoto [--disc <path>] [--game jm1|jm2|jm3] [--extract [folder]] [--rebuild]
 
         --disc <path>      A .cue of a disc you own, or a folder previously
                            produced by --extract. Without this the launcher looks
                            beside itself and in the current directory.
-        --game jm1|jm2     Force which port to build. Detected from the disc
+        --game jm1|jm2|jm3 Force which port to build. Detected from the disc
                            otherwise.
         --extract [folder] Extract the disc to loose files with an ogg
                            soundtrack, then exit. Defaults to <disc name>_loose.
@@ -35,7 +35,8 @@ sealed class Options
             switch (args[i])
             {
                 case "-h" or "--help" or "/?":
-                    Console.WriteLine(Help);
+                    string exe = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "JetMoto");
+                    Console.WriteLine(Help.Replace("JetMoto [", $"{exe} ["));
                     return null;
                 case "--disc" when i + 1 < args.Length:
                     o.Disc = args[++i]; break;
