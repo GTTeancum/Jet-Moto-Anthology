@@ -846,6 +846,50 @@ index 0000000..18909ba
 +        }
 +    }
 +}
+diff --git a/RecompOne.Runtime/Config/ViewConfig.cs b/RecompOne.Runtime/Config/ViewConfig.cs
+index f875641..f1b93f4 100644
+--- a/RecompOne.Runtime/Config/ViewConfig.cs
++++ b/RecompOne.Runtime/Config/ViewConfig.cs
+@@ -50,6 +50,39 @@ public class ViewConfig
+         set => SetBool("NativeResolution", value);
+     }
+ 
++    public int RenderScale
++    {
++        get
++        {
++            int value = GetInt("RenderScale", NativeResolution ? 1 : 4);
++            return value is 1 or 2 or 4 ? value : 4;
++        }
++        set
++        {
++            int scale = value is 1 or 2 or 4 ? value : 4;
++            SetInt("RenderScale", scale);
++            NativeResolution = scale == 1;
++        }
++    }
++
++    public int WindowWidth
++    {
++        get => Math.Clamp(GetInt("WindowWidth", 1280), 640, 7680);
++        set => SetInt("WindowWidth", Math.Clamp(value, 640, 7680));
++    }
++
++    public int WindowHeight
++    {
++        get => Math.Clamp(GetInt("WindowHeight", 720), 480, 4320);
++        set => SetInt("WindowHeight", Math.Clamp(value, 480, 4320));
++    }
++
++    public bool Fxaa
++    {
++        get => GetBool("Fxaa", true);
++        set => SetBool("Fxaa", value);
++    }
++
+     public bool VSync
+     {
+         get => GetBool("VSync");
 diff --git a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs b/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
 index 234f148..cbb487d 100644
 --- a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
@@ -1153,9 +1197,18 @@ index 0000000..4b8a1e3
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
-index d2ab6f5..b07450c 100644
+index d2ab6f5..02f009c 100644
 --- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
 +++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+@@ -42,7 +42,7 @@ public sealed class GlCore : IGpuBackend
+     int _kTwAndX, _kTwAndY, _kTwOrX, _kTwOrY;
+     int _kClipX0, _kClipY0, _kClipX1, _kClipY1;
+     int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
+-    int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
++    int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresentFxaa, _uPresent24Origin, _uPresent24Size;
+ 
+     public bool Ready { get; private set; }
+ 
 @@ -50,6 +50,12 @@ public sealed class GlCore : IGpuBackend
  
      public unsafe void InitGl()
@@ -1169,7 +1222,15 @@ index d2ab6f5..b07450c 100644
          _vram.Init();
  
          _progPrim = GlShaders.Build(_gl, GlShaders.PrimVs, GlShaders.PrimFs, "prim");
-@@ -273,13 +279,10 @@ public sealed class GlCore : IGpuBackend
+@@ -74,6 +80,7 @@ public sealed class GlCore : IGpuBackend
+         _uPresentOrigin = _gl.GetUniformLocation(_progPresent, "uOrigin");
+         _uPresentSize = _gl.GetUniformLocation(_progPresent, "uSize");
+         _uPresentTexSize = _gl.GetUniformLocation(_progPresent, "uTexSize");
++        _uPresentFxaa = _gl.GetUniformLocation(_progPresent, "uFxaa");
+         _gl.UseProgram(_progPresent);
+         _gl.Uniform1(_gl.GetUniformLocation(_progPresent, "uVram"), 0);
+ 
+@@ -273,13 +280,10 @@ public sealed class GlCore : IGpuBackend
          _kClipX0 = _env.ClipX0; _kClipY0 = _env.ClipY0; _kClipX1 = _env.ClipX1; _kClipY1 = _env.ClipY1;
      }
  
@@ -1184,7 +1245,7 @@ index d2ab6f5..b07450c 100644
          return new GlVertex
          {
              X = v.X, Y = v.Y,
-@@ -293,8 +296,7 @@ public sealed class GlCore : IGpuBackend
+@@ -293,8 +297,7 @@ public sealed class GlCore : IGpuBackend
      public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
      {
          Begin(f, 3);
@@ -1194,7 +1255,7 @@ index d2ab6f5..b07450c 100644
      }
  
      public void DrawRect(in HleRect r, in PrimFlags f)
-@@ -304,22 +306,21 @@ public sealed class GlCore : IGpuBackend
+@@ -304,22 +307,21 @@ public sealed class GlCore : IGpuBackend
          var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
          var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
          var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
@@ -1221,7 +1282,7 @@ index d2ab6f5..b07450c 100644
              return;
          }
  
-@@ -327,14 +328,14 @@ public sealed class GlCore : IGpuBackend
+@@ -327,14 +329,14 @@ public sealed class GlCore : IGpuBackend
          if (Math.Abs(dx) > Math.Abs(dy)) { xo = 0; yo = 1; if (dx > 0) x2++; else x1++; }
          else { xo = 1; yo = 0; if (dy > 0) y2++; else y1++; }
  
@@ -1240,11 +1301,87 @@ index d2ab6f5..b07450c 100644
      }
  
      public void FillRect(int x, int y, int w, int h, ushort color15)
+@@ -518,7 +520,7 @@ public sealed class GlCore : IGpuBackend
+ 
+     public void Present(in HleDispEnv disp) => PresentDisplay(disp.X, disp.Y, disp.W, disp.H, disp.Rgb24);
+ 
+-    public unsafe (uint tex, int w, int h, float aspect) PresentDisplay(int dispX, int dispY, int w, int h, bool rgb24 = false, int outW = 0, int outH = 0)
++    public unsafe (uint tex, int w, int h, float aspect) PresentDisplay(int dispX, int dispY, int w, int h, bool rgb24 = false, int outW = 0, int outH = 0, bool fxaa = false)
+     {
+         if (!Ready || w <= 0 || h <= 0) return (0, 0, 0, GpuHle.OutputAspect);
+         _frame++;
+@@ -575,12 +577,14 @@ public sealed class GlCore : IGpuBackend
+             _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X), dispY - src.Y);
+             _gl.Uniform2(_uPresentSize, (float)w1x, h1x);
+             _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
++            _gl.Uniform1(_uPresentFxaa, fxaa ? 1 : 0);
+         }
+         else
+         {
+             _gl.Uniform2(_uPresentOrigin, (float)dispX, dispY);
+             _gl.Uniform2(_uPresentSize, (float)w, h);
+             _gl.Uniform2(_uPresentTexSize, (float)VramShadow.Width, VramShadow.Height);
++            _gl.Uniform1(_uPresentFxaa, fxaa ? 1 : 0);
+         }
+         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+ 
 diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
-index 62e6cbf..fc238e0 100644
+index 62e6cbf..b816edb 100644
 --- a/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
 +++ b/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
-@@ -69,7 +69,6 @@ internal static class GlShaders
+@@ -21,10 +21,50 @@ internal static class GlShaders
+         uniform vec2 uOrigin;
+         uniform vec2 uSize;
+         uniform vec2 uTexSize;
++        uniform int uFxaa;
+         out vec4 oColor;
++
++        vec3 sampleDisplay(vec2 uv) {
++            vec2 lo = (uOrigin + vec2(0.5)) / uTexSize;
++            vec2 hi = (uOrigin + uSize - vec2(0.5)) / uTexSize;
++            return texture(uVram, clamp(uv, lo, hi)).rgb;
++        }
++
++        float luma(vec3 rgb) {
++            return dot(rgb, vec3(0.299, 0.587, 0.114));
++        }
++
++        vec3 applyFxaa(vec2 uv) {
++            vec2 px = 1.0 / vec2(textureSize(uVram, 0));
++            vec3 rgbNW = sampleDisplay(uv + vec2(-1.0, -1.0) * px);
++            vec3 rgbNE = sampleDisplay(uv + vec2( 1.0, -1.0) * px);
++            vec3 rgbSW = sampleDisplay(uv + vec2(-1.0,  1.0) * px);
++            vec3 rgbSE = sampleDisplay(uv + vec2( 1.0,  1.0) * px);
++            vec3 rgbM  = sampleDisplay(uv);
++
++            float lumaNW = luma(rgbNW), lumaNE = luma(rgbNE);
++            float lumaSW = luma(rgbSW), lumaSE = luma(rgbSE), lumaM = luma(rgbM);
++            float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
++            float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
++
++            vec2 dir;
++            dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
++            dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
++            float reduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * 0.03125, 0.0078125);
++            float inverseMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
++            dir = clamp(dir * inverseMin, vec2(-8.0), vec2(8.0)) * px;
++
++            vec3 rgbA = 0.5 * (sampleDisplay(uv + dir * (1.0 / 3.0 - 0.5)) +
++                               sampleDisplay(uv + dir * (2.0 / 3.0 - 0.5)));
++            vec3 rgbB = rgbA * 0.5 + 0.25 * (sampleDisplay(uv + dir * -0.5) +
++                                             sampleDisplay(uv + dir *  0.5));
++            float lumaB = luma(rgbB);
++            return lumaB < lumaMin || lumaB > lumaMax ? rgbA : rgbB;
++        }
++
+         void main() {
+             vec2 t = (uOrigin + vUv * uSize) / uTexSize;
+-            oColor = vec4(texture(uVram, t).rgb, 1.0);
++            oColor = vec4(uFxaa != 0 ? applyFxaa(t) : sampleDisplay(t), 1.0);
+         }
+         """;
+ 
+@@ -69,7 +109,6 @@ internal static class GlShaders
          flat out ivec2 clutBase;
          flat out ivec2 pageBase;
          flat out int   texMode;
@@ -1252,7 +1389,7 @@ index 62e6cbf..fc238e0 100644
  
          uniform vec2 uVertexOffset;
          uniform vec2 uPosBias;
-@@ -80,8 +79,6 @@ internal static class GlShaders
+@@ -80,8 +119,6 @@ internal static class GlShaders
              gl_Position = vec4(p, 0.0, 1.0);
  
              vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
@@ -1261,7 +1398,7 @@ index 62e6cbf..fc238e0 100644
              if ((inTexpage & 0x8000) != 0) {
                  texMode = 4;
              } else if ((inTexpage & 0x4000) != 0) {
-@@ -103,7 +100,6 @@ internal static class GlShaders
+@@ -103,7 +140,6 @@ internal static class GlShaders
          flat in ivec2 clutBase;
          flat in ivec2 pageBase;
          flat in int   texMode;
@@ -1269,7 +1406,7 @@ index 62e6cbf..fc238e0 100644
  
          layout(location = 0, index = 0) out vec4 FragColor;
          layout(location = 0, index = 1) out vec4 BlendColor;
-@@ -119,12 +115,6 @@ internal static class GlShaders
+@@ -119,12 +155,6 @@ internal static class GlShaders
          uniform int   uScale;
          uniform vec2  uPosBias;
  
@@ -1282,7 +1419,7 @@ index 62e6cbf..fc238e0 100644
          int u5(float f) { return int(floor(f * 31.0 + 0.5)); }
          vec4 fetch(ivec2 c) { return texelFetch(uVram, (c & ivec2(1023, 511)) * uScale, 0); }
          int fetch16(ivec2 c) {
-@@ -132,10 +122,6 @@ internal static class GlShaders
+@@ -132,10 +162,6 @@ internal static class GlShaders
              return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
          }
          vec3 quant5(ivec3 c8) {
@@ -3562,7 +3699,7 @@ index 0000000..c38f32d
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..b9b7e1f 100644
+index 8a62627..0519f91 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
 @@ -40,16 +40,41 @@ public static class HostWindow
@@ -3590,7 +3727,8 @@ index 8a62627..b9b7e1f 100644
          {
              var options = WindowOptions.Default with
              {
-                 Size = new Vector2D<int>(1280, 720),
+-                Size = new Vector2D<int>(1280, 720),
++                Size = new Vector2D<int>(ConfigManager.View.WindowWidth, ConfigManager.View.WindowHeight),
                  Title = title,
 -                VSync = ConfigManager.View.VSync,
 +                VSync = offscreen ? false : ConfigManager.View.VSync,
@@ -3781,7 +3919,21 @@ index 8a62627..b9b7e1f 100644
      }
  
      internal static void Pump()
-@@ -258,7 +436,9 @@ public static class HostWindow
+@@ -221,6 +399,13 @@ public static class HostWindow
+         if (_window == null) return;
+         _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
+         if (on) SetAutoIconify(false);
++        else SetWindowSize(ConfigManager.View.WindowWidth, ConfigManager.View.WindowHeight);
++    }
++
++    public static void SetWindowSize(int width, int height)
++    {
++        if (_window == null || _window.WindowState == WindowState.Fullscreen) return;
++        _window.Size = new Vector2D<int>(width, height);
+     }
+ 
+     static unsafe void SetAutoIconify(bool on)
+@@ -258,7 +443,9 @@ public static class HostWindow
          while (true)
          {
              var path = ConfigManager.Game.CdPath;
@@ -3792,7 +3944,7 @@ index 8a62627..b9b7e1f 100644
                  return;
  
              try { _window.DoEvents(); } catch { }
-@@ -285,13 +465,34 @@ public static class HostWindow
+@@ -285,13 +472,37 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -3801,14 +3953,15 @@ index 8a62627..b9b7e1f 100644
 +        // The 4x default is a 16x fill-rate multiplier, which is what put Jet
 +        // Moto 3's busiest scenes under 30 fps; at 1x it is what the console
 +        // drew, which is the point of a port that is meant to match retail.
-+        bool nativeRes = ConfigManager.View.NativeResolution ||
-+            Environment.GetEnvironmentVariable("RECOMPONE_NATIVE_RES") is "1" or "true";
++        bool nativeRes = Environment.GetEnvironmentVariable("RECOMPONE_NATIVE_RES") is "1" or "true";
 +
 +        // [jetmoto-fork] RECOMPONE_RES_SCALE=<1|2|4> picks the internal render
 +        // scale outright. 4x is a sixteenfold fill cost and 1x is what the
 +        // console drew; 2x sits between and is worth measuring rather than
 +        // assuming, because 320x240 upscaled is a hard sell on a modern display.
-+        int scale = nativeRes ? 1 : (GameQuirks.RenderScale != 0 ? GameQuirks.RenderScale : 4);
++        int scale = nativeRes ? 1 : ConfigManager.View.RenderScale;
++        if (!ConfigManager.View.Values.ContainsKey("RenderScale") && GameQuirks.RenderScale != 0)
++            scale = GameQuirks.RenderScale;
 +        if (int.TryParse(Environment.GetEnvironmentVariable("RECOMPONE_RES_SCALE"), out var rs)
 +            && (rs == 1 || rs == 2 || rs == 4))
 +            scale = rs;
@@ -3827,10 +3980,12 @@ index 8a62627..b9b7e1f 100644
          Hle.GpuHle.Backend = _glBackend;
 -        Hle.GpuHle.NativeResolution = ConfigManager.View.NativeResolution;
 +        Hle.GpuHle.NativeResolution = nativeRes;
++        Console.Error.WriteLine(
++            $"[Gpu] display: {ConfigManager.View.WindowWidth}x{ConfigManager.View.WindowHeight}, internal {scale}x, FXAA {(ConfigManager.View.Fxaa ? "on" : "off")}");
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -319,7 +520,9 @@ public static class HostWindow
+@@ -319,7 +530,9 @@ public static class HostWindow
          ConfigManager.ApplyViewToPanels(PanelManager.Panels);
  
          var cdPath = ConfigManager.Game.CdPath;
@@ -3841,11 +3996,14 @@ index 8a62627..b9b7e1f 100644
              _discPicker.Show();
      }
  
-@@ -372,7 +575,12 @@ public static class HostWindow
+@@ -371,8 +584,14 @@ public static class HostWindow
+                     gpu.DisplayX, gpu.DisplayY,
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
-                     outW: wf.X, outH: wf.Y);
+-                    outW: wf.X, outH: wf.Y);
 -                if (tex != 0) OutputPanel.SetTexture(tex, tw, th, aspect);
++                    outW: wf.X, outH: wf.Y,
++                    fxaa: ConfigManager.View.Fxaa);
 +                // 24-bit output comes from the software shadow: it is what a
 +                // movie player fills, and the GL 24-bit path never produced a
 +                // picture. PresentDisplay still runs, because it is what
@@ -3855,7 +4013,7 @@ index 8a62627..b9b7e1f 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +763,25 @@ public static class HostWindow
+@@ -555,6 +774,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
@@ -3881,6 +4039,69 @@ index 8a62627..b9b7e1f 100644
      static void ConvertDisplay(Gpu gpu, int w, int h)
      {
          var vram = gpu.Vram;
+diff --git a/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs b/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
+index 2f5f1f6..0e2c28a 100644
+--- a/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
++++ b/RecompOne.Runtime/Host/Window/Settings/Sections/DisplaySettingsSection.cs
+@@ -5,6 +5,13 @@ namespace RecompOne.Runtime.Host.Window;
+ 
+ internal sealed class DisplaySettingsSection : ISettingsSection
+ {
++    static readonly string[] WindowResolutionLabels =
++        ["960 x 540", "1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"];
++    static readonly (int Width, int Height)[] WindowResolutions =
++        [(960, 540), (1280, 720), (1600, 900), (1920, 1080), (2560, 1440), (3840, 2160)];
++    static readonly string[] RenderScaleLabels = ["Native (1x)", "2x", "4x"];
++    static readonly int[] RenderScales = [1, 2, 4];
++
+     public string Id => "display";
+     public string Title => "Display";
+     public int Order => 5;
+@@ -28,17 +35,38 @@ internal sealed class DisplaySettingsSection : ISettingsSection
+         }
+         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Syncs with refresh rate");
+ 
+-        bool native = ConfigManager.View.NativeResolution;
+-        if (ImGui.Checkbox("Native resolution", ref native))
++        int resolutionIndex = Array.FindIndex(WindowResolutions,
++            r => r.Width == ConfigManager.View.WindowWidth && r.Height == ConfigManager.View.WindowHeight);
++        if (resolutionIndex < 0) resolutionIndex = 1;
++        if (ImGui.Combo("Window resolution", ref resolutionIndex,
++            WindowResolutionLabels, WindowResolutionLabels.Length))
+         {
+-            ConfigManager.View.NativeResolution = native;
+-            Hle.GpuHle.NativeResolution = native;
++            var resolution = WindowResolutions[resolutionIndex];
++            ConfigManager.View.WindowWidth = resolution.Width;
++            ConfigManager.View.WindowHeight = resolution.Height;
++            HostWindow.SetWindowSize(resolution.Width, resolution.Height);
+             ConfigManager.SaveView(PanelManager.Panels);
+-            NoticePopup.Show("You need to restart the application to apply this configuration");
+         }
+-        if (ConfigManager.View.NativeResolution != (Hle.GlVram.Scale == 1))
++
++        int scaleIndex = Array.IndexOf(RenderScales, ConfigManager.View.RenderScale);
++        if (scaleIndex < 0) scaleIndex = 2;
++        if (ImGui.Combo("Internal resolution", ref scaleIndex, RenderScaleLabels, RenderScaleLabels.Length))
++        {
++            ConfigManager.View.RenderScale = RenderScales[scaleIndex];
++            ConfigManager.SaveView(PanelManager.Panels);
++            NoticePopup.Show("Restart the application to apply the internal resolution");
++        }
++        if (ConfigManager.View.RenderScale != Hle.GlVram.Scale)
+             ImGui.TextDisabled("restart is required");
+ 
++        bool fxaa = ConfigManager.View.Fxaa;
++        if (ImGui.Checkbox("FXAA", ref fxaa))
++        {
++            ConfigManager.View.Fxaa = fxaa;
++            ConfigManager.SaveView(PanelManager.Panels);
++        }
++        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Smooths high-contrast polygon edges");
++
+         ImGui.Separator();
+ 
+         string[] backends = ["auto", "gl45", "gl33"];
 diff --git a/RecompOne.Runtime/Log.cs b/RecompOne.Runtime/Log.cs
 index ebd353f..d4a1d87 100644
 --- a/RecompOne.Runtime/Log.cs

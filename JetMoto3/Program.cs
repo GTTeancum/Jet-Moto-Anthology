@@ -74,9 +74,12 @@ if (track != null)
 // to the bin/cue image. A positional argument overrides either, and may be a loose
 // directory or a cue. RECOMPONE_DISC / RECOMPONE_DISC_PREFER also apply.
 string repo = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..");
-string localLoose = LooseDisc.Is(AppContext.BaseDirectory)
-    ? AppContext.BaseDirectory
-    : Path.Combine(repo, "JetMoto3_loose");
+string processDir = Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+string localLoose = new[] { processDir, Environment.CurrentDirectory, AppContext.BaseDirectory }
+    .FirstOrDefault(LooseDisc.Is)
+    ?? Path.Combine(repo, "JetMoto3_loose");
+if (LooseDisc.Is(localLoose) && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("RECOMPONE_LOG")))
+    Environment.SetEnvironmentVariable("RECOMPONE_LOG", Path.Combine(localLoose, "jetmoto.log"));
 string? disc = discOverride != null
     ? discOverride
     : DiscSource.Resolve(
@@ -92,6 +95,7 @@ GameQuirks.Apply("jm3");
 
 if (disc != null && (File.Exists(disc) || LooseDisc.Is(disc)))
 {
+    RecompOne.Runtime.Config.ConfigManager.Load();
     RecompOne.Runtime.Config.ConfigManager.Game.CdPath = Path.GetFullPath(disc);
     RecompOne.Runtime.Config.ConfigManager.SaveGame();
 }

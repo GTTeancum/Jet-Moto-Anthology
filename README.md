@@ -167,6 +167,18 @@ dotnet JetMoto3/bin/Release/net10.0/JetMoto3.dll --track ice
 
 The available track switches are `--canyon`, `--ice`, and `--volcano`.
 
+To publish Jet Moto 3 as one self-contained Windows executable and place it in
+the extracted-disc directory:
+
+```powershell
+./tools/deploy-jetmoto3.ps1
+```
+
+The script bundles managed and native dependencies into `JetMoto3.exe` and
+removes obsolete DLL/runtime files from the verified deployment directory.
+Window resolution, internal render scale, and FXAA are available under
+**Settings > Display**.
+
 ```bash
 dotnet publish Launcher/JetMotoLauncher.csproj -c Release -r win-x64 --self-contained
 ```
