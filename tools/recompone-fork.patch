@@ -1152,6 +1152,134 @@ index 0000000..4b8a1e3
 +        if (!string.IsNullOrWhiteSpace(q)) Apply(q);
 +    }
 +}
+diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+index d2ab6f5..9a72734 100644
+--- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
++++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+@@ -273,13 +273,10 @@ public sealed class GlCore : IGpuBackend
+         _kClipX0 = _env.ClipX0; _kClipY0 = _env.ClipY0; _kClipX1 = _env.ClipX1; _kClipY1 = _env.ClipY1;
+     }
+ 
+-    bool DitherOf(in PrimFlags f) => _env.Dither && (f.Gouraud || (f.Textured && !f.RawTexture));
+-
+-    GlVertex V(in HleVertex v, in PrimFlags f, bool dither)
++    GlVertex V(in HleVertex v, in PrimFlags f)
+     {
+         uint color = (f.Textured && f.RawTexture) ? 0x808080u : (uint)(v.R | (v.G << 8) | (v.B << 16));
+         int tpage = f.UseImage ? 0x4000 : f.Textured ? (f.TPage & 0x1FF) : 0x8000;
+-        if (dither) tpage |= 0x400;
+         return new GlVertex
+         {
+             X = v.X, Y = v.Y,
+@@ -293,8 +290,7 @@ public sealed class GlCore : IGpuBackend
+     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+     {
+         Begin(f, 3);
+-        bool dith = DitherOf(f);
+-        _verts[_count++] = V(a, f, dith); _verts[_count++] = V(b, f, dith); _verts[_count++] = V(c, f, dith);
++        _verts[_count++] = V(a, f); _verts[_count++] = V(b, f); _verts[_count++] = V(c, f);
+     }
+ 
+     public void DrawRect(in HleRect r, in PrimFlags f)
+@@ -304,22 +300,21 @@ public sealed class GlCore : IGpuBackend
+         var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
+         var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
+         var d = new HleVertex { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
+-        _verts[_count++] = V(a, f, false); _verts[_count++] = V(b, f, false); _verts[_count++] = V(c, f, false);
+-        _verts[_count++] = V(b, f, false); _verts[_count++] = V(d, f, false); _verts[_count++] = V(c, f, false);
++        _verts[_count++] = V(a, f); _verts[_count++] = V(b, f); _verts[_count++] = V(c, f);
++        _verts[_count++] = V(b, f); _verts[_count++] = V(d, f); _verts[_count++] = V(c, f);
+     }
+ 
+     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
+     {
+         Begin(f, 6);
+-        bool dith = _env.Dither;
+         float x1 = a.X, y1 = a.Y;
+         float x2 = b.X, y2 = b.Y;
+         float dx = x2 - x1, dy = y2 - y1;
+ 
+         if (dx == 0 && dy == 0)
+         {
+-            LineVert(x1, y1, a, f, dith); LineVert(x1 + 1, y1, a, f, dith); LineVert(x1 + 1, y1 + 1, a, f, dith);
+-            LineVert(x1 + 1, y1 + 1, a, f, dith); LineVert(x1, y1 + 1, a, f, dith); LineVert(x1, y1, a, f, dith);
++            LineVert(x1, y1, a, f); LineVert(x1 + 1, y1, a, f); LineVert(x1 + 1, y1 + 1, a, f);
++            LineVert(x1 + 1, y1 + 1, a, f); LineVert(x1, y1 + 1, a, f); LineVert(x1, y1, a, f);
+             return;
+         }
+ 
+@@ -327,14 +322,14 @@ public sealed class GlCore : IGpuBackend
+         if (Math.Abs(dx) > Math.Abs(dy)) { xo = 0; yo = 1; if (dx > 0) x2++; else x1++; }
+         else { xo = 1; yo = 0; if (dy > 0) y2++; else y1++; }
+ 
+-        LineVert(x1, y1, a, f, dith); LineVert(x2, y2, b, f, dith); LineVert(x2 + xo, y2 + yo, b, f, dith);
+-        LineVert(x2 + xo, y2 + yo, b, f, dith); LineVert(x1 + xo, y1 + yo, a, f, dith); LineVert(x1, y1, a, f, dith);
++        LineVert(x1, y1, a, f); LineVert(x2, y2, b, f); LineVert(x2 + xo, y2 + yo, b, f);
++        LineVert(x2 + xo, y2 + yo, b, f); LineVert(x1 + xo, y1 + yo, a, f); LineVert(x1, y1, a, f);
+     }
+ 
+-    void LineVert(float x, float y, in HleVertex src, in PrimFlags f, bool dither)
++    void LineVert(float x, float y, in HleVertex src, in PrimFlags f)
+     {
+         var v = src; v.X = x; v.Y = y;
+-        _verts[_count++] = V(v, f, dither);
++        _verts[_count++] = V(v, f);
+     }
+ 
+     public void FillRect(int x, int y, int w, int h, ushort color15)
+diff --git a/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs b/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
+index 62e6cbf..fc238e0 100644
+--- a/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
++++ b/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
+@@ -69,7 +69,6 @@ internal static class GlShaders
+         flat out ivec2 clutBase;
+         flat out ivec2 pageBase;
+         flat out int   texMode;
+-        flat out int   vDither;
+ 
+         uniform vec2 uVertexOffset;
+         uniform vec2 uPosBias;
+@@ -80,8 +79,6 @@ internal static class GlShaders
+             gl_Position = vec4(p, 0.0, 1.0);
+ 
+             vColor = vec4(float(inColor & 0xFFu), float((inColor >> 8) & 0xFFu), float((inColor >> 16) & 0xFFu), 0.0) / 255.0;
+-            vDither = (inTexpage >> 10) & 1;
+-
+             if ((inTexpage & 0x8000) != 0) {
+                 texMode = 4;
+             } else if ((inTexpage & 0x4000) != 0) {
+@@ -103,7 +100,6 @@ internal static class GlShaders
+         flat in ivec2 clutBase;
+         flat in ivec2 pageBase;
+         flat in int   texMode;
+-        flat in int   vDither;
+ 
+         layout(location = 0, index = 0) out vec4 FragColor;
+         layout(location = 0, index = 1) out vec4 BlendColor;
+@@ -119,12 +115,6 @@ internal static class GlShaders
+         uniform int   uScale;
+         uniform vec2  uPosBias;
+ 
+-        const int ditherTbl[16] = int[16](
+-            -4,  0, -3,  1,
+-             2, -2,  3, -1,
+-            -3,  1, -4,  0,
+-             3, -1,  2, -2 );
+-
+         int u5(float f) { return int(floor(f * 31.0 + 0.5)); }
+         vec4 fetch(ivec2 c) { return texelFetch(uVram, (c & ivec2(1023, 511)) * uScale, 0); }
+         int fetch16(ivec2 c) {
+@@ -132,10 +122,6 @@ internal static class GlShaders
+             return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
+         }
+         vec3 quant5(ivec3 c8) {
+-            if (vDither != 0) {
+-                ivec2 vp = ivec2(floor(gl_FragCoord.xy / float(uScale) - uPosBias));
+-                c8 = clamp(c8 + ditherTbl[(vp.y & 3) * 4 + (vp.x & 3)], 0, 255);
+-            }
+             return vec3(min(c8 >> 3, 31)) / 31.0;
+         }
+ 
 diff --git a/RecompOne.Runtime/Gpu/Counters.cs b/RecompOne.Runtime/Gpu/Counters.cs
 new file mode 100644
 index 0000000..6501310
@@ -1249,25 +1377,18 @@ index 0000000..6501310
 +    }
 +}
 diff --git a/RecompOne.Runtime/Gpu/Gpu.cs b/RecompOne.Runtime/Gpu/Gpu.cs
-index 8b55b53..c458264 100644
+index 8b55b53..b45b4dc 100644
 --- a/RecompOne.Runtime/Gpu/Gpu.cs
 +++ b/RecompOne.Runtime/Gpu/Gpu.cs
-@@ -19,6 +19,14 @@ public sealed partial class Gpu
+@@ -18,6 +18,7 @@ public sealed partial class Gpu
+     int _texPageX, _texPageY;
      int _texDepth;
      int _blendMode;
++    // Retained only for GPUSTAT bit 9 compatibility; rendering does not dither.
      bool _dither;
-+
-+    // [jetmoto-fork] Dithering is removed outright. The PS1 GPU dithered when
-+    // reducing 24-bit shaded colour to 15-bit output, which on a modern display
-+    // reads as a fixed 4x4 crosshatch over every gouraud and modulated-texture
-+    // surface. The game's own request is still tracked in _dither so GPUSTAT
-+    // bit 9 reports what it set -- only the rendering effect is suppressed.
-+    internal const bool DitherEnabled = false;
-+    internal bool EffectiveDither => _dither && DitherEnabled;
      bool _texDisable;
  
-     int _texWinMaskX, _texWinMaskY, _texWinOffX, _texWinOffY;
-@@ -50,6 +58,187 @@ public sealed partial class Gpu
+@@ -50,6 +51,187 @@ public sealed partial class Gpu
      public bool Display24Bit => _disp24;
      public bool Pal => _pal;
  
@@ -1455,7 +1576,7 @@ index 8b55b53..c458264 100644
      int CyclesPerPixel => _hres368 ? 7 : _hres switch { 0 => 10, 1 => 8, 2 => 5, _ => 4 };
  
      public int DisplayWidth
-@@ -145,6 +334,7 @@ public sealed partial class Gpu
+@@ -145,6 +327,7 @@ public sealed partial class Gpu
              case >= 0x05 and <= 0x08:
                  WriteGp1Display(op, p);
                  GpuHle.NotifyDisplay(_dispVramX, _dispVramY, DisplayWidth, DisplayHeight);
@@ -1463,7 +1584,7 @@ index 8b55b53..c458264 100644
                  return;
              case 0x00: Reset(); break;
              case 0x01: _fifo.Clear(); _polyline = false; _loadImage = false; break;
-@@ -155,11 +345,80 @@ public sealed partial class Gpu
+@@ -155,11 +338,80 @@ public sealed partial class Gpu
          }
      }
  
@@ -1721,7 +1842,7 @@ index 9900095..de58973 100644
              int x = (_loadX + (_loadPx % _loadW)) & (VramWidth - 1);
              int y = (_loadY + (_loadPx / _loadW)) & (VramHeight - 1);
 diff --git a/RecompOne.Runtime/Gpu/GpuHleForward.cs b/RecompOne.Runtime/Gpu/GpuHleForward.cs
-index 80a937d..f56f89a 100644
+index 80a937d..697d922 100644
 --- a/RecompOne.Runtime/Gpu/GpuHleForward.cs
 +++ b/RecompOne.Runtime/Gpu/GpuHleForward.cs
 @@ -13,7 +13,7 @@ public sealed partial class Gpu
@@ -1729,7 +1850,7 @@ index 80a937d..f56f89a 100644
          ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
          TwMaskX = _texWinMaskX, TwMaskY = _texWinMaskY, TwOffX = _texWinOffX, TwOffY = _texWinOffY,
 -        SetMask = _setMask, CheckMask = _checkMask, Dither = _dither,
-+        SetMask = _setMask, CheckMask = _checkMask, Dither = EffectiveDither,
++        SetMask = _setMask, CheckMask = _checkMask,
      };
  
      static HleVertex HV(in Vert v) => new()
@@ -1752,13 +1873,14 @@ index 80a937d..f56f89a 100644
          var be = GpuHle.Backend!;
          be.SetDrawEnv(CurEnv());
 diff --git a/RecompOne.Runtime/Gpu/GpuRaster.cs b/RecompOne.Runtime/Gpu/GpuRaster.cs
-index 6f7a426..1c86570 100644
+index 6f7a426..2004a47 100644
 --- a/RecompOne.Runtime/Gpu/GpuRaster.cs
 +++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
-@@ -17,6 +17,132 @@ public sealed partial class Gpu
-         {  3, -1,  2, -2 },
-     };
+@@ -9,13 +9,131 @@ public sealed partial class Gpu
  
+     static readonly RenderPrimEvent _primEvent = new();
+ 
+-    static readonly int[,] Dither =
 +    static readonly bool SkipSemi =
 +        Environment.GetEnvironmentVariable("RECOMPONE_NO_SEMI") is "1" or "true";
 +
@@ -1787,7 +1909,12 @@ index 6f7a426..1c86570 100644
 +
 +    public static void SetWatchPixel(int x, int y) { WatchPixelX = x; WatchPixelY = y; _pixelWrites = 0; }
 +    static int ParseWatchPixel(int i)
-+    {
+     {
+-        { -4,  0, -3,  1 },
+-        {  2, -2,  3, -1 },
+-        { -3,  1, -4,  0 },
+-        {  3, -1,  2, -2 },
+-    };
 +        var v = Environment.GetEnvironmentVariable("RECOMPONE_WATCH_PIXEL");
 +        if (string.IsNullOrWhiteSpace(v)) return -1;
 +        var parts = v.Split(',');
@@ -1884,11 +2011,10 @@ index 6f7a426..1c86570 100644
 +        if (AtProjectionLimit(b, _drawOffsetX, _drawOffsetY)) GpuCounters.TotalProjectionLimitVertices++;
 +        if (AtProjectionLimit(c, _drawOffsetX, _drawOffsetY)) GpuCounters.TotalProjectionLimitVertices++;
 +    }
-+
+ 
      void DrawPolygon()
      {
-         uint cmd = _fifo[0];
-@@ -26,6 +152,15 @@ public sealed partial class Gpu
+@@ -26,6 +144,15 @@ public sealed partial class Gpu
          bool semi = (cmd & (1u << 25)) != 0;
          bool raw = (cmd & (1u << 24)) != 0;
          int n = quad ? 4 : 3;
@@ -1904,7 +2030,7 @@ index 6f7a426..1c86570 100644
  
          Span<Vert> v = stackalloc Vert[4];
          int idx = 1;
-@@ -68,6 +203,152 @@ public sealed partial class Gpu
+@@ -68,6 +195,152 @@ public sealed partial class Gpu
              for (int i = 0; i < n; i++) { v[i].X = e.X[i]; v[i].Y = e.Y[i]; }
          }
  
@@ -2057,7 +2183,7 @@ index 6f7a426..1c86570 100644
          if (HleOn)
          {
              HleTri(v[0], v[1], v[2], tex, gouraud, semi, raw, clut);
-@@ -84,10 +365,44 @@ public sealed partial class Gpu
+@@ -84,10 +357,44 @@ public sealed partial class Gpu
      {
          int spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
          int spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
@@ -2104,7 +2230,7 @@ index 6f7a426..1c86570 100644
          if (area < 0) { (b, c) = (c, b); area = -area; }
  
          int minX = Math.Max(_drawAreaLeft, Math.Min(a.X, Math.Min(b.X, c.X)));
-@@ -96,10 +411,22 @@ public sealed partial class Gpu
+@@ -96,11 +403,21 @@ public sealed partial class Gpu
          int maxY = Math.Min(_drawAreaBottom, Math.Max(a.Y, Math.Max(b.Y, c.Y)));
          if (minX > maxX || minY > maxY) return;
  
@@ -2124,15 +2250,16 @@ index 6f7a426..1c86570 100644
          int bias1 = IsTopLeft(c, a) ? 0 : -1;
          int bias2 = IsTopLeft(a, b) ? 0 : -1;
 -        bool ditherTex = _dither && !raw;
-+        bool ditherTex = EffectiveDither && !raw;
- 
+-
          int sx0 = b.Y - c.Y, sy0 = c.X - b.X;
          int sx1 = c.Y - a.Y, sy1 = a.X - c.X;
-@@ -133,12 +460,93 @@ public sealed partial class Gpu
+         int sx2 = a.Y - b.Y, sy2 = b.X - a.X;
+@@ -133,12 +450,93 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
 -                    if (!raw) { tr = tr * r >> 7; tg = tg * g >> 7; tb = tb * bl >> 7; }
+-                    Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
 +                    // [jetmoto-fork] The PS1 saturates the texture/vertex-colour
 +                    // product; it does not wrap. tr can reach 255*255>>7 = 508,
 +                    // and Plot packs with (v >> 3) & 0x1F, so 256 came out as
@@ -2154,14 +2281,14 @@ index 6f7a426..1c86570 100644
 +                        if (over) { tr = 0; tg = 255; tb = 0; }
 +                    }
 +                    if (TrapDarkArea > 0) { _darkPixels += tr + tg + tb < 96 ? 1 : 0; _litPixels++; }
-                     Plot(x, y, tr, tg, tb, semi && stp, ditherTex, stp);
-                 }
--                else Plot(x, y, r, g, bl, semi, _dither && gouraud);
++                    Plot(x, y, tr, tg, tb, semi && stp, stp);
++                }
 +                else
 +                {
 +                    if (TrapDarkArea > 0) { _darkPixels += r + g + bl < 96 ? 1 : 0; _litPixels++; }
-+                    Plot(x, y, r, g, bl, semi, EffectiveDither && gouraud);
-+                }
++                    Plot(x, y, r, g, bl, semi);
+                 }
+-                else Plot(x, y, r, g, bl, semi, _dither && gouraud);
              }
          }
 +
@@ -2224,7 +2351,7 @@ index 6f7a426..1c86570 100644
      }
  
      static bool IsTopLeft(in Vert p0, in Vert p1)
-@@ -185,6 +593,10 @@ public sealed partial class Gpu
+@@ -185,6 +583,10 @@ public sealed partial class Gpu
              if (e.Skip) return;
              x = e.X[0]; w = e.X[1] - e.X[0];
          }
@@ -2235,11 +2362,12 @@ index 6f7a426..1c86570 100644
          if (HleOn) { HleRect(x, y, w, h, u0, v0, clut, cr, cg, cb, tex, semi, raw); return; }
  
          for (int dy = 0; dy < h; dy++)
-@@ -198,7 +610,13 @@ public sealed partial class Gpu
+@@ -198,10 +600,16 @@ public sealed partial class Gpu
                      if (texel == 0) continue;
                      bool stp = (texel & 0x8000) != 0;
                      int tr = (texel & 0x1F) << 3, tg = ((texel >> 5) & 0x1F) << 3, tb = ((texel >> 10) & 0x1F) << 3;
 -                    if (!raw) { tr = tr * cr >> 7; tg = tg * cg >> 7; tb = tb * cb >> 7; }
+-                    Plot(px, py, tr, tg, tb, semi && stp, false, stp);
 +                    if (!raw)
 +                    {
 +                        tr = tr * cr >> 7; tg = tg * cg >> 7; tb = tb * cb >> 7;
@@ -2247,30 +2375,37 @@ index 6f7a426..1c86570 100644
 +                        if (tg > 255) tg = 255;
 +                        if (tb > 255) tb = 255;
 +                    }
-                     Plot(px, py, tr, tg, tb, semi && stp, false, stp);
++                    Plot(px, py, tr, tg, tb, semi && stp, stp);
                  }
-                 else Plot(px, py, cr, cg, cb, semi, false);
-@@ -252,7 +670,7 @@ public sealed partial class Gpu
+-                else Plot(px, py, cr, cg, cb, semi, false);
++                else Plot(px, py, cr, cg, cb, semi);
+             }
+     }
+ 
+@@ -252,7 +660,7 @@ public sealed partial class Gpu
          if (HleOn) { HleLine(x0, y0, r0, g0, b0, x1, y1, r1, g1, b1, semi, gouraud); return; }
          int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
          int steps = Math.Max(dx, dy);
 -        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, _dither); return; }
-+        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi, EffectiveDither); return; }
++        if (steps == 0) { Plot(x0, y0, r0, g0, b0, semi); return; }
          for (int i = 0; i <= steps; i++)
          {
              double t = (double)i / steps;
-@@ -262,7 +680,7 @@ public sealed partial class Gpu
+@@ -262,7 +670,7 @@ public sealed partial class Gpu
              int g = (int)(g0 + (g1 - g0) * t);
              int b = (int)(b0 + (b1 - b0) * t);
              if (x < _drawAreaLeft || x > _drawAreaRight || y < _drawAreaTop || y > _drawAreaBottom) continue;
 -            Plot(x, y, r, g, b, semi, _dither);
-+            Plot(x, y, r, g, b, semi, EffectiveDither);
++            Plot(x, y, r, g, b, semi);
          }
      }
  
-@@ -294,10 +712,46 @@ public sealed partial class Gpu
+@@ -292,21 +700,51 @@ public sealed partial class Gpu
+         return Vram[(clutY & (VramHeight - 1)) * VramWidth + ((clutX + index) & (VramWidth - 1))];
+     }
  
-     void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
+-    void Plot(int x, int y, int r, int g, int b, bool semi, bool dither, bool maskBit = false)
++    void Plot(int x, int y, int r, int g, int b, bool semi, bool maskBit = false)
      {
 +        // Match either framebuffer: the game alternates between y and y+240,
 +        // and pinning one of them is why the first attempt saw nothing in a race.
@@ -2315,6 +2450,15 @@ index 6f7a426..1c86570 100644
          ushort bg = Vram[idx];
          if (_checkMask && (bg & 0x8000) != 0) return;
  
+-        if (dither)
+-        {
+-            int d = Dither[y & 3, x & 3];
+-            r = Clamp255(r + d); g = Clamp255(g + d); b = Clamp255(b + d);
+-        }
+-
+         int fr = Math.Min(31, r >> 3), fg = Math.Min(31, g >> 3), fb = Math.Min(31, b >> 3);
+ 
+         if (semi)
 diff --git a/RecompOne.Runtime/Gpu/GpuRasterOrder.cs b/RecompOne.Runtime/Gpu/GpuRasterOrder.cs
 new file mode 100644
 index 0000000..9d8bb1d
@@ -2342,6 +2486,17 @@ index 0000000..67a5f0d
 +{
 +    public static void Set(int x, int y) => Gpu.SetWatchPixel(x, y);
 +}
+diff --git a/RecompOne.Runtime/Gpu/Hle/HleTypes.cs b/RecompOne.Runtime/Gpu/Hle/HleTypes.cs
+index 37400f7..e84acf0 100644
+--- a/RecompOne.Runtime/Gpu/Hle/HleTypes.cs
++++ b/RecompOne.Runtime/Gpu/Hle/HleTypes.cs
+@@ -22,5 +22,5 @@ public struct PrimFlags
+ }
+ 
+ public struct HleRect { public float X, Y; public int W, H; public short U, V; public byte R, G, B; }
+-public struct HleDrawEnv { public int ClipX0, ClipY0, ClipX1, ClipY1; public int TwMaskX, TwMaskY, TwOffX, TwOffY; public bool SetMask, CheckMask, Dither; }
++public struct HleDrawEnv { public int ClipX0, ClipY0, ClipX1, ClipY1; public int TwMaskX, TwMaskY, TwOffX, TwOffY; public bool SetMask, CheckMask; }
+ public struct HleDispEnv { public int X, Y, W, H; public bool Rgb24, Interlace; }
 diff --git a/RecompOne.Runtime/Hardware/CdAudio.cs b/RecompOne.Runtime/Hardware/CdAudio.cs
 new file mode 100644
 index 0000000..f8e64da
