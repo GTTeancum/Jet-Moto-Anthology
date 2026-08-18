@@ -3699,11 +3699,28 @@ index 0000000..c38f32d
 +    }
 +}
 diff --git a/RecompOne.Runtime/Host/Window/HostWindow.cs b/RecompOne.Runtime/Host/Window/HostWindow.cs
-index 8a62627..0519f91 100644
+index 8a62627..fbe25e9 100644
 --- a/RecompOne.Runtime/Host/Window/HostWindow.cs
 +++ b/RecompOne.Runtime/Host/Window/HostWindow.cs
-@@ -40,16 +40,41 @@ public static class HostWindow
+@@ -1,4 +1,5 @@
+ using System.Numerics;
++using System.Diagnostics;
+ using ImGuiNET;
+ using Silk.NET.Input;
+ using Silk.NET.Maths;
+@@ -35,21 +36,52 @@ public static class HostWindow
+     static bool _layoutPending = true;
+     static bool _closed;
+     static DiscPickerPopup? _discPicker;
++    static string _baseTitle = "";
++    static long _fpsWindowStart;
++    static int _fpsFrames;
+ 
+     public static void Initialize(string title)
      {
++        _baseTitle = title;
++        _fpsWindowStart = Stopwatch.GetTimestamp();
++        _fpsFrames = 0;
          ConfigManager.Load();
  
 +        // [jetmoto-fork] opt-in headless: RECOMPONE_HEADLESS=1 skips window
@@ -3747,7 +3764,20 @@ index 8a62627..0519f91 100644
                  API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
              };
              _window = Silk.NET.Windowing.Window.Create(options);
-@@ -177,10 +202,162 @@ public static class HostWindow
+@@ -68,7 +100,11 @@ public static class HostWindow
+     public static string Title
+     {
+         get => _window?.Title ?? "";
+-        set { if (_window != null) _window.Title = value ?? ""; }
++        set
++        {
++            _baseTitle = value ?? "";
++            if (_window != null) _window.Title = _baseTitle;
++        }
+     }
+ 
+     public static void SetTitle(string title) => Title = title;
+@@ -177,10 +213,162 @@ public static class HostWindow
          return best;
      }
  
@@ -3911,7 +3941,7 @@ index 8a62627..0519f91 100644
          try { _window.DoEvents(); }
          catch (Exception e) {
              Console.WriteLine(e.Message);
-@@ -199,6 +376,7 @@ public static class HostWindow
+@@ -199,6 +387,7 @@ public static class HostWindow
              ConfigManager.SaveView(PanelManager.Panels);
          }
          _window.DoRender();
@@ -3919,7 +3949,7 @@ index 8a62627..0519f91 100644
      }
  
      internal static void Pump()
-@@ -221,6 +399,13 @@ public static class HostWindow
+@@ -221,6 +410,13 @@ public static class HostWindow
          if (_window == null) return;
          _window.WindowState = on ? WindowState.Fullscreen : WindowState.Normal;
          if (on) SetAutoIconify(false);
@@ -3933,7 +3963,7 @@ index 8a62627..0519f91 100644
      }
  
      static unsafe void SetAutoIconify(bool on)
-@@ -258,7 +443,9 @@ public static class HostWindow
+@@ -258,7 +454,9 @@ public static class HostWindow
          while (true)
          {
              var path = ConfigManager.Game.CdPath;
@@ -3944,7 +3974,7 @@ index 8a62627..0519f91 100644
                  return;
  
              try { _window.DoEvents(); } catch { }
-@@ -285,13 +472,37 @@ public static class HostWindow
+@@ -285,13 +483,37 @@ public static class HostWindow
          _vramTex= CreateTexture(_gl);
          _ramTex = CreateTexture(_gl);
  
@@ -3985,7 +4015,7 @@ index 8a62627..0519f91 100644
  
          _imgui = new ImGuiController(_gl, _window, input, null, ConfigureImGui);
  
-@@ -319,7 +530,9 @@ public static class HostWindow
+@@ -319,7 +541,9 @@ public static class HostWindow
          ConfigManager.ApplyViewToPanels(PanelManager.Panels);
  
          var cdPath = ConfigManager.Game.CdPath;
@@ -3996,7 +4026,7 @@ index 8a62627..0519f91 100644
              _discPicker.Show();
      }
  
-@@ -371,8 +584,14 @@ public static class HostWindow
+@@ -371,8 +595,14 @@ public static class HostWindow
                      gpu.DisplayX, gpu.DisplayY,
                      gpu.DisplayWidth, gpu.DisplayHeight,
                      gpu.Display24Bit,
@@ -4013,7 +4043,28 @@ index 8a62627..0519f91 100644
                  gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                  gl.Viewport(0, 0, (uint)wf.X, (uint)wf.Y);
              }
-@@ -555,6 +774,25 @@ public static class HostWindow
+@@ -403,6 +633,20 @@ public static class HostWindow
+         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+         gl.Viewport(0, 0, (uint)fbDef.X, (uint)fbDef.Y);
+         _imgui.Render();
++        UpdateTitleFps();
++    }
++
++    static void UpdateTitleFps()
++    {
++        _fpsFrames++;
++        long now = Stopwatch.GetTimestamp();
++        double elapsed = (now - _fpsWindowStart) / (double)Stopwatch.Frequency;
++        if (elapsed < 0.5) return;
++
++        double fps = _fpsFrames / elapsed;
++        if (_window != null) _window.Title = $"{_baseTitle} | {fps:F1} FPS";
++        _fpsFrames = 0;
++        _fpsWindowStart = now;
+     }
+ 
+     static void DrawDockspace()
+@@ -555,6 +799,25 @@ public static class HostWindow
          RamMapPanel.SetTexture(_ramTex);
      }
  
