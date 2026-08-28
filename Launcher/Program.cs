@@ -24,26 +24,23 @@ try
     {
         string name = want?.Name ?? "Jet Moto";
         string exe = want?.Exe ?? "JetMoto";
-        Console.Error.WriteLine(
+        Gui.Error(
             $"No {name} disc found.\n\n" +
-            "This program ships no game data - you supply a rip of a disc you\n" +
-            "own. Put the .cue (or an extracted folder) beside this program, or\n" +
-            "pass it:\n\n" +
-            $"    {exe} --disc \"D:\\rips\\{name} (USA).cue\"\n");
+            "This program ships no game data - you supply a rip of a disc you own.\n\n" +
+            $"Put the .cue next to {exe}.exe and run it again, or pick it when asked.");
         return 2;
     }
 
     var title = GameProfile.Detect(disc, opt.Game) ?? want;
     if (title is null)
     {
-        Console.Error.WriteLine($"Not a Jet Moto disc: {disc}");
+        Gui.Error($"That is not a Jet Moto disc:\n\n{disc}");
         return 2;
     }
     if (want is not null && title.Key != want.Key)
     {
-        Console.Error.WriteLine(
-            $"That is a {title.Name} disc; this is the {want.Name} build.\n" +
-            $"Run {title.Exe} instead, or pass --game {title.Key} to override.");
+        Gui.Error($"That is a {title.Name} disc, and this is the {want.Name} build.\n\n" +
+                  $"Run {title.Exe}.exe instead.");
         return 2;
     }
 
@@ -52,7 +49,34 @@ try
     if (opt.Extract is not null)
         return DiscExtractor.Run(disc, opt.Extract, title) ? 0 : 1;
 
-    var asm = Recompile.LoadOrBuild(disc, title, opt.Rebuild);
+    // What we settled on is still a disc image, which means no extracted tree
+    // was found. Extract it into this executable's own folder and run from
+    // there, so the next launch finds the tree beside itself and starts
+    // straight away. This is the whole first-run experience: point at the
+    // bin/cue once, never be asked again.
+    //
+    // A failure here is not fatal -- the port can boot from the image directly,
+    // it just loses the ogg soundtrack and the faster reads.
+    string image = disc;
+    System.Reflection.Assembly? loaded = null;
+
+    // Extraction and recompilation both take a while on a first run and both
+    // report progress by writing to the console. SetupWindow puts that on
+    // screen instead -- and shows nothing at all when the work turns out to be
+    // cached and finishes in a fraction of a second.
+    SetupWindow.Run($"Preparing {title.Name}", report => StatusWriter.Capture(report, () =>
+    {
+        if (!Directory.Exists(image))
+        {
+            string here = DiscPicker.AppFolder.TrimEnd(Path.DirectorySeparatorChar);
+            Console.WriteLine($"Extracting {title.Name} to {here}");
+            if (DiscExtractor.Run(image, here, title)) disc = here;
+        }
+        loaded = Recompile.LoadOrBuild(disc, title, opt.Rebuild);
+        return true;
+    }));
+
+    var asm = loaded ?? throw new InvalidOperationException("nothing was built");
 
     var entry = asm.GetType("Recompiled.Entry")
                 ?? throw new InvalidOperationException("recompiled assembly has no Recompiled.Entry");
@@ -77,11 +101,13 @@ try
 }
 catch (TargetInvocationException tie) when (tie.InnerException is not null)
 {
+    Gui.Error(tie.InnerException.Message);
     Console.Error.WriteLine(tie.InnerException);
     return 1;
 }
 catch (Exception e)
 {
-    Console.Error.WriteLine(e.Message);
+    Gui.Error(e.Message);
+    Console.Error.WriteLine(e);
     return 1;
 }

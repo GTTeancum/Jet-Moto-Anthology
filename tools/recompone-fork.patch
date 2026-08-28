@@ -1051,10 +1051,10 @@ index f875641..9b5b03c 100644
      {
          get => GetBool("VSync");
 diff --git a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs b/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
-index 234f148..cbb487d 100644
+index 234f148..5af1510 100644
 --- a/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
 +++ b/RecompOne.Runtime/Diagnostics/ConsoleMirror.cs
-@@ -14,12 +14,91 @@ public static class ConsoleMirror
+@@ -14,12 +14,103 @@ public static class ConsoleMirror
  
      public static int Version { get { lock (_gate) return _version; } }
  
@@ -1077,9 +1077,21 @@ index 234f148..cbb487d 100644
 +            var spec = Environment.GetEnvironmentVariable("RECOMPONE_LOG_FILE");
 +            if (string.Equals(spec, "off", StringComparison.OrdinalIgnoreCase)) return;
 +
++            // [jetmoto-fork] Beside the executable, not AppContext.BaseDirectory:
++            // this ships as a single file, and for one of those BaseDirectory is
++            // the temporary self-extraction directory. The log was landing there
++            // -- invisible to the player and swept away later -- while the
++            // instructions promised one next to the program.
++            string home = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
++
++            // Named after the executable, so the three games never share a log.
++            // All three can sit in one folder, and a single jetmoto.log meant
++            // whichever ran last overwrote the evidence from the others.
++            string stem = Path.GetFileNameWithoutExtension(Environment.ProcessPath);
++            if (string.IsNullOrWhiteSpace(stem)) stem = "jetmoto";
 +            string path = !string.IsNullOrWhiteSpace(spec)
 +                ? spec!
-+                : Path.Combine(AppContext.BaseDirectory, "jetmoto.log");
++                : Path.Combine(home, stem + ".log");
 +
 +            var dir = Path.GetDirectoryName(path);
 +            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
@@ -1146,7 +1158,7 @@ index 234f148..cbb487d 100644
      }
  
      public static void Clear()
-@@ -69,7 +148,12 @@ public static class ConsoleMirror
+@@ -69,7 +160,12 @@ public static class ConsoleMirror
  
      static void FlushPendingLocked()
      {

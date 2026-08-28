@@ -46,6 +46,15 @@ static class DiscPicker
         {
             if (!Directory.Exists(dir)) continue;
 
+            // The folder itself, before anything inside it. Dropping the
+            // executable straight into an extracted tree is the normal way to
+            // deploy one of these -- the disc root and the program end up in the
+            // same directory -- and checking only subdirectories meant that
+            // arrangement was invisible, so a fully extracted game still stopped
+            // to ask for a disc it already had.
+            if (LooseDisc.Is(dir) && seen.Add(Path.GetFullPath(dir)))
+                yield return dir;
+
             // an extracted tree is a deliberate choice, so it goes first
             foreach (var sub in Directory.EnumerateDirectories(dir))
                 if (LooseDisc.Is(sub) && seen.Add(Path.GetFullPath(sub)))
@@ -57,8 +66,20 @@ static class DiscPicker
         }
     }
 
+    /// <summary>
+    /// The folder the executable actually sits in.
+    ///
+    /// Not AppContext.BaseDirectory: this ships as a single file, and for one of
+    /// those BaseDirectory is the temporary self-extraction directory. Anything
+    /// looked for -- or written -- there is invisible to the player and swept
+    /// away later. Recompile.cs makes the same distinction for its cache.
+    /// </summary>
+    public static string AppFolder =>
+        Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+
     static IEnumerable<string> Roots()
     {
+        yield return AppFolder;
         yield return AppContext.BaseDirectory;
         yield return Directory.GetCurrentDirectory();
         // one level up covers the common "game/ next to discs/" arrangement

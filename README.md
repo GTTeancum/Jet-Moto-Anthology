@@ -46,25 +46,25 @@ Three downloads on the [releases page](https://github.com/GTTeancum/Jet-Moto-Ant
 one per game. Each is a **single executable** — no .NET, no SDK, no build step,
 no loose DLLs.
 
-| | |
-|---|---|
-| `JetMoto.exe` | Jet Moto |
-| `JetMoto2.exe` | Jet Moto 2 |
-| `JetMoto3.exe` | Jet Moto 3 |
+| | | |
+|---|---|---|
+| `JetMoto.exe` | Jet Moto | SCUS-94309 |
+| `JetMoto2.exe` | Jet Moto 2 | SCUS-94167 |
+| `JetMoto3.exe` | Jet Moto 3 | SCUS-94555 |
 
-Put your disc rip in the same folder and double-click. If it cannot find a disc
-it opens a file picker and asks. Or point it straight at one:
+**Put your disc rip in the same folder and double-click.** That is the whole
+procedure. No installer, no command prompt, nothing else to install.
 
-```
-JetMoto2.exe --disc "D:\rips\Jet Moto 2 (v1.1).cue"
-JetMoto3.exe --disc "D:\rips\Jet Moto 3 (USA).cue"
-```
+If it cannot find a disc beside it, it opens a file picker and asks for your
+`.cue`.
 
-Install all three side by side if you like — each looks for its own disc and
-keeps its own cache, so having every rip present is fine.
+The first launch prepares your disc — unpacking it to loose files and
+translating its executable — and shows a progress window while it works. The
+result is saved next to the program, so every launch after the first goes
+straight into the game.
 
-The first launch spends 10–30 seconds translating your disc's executable and
-saves the result in `cache/`. Every launch after that starts immediately.
+Install all three side by side if you like. Each looks for its own disc, keeps
+its own saved translation, and writes its own log.
 
 ### You supply the game
 
@@ -76,30 +76,27 @@ A prebuilt port binary would have the game's entire executable compiled into it,
 translated line for line; that artifact is the game. Doing the translation at
 first launch is what makes a release possible.
 
-### Running Jet Moto 3
+### Controls and options
 
-The Jet Moto 3 release supports the North American disc, **SCUS-94555**.
-Download and extract `JetMoto3-win-x64.zip`, then either:
+Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
+`Enter` Start, `Q`/`W` L1/R1. Keyboard and gamepad bindings are under
+**Settings > Input**.
 
-1. Put `JetMoto3.exe`, the disc's `.cue`, and every `.bin` named by that cue in
-   one folder, then double-click `JetMoto3.exe`.
-2. Keep the rip elsewhere and choose it in the file picker on first launch.
-3. Pass the cue explicitly from a terminal:
+**Settings > Display** offers window resolution, 1x/2x/4x internal resolution
+and FXAA. Jet Moto 3 adds true 16:9 widescreen: the world is extended at the
+sides rather than the 4:3 picture being stretched, and the HUD is anchored to
+the new edges. Pre-rendered movies stay 4:3, and the same panel switches back
+to 4:3 gameplay at any time. The window title shows the current render FPS.
 
-```text
-JetMoto3.exe --disc "D:\rips\Jet Moto 3 (USA).cue"
-```
+### If something goes wrong
 
-The first run recompiles that disc locally and writes a roughly 2.5 MB DLL to
-`cache/` beside the launcher. On the tested disc this takes about 10 seconds.
-Later launches load the cached build immediately; use `--rebuild` after updating
-the launcher or when diagnosing a bad cache.
+Each game writes a log beside itself — `JetMoto.log`, `JetMoto2.log`,
+`JetMoto3.log` — flushed as it goes, so a crash still leaves a record. The
+previous run is kept as `<name>.prev.log`. Attach it to any bug report.
 
-The public release is the first-run launcher. The `--canyon`, `--ice`, and
-`--volcano` shortcuts documented under **Build from source** belong to the
-developer build and are intentionally not release options.
+### Advanced
 
-### Jet Moto 3 options
+Everything above works by double-clicking. These exist for the curious:
 
 ```
 JetMoto3.exe [--disc <path>] [--extract [folder]] [--rebuild]
@@ -109,25 +106,15 @@ JetMoto3.exe [--disc <path>] [--extract [folder]] [--rebuild]
 |---|---|
 | `--disc <path>` | a `.cue`, or a folder made by `--extract` |
 | `--extract [folder]` | unpack the disc to loose files with an ogg soundtrack |
-| `--rebuild` | discard the cached recompilation and redo it |
+| `--rebuild` | discard the saved translation and redo it |
 
-Default keys: arrows = D-pad, `Z` Cross, `X` Circle, `A` Square, `S` Triangle,
-`Enter` Start, `Q`/`W` L1/R1.
+`RECOMPONE_FRAME_DIVIDER=2` gives Jet Moto 1 the original's 30 Hz pacing.
+`ffmpeg` on PATH is optional, and only used for the soundtrack when extracting.
 
-Jet Moto 3's **Settings > Display** panel provides window resolution, 1x/2x/4x
-internal resolution, FXAA, and optional true 16:9 widescreen. Widescreen extends
-the world on both sides instead of stretching the 4:3 image, and anchors the HUD
-to the new edges. The window title shows the current render FPS.
+The `--canyon`, `--ice` and `--volcano` shortcuts documented under **Build from
+source** belong to the developer build and are intentionally not release
+options.
 
-Pre-rendered movies retain their original 4:3 aspect ratio. The same display
-panel can switch back to the original 4:3 gameplay view immediately. Keyboard
-and gamepad bindings are under **Settings > Input**.
-
-`RECOMPONE_FRAME_DIVIDER=2` gives the original's 30 Hz pacing. A log is written
-to `jetmoto.log` beside the binary, flushed per line so a crash still leaves a
-record; the previous run is kept as `jetmoto.prev.log`.
-
-`ffmpeg` on PATH is optional, and only used by `--extract` for the soundtrack.
 
 ## Loose files and the ogg soundtrack
 
