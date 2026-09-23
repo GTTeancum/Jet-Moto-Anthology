@@ -242,8 +242,35 @@ vec3 lightOriginalSurface(vec3 color) {
     return clamp(color*(ambient*(1.0-0.10*ao)+0.66*diffuse*sun),0.0,1.0);
 }
 
+float foamNoise(vec2 p) {
+    vec2 cell=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    vec4 h=fract(sin(vec4(dot(cell,vec2(127.1,311.7)),
+        dot(cell+vec2(1,0),vec2(127.1,311.7)),
+        dot(cell+vec2(0,1),vec2(127.1,311.7)),
+        dot(cell+vec2(1,1),vec2(127.1,311.7))))*43758.5453);
+    return mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y);
+}
+vec4 waterCoverage(vec3 tint,float alpha) {
+    // Native particle brightness is its fade, not a dark surface decal.
+    float life=clamp(max(vColor.r,max(vColor.g,vColor.b))*255.0/128.0,0.0,1.0);
+    return vec4(tint/max(life,.0001),alpha*life);
+}
+float surfaceFoam(vec2 t) {
+    vec2 flow=vec2(t.x*5.0,t.y*7.0-uEffectTime*.9);
+    float coarse=foamNoise(flow);
+    float fine=foamNoise(flow*3.1+vec2(coarse*1.3,uEffectTime*.23));
+    float edge=(1.0-smoothstep(.55,1.0,abs(t.x-.5)*2.0))
+        *smoothstep(0.0,.20,t.y)*(1.0-smoothstep(.80,1.0,t.y));
+    vec2 detail=t*vec2(96.0,112.0)+vec2(coarse*2.0,-uEffectTime*4.0);
+    float bubbles=smoothstep(.38,.72,foamNoise(detail));
+    float footprint=max(length(dFdx(detail)),length(dFdy(detail)));
+    bubbles=mix(bubbles,.42,smoothstep(.8,2.0,footprint));
+    return edge*(.05+.56*bubbles*(.25+.75*coarse)*(.55+.45*fine));
+}
 vec4 sampleCoverageEffect(vec2 t) {
     vec4 base=texture(uRepTex,t);
+    if(uRepCoverage>2.5)
+        return waterCoverage(texture(uRepTex,vec2(.5,.72)).rgb,surfaceFoam(t));
     if(uRepCoverage>1.5) {
         float alpha=0.0;
         float aa=max(length(fwidth(t))*.5,.001);
@@ -258,7 +285,7 @@ vec4 sampleCoverageEffect(vec2 t) {
             alpha=max(alpha,(1.0-smoothstep(radius,radius+aa,length(d)))*fade*.55);
         }
         vec3 tint=texture(uRepTex,vec2(.5,.72)).rgb;
-        return vec4(tint,alpha);
+        return waterCoverage(tint,alpha);
     }
     float motion=smoothstep(0.02,0.20,uEffectTime);
     float phase=fract(uEffectTime*.85);
@@ -655,8 +682,35 @@ vec3 lightOriginalSurface(vec3 color) {
     return clamp(color*(ambient*(1.0-0.10*ao)+0.66*diffuse*sun),0.0,1.0);
 }
 
+float foamNoise(vec2 p) {
+    vec2 cell=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    vec4 h=fract(sin(vec4(dot(cell,vec2(127.1,311.7)),
+        dot(cell+vec2(1,0),vec2(127.1,311.7)),
+        dot(cell+vec2(0,1),vec2(127.1,311.7)),
+        dot(cell+vec2(1,1),vec2(127.1,311.7))))*43758.5453);
+    return mix(mix(h.x,h.y,f.x),mix(h.z,h.w,f.x),f.y);
+}
+vec4 waterCoverage(vec3 tint,float alpha) {
+    // Native particle brightness is its fade, not a dark surface decal.
+    float life=clamp(max(vColor.r,max(vColor.g,vColor.b))*255.0/128.0,0.0,1.0);
+    return vec4(tint/max(life,.0001),alpha*life);
+}
+float surfaceFoam(vec2 t) {
+    vec2 flow=vec2(t.x*5.0,t.y*7.0-uEffectTime*.9);
+    float coarse=foamNoise(flow);
+    float fine=foamNoise(flow*3.1+vec2(coarse*1.3,uEffectTime*.23));
+    float edge=(1.0-smoothstep(.55,1.0,abs(t.x-.5)*2.0))
+        *smoothstep(0.0,.20,t.y)*(1.0-smoothstep(.80,1.0,t.y));
+    vec2 detail=t*vec2(96.0,112.0)+vec2(coarse*2.0,-uEffectTime*4.0);
+    float bubbles=smoothstep(.38,.72,foamNoise(detail));
+    float footprint=max(length(dFdx(detail)),length(dFdy(detail)));
+    bubbles=mix(bubbles,.42,smoothstep(.8,2.0,footprint));
+    return edge*(.05+.56*bubbles*(.25+.75*coarse)*(.55+.45*fine));
+}
 vec4 sampleCoverageEffect(vec2 t) {
     vec4 base=texture2D(uRepTex,t);
+    if(uRepCoverage>2.5)
+        return waterCoverage(texture2D(uRepTex,vec2(.5,.72)).rgb,surfaceFoam(t));
     if(uRepCoverage>1.5) {
         float alpha=0.0;
         float aa=max(length(fwidth(t))*.5,.001);
@@ -671,7 +725,7 @@ vec4 sampleCoverageEffect(vec2 t) {
             alpha=max(alpha,(1.0-smoothstep(radius,radius+aa,length(d)))*fade*.55);
         }
         vec3 tint=texture2D(uRepTex,vec2(.5,.72)).rgb;
-        return vec4(tint,alpha);
+        return waterCoverage(tint,alpha);
     }
     float motion=smoothstep(0.02,0.20,uEffectTime);
     float phase=fract(uEffectTime*.85);

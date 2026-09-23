@@ -1,0 +1,13 @@
+{
+  "app": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\JetMoto\\bin\\Release\\net10.0\\win-x64\\JetMoto.dll",
+  "appSha256": "30058359182F213C3481BE0B69A9CCFB900840366365B4C6891384D9400DB123",
+  "runtimeSha256": "DBD6DAA63BEE55F955E9A57D5504446F37E8DF14AC362A82CBF6571E6D309662",
+  "replaySha256": "A2A0AD7CF5EA2DF663D5D37C7742B1853BE5F33B23457161E81539BE797870BA",
+  "headless": true,
+  "mute": true,
+  "seconds": 76,
+  "capture": true,
+  "captureStart": 3550,
+  "captureEnd": 9223372036854775807,
+  "effectCaptureFrames": 3
+}

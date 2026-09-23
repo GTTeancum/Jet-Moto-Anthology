@@ -10,6 +10,11 @@ results below are superseded by REOPENED-DEFECTS.md where noted.
 
 ## Latest Validation Checkpoint
 
+- Surface wakes now use moving, overlapping foam coverage instead of repeating
+  fan artwork. See WAKE-CONTINUITY.md for implementation, rejected iterations,
+  pixel tests, individually inspected native captures and explicit lifecycle
+  limits. Ocean shaders, water geometry and lighting were not changed by this
+  wake pass. General flicker and swamp acceptance remain open.
 - Follow-up wake geometry fix: sprite-axis lift replaces per-triangle bounding
   width. The skewed-quad diagonal regression went from failing on all three GL
   backends to zero changed above-wake pixels at 1x/2x/4x. All 642 pixel checks

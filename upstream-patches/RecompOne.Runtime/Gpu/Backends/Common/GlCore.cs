@@ -31,10 +31,16 @@ public sealed class GlCore : IGpuBackend
     private long _effectDrawVblank = -1, _lastEffectCaptureFrame = -1;
     private int _effectFrameTriangles, _effectCaptures;
     private bool _effectCaptureStarted;
+    private int _wakeDraws, _wakeVisibleDraws, _wakeMinLight=255, _wakeMaxLight;
     
     public void AdvanceFrame()
     {
         _frame++;
+        if (_diagnoseSurfaces && _frame % 120 == 0)
+        {
+            Console.WriteLine($"[JetMoto:wake-window] vblank={Interrupts.VBlankCount} renderFrame={_frame} submitted={_wakeDraws} visible={_wakeVisibleDraws} lightMin={(_wakeDraws==0 ? -1 : _wakeMinLight)} lightMax={(_wakeDraws==0 ? -1 : _wakeMaxLight)}");
+            _wakeDraws=_wakeVisibleDraws=_wakeMaxLight=0;_wakeMinLight=255;
+        }
     }
 
 
@@ -80,6 +86,7 @@ public sealed class GlCore : IGpuBackend
     private int _uWorldBounds,_uWorldHeightRange,_uWorldLight,_uWorldEye,_uWorldTime,_uEffectTime,_uWaterTint;
     private bool _kRepCoverage, _pendingRepCoverage;
     private bool _kAirborne, _pendingAirborne, _emittingAirborne;
+    private bool _kWaterWake, _pendingWaterWake;
     private int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
 
     public bool Ready { get; private set; }
@@ -402,7 +409,7 @@ public sealed class GlCore : IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kAirborne == _pendingAirborne
+        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kAirborne == _pendingAirborne && _kWaterWake == _pendingWaterWake
                                           && (_pendingRepTex == 0 || (_kRepX == _pendingRepX && _kRepY == _pendingRepY
                                               && _kRepW == _pendingRepW && _kRepH == _pendingRepH))
                                           && _kTransparent == transparent && _kBlend == blend && _kImage == image
@@ -466,6 +473,7 @@ public sealed class GlCore : IGpuBackend
         _kRepTex = _pendingRepTex;
         _kRepCoverage = _pendingRepCoverage;
         _kAirborne = _pendingAirborne;
+        _kWaterWake = _pendingWaterWake;
         _kRepClut = _pendingRepClut;
         _kRepClutCount = _pendingRepClutCount;
         _kRepX = _pendingRepX;
@@ -525,6 +533,7 @@ public sealed class GlCore : IGpuBackend
         _pendingRepClut = 0;
         _pendingRepCoverage = false;
         _pendingAirborne = false;
+        _pendingWaterWake = false;
 
         if (!f.Textured || f.UseImage) return;
 
@@ -538,6 +547,7 @@ public sealed class GlCore : IGpuBackend
             _pendingRepTex = EnsureRepTexture(replacement);
             _pendingRepCoverage = replacement.Coverage;
             _pendingAirborne = replacement.Coverage && _emittingAirborne;
+            _pendingWaterWake = replacement.Coverage && native.Asset.WaterSpray && !_emittingAirborne;
             _pendingRepX = native.U0; _pendingRepY = native.V0;
             _pendingRepW = native.Width; _pendingRepH = native.Height;
             // Native effects reveal successive atlas slices as their geometry grows.
@@ -738,9 +748,37 @@ public sealed class GlCore : IGpuBackend
             (int)Math.Max(a.U, Math.Max(b.U, c.U)), (int)Math.Max(a.V, Math.Max(b.V, c.V)));
         Begin(f, 3);
         int start = _count;
-        _verts[_count++] = V(a, f);
-        _verts[_count++] = V(b, f);
-        _verts[_count++] = V(c, f);
+        var wakeA=a;var wakeB=b;var wakeC=c;
+        if (_pendingWaterWake)
+        {
+            if (_diagnoseSurfaces)
+            {
+                _wakeDraws++;
+                if(Math.Max(a.X,Math.Max(b.X,c.X))>=_env.ClipX0 && Math.Min(a.X,Math.Min(b.X,c.X))<=_env.ClipX1
+                    && Math.Max(a.Y,Math.Max(b.Y,c.Y))>=_env.ClipY0 && Math.Min(a.Y,Math.Min(b.Y,c.Y))<=_env.ClipY1)
+                    _wakeVisibleDraws++;
+                int light=f.RawTexture ? 128 : Math.Max(a.R,Math.Max(a.G,a.B));
+                _wakeMinLight=Math.Min(_wakeMinLight,light);_wakeMaxLight=Math.Max(_wakeMaxLight,light);
+            }
+            float duB=b.U-a.U,dvB=b.V-a.V,duC=c.U-a.U,dvC=c.V-a.V;
+            float determinant=duB*dvC-duC*dvB;
+            if(MathF.Abs(determinant)>.0001f)
+            {
+                float axisX=((c.X-a.X)*duB-(b.X-a.X)*duC)/determinant;
+                float axisY=((c.Y-a.Y)*duB-(b.Y-a.Y)*duC)/determinant;
+                float center=(Math.Min(a.V,Math.Min(b.V,c.V))+Math.Max(a.V,Math.Max(b.V,c.V)))*.5f;
+                // Overlap soft foam footprints along the trail without moving
+                // the water surface or changing the airborne sprite geometry.
+                HleVertex Extend(HleVertex v) {
+                    float offset=(v.V-center)*.5f;
+                    v.X+=axisX*offset;v.Y+=axisY*offset;return v;
+                }
+                wakeA=Extend(a);wakeB=Extend(b);wakeC=Extend(c);
+            }
+        }
+        _verts[_count++] = V(wakeA, f);
+        _verts[_count++] = V(wakeB, f);
+        _verts[_count++] = V(wakeC, f);
         if (_pendingRepCoverage)
         {
             long drawVblank = Interrupts.VBlankCount;
@@ -765,7 +803,7 @@ public sealed class GlCore : IGpuBackend
             && Interrupts.VBlankCount >= _effectDiagnosticStart && Interrupts.VBlankCount <= _effectDiagnosticEnd
             && _effectDiagnosticCount++ < 96)
         {
-            Console.WriteLine($"[JetMoto:effect-draw] vblank={Interrupts.VBlankCount} asset={f.NativeTexture?.Asset.Key} rect={_pendingRepX},{_pendingRepY},{_pendingRepW},{_pendingRepH} blend={_kBlend} semi={_kTransparent} " +
+            Console.WriteLine($"[JetMoto:effect-draw] vblank={Interrupts.VBlankCount} asset={f.NativeTexture?.Asset.Key} rect={_pendingRepX},{_pendingRepY},{_pendingRepW},{_pendingRepH} blend={_kBlend} semi={_kTransparent} rgb={a.R},{a.G},{a.B} layer={(_kAirborne ? "airborne" : _kWaterWake ? "foam" : "other")} " +
                 $"a=({a.X},{a.Y};uv={a.U},{a.V};z={a.Z};valid={a.HasGteZ}) b=({b.X},{b.Y};uv={b.U},{b.V};z={b.Z};valid={b.HasGteZ}) c=({c.X},{c.Y};uv={c.U},{c.V};z={c.Z};valid={c.HasGteZ})");
         }
         // A triangle needs a coherent depth for every corner. Never mix W=1
@@ -1074,7 +1112,7 @@ public sealed class GlCore : IGpuBackend
         _gl.UseProgram(_progPrim);
         SetWorldUniforms();
         if(_uEffectTime>=0)_gl.Uniform1(_uEffectTime,_frame/60f);
-        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? (_kAirborne ? 2f : 1f) : 0f);
+        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? (_kAirborne ? 2f : _kWaterWake ? 3f : 1f) : 0f);
         _gl.BindVertexArray(_vao);
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);

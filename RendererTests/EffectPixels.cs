@@ -109,6 +109,34 @@ static class EffectPixels
         var diagonalA=SkewedSpray(false);var diagonalB=SkewedSpray(true);
         int diagonalChanges=Enumerable.Range(0,32*64).Count(i=>Math.Abs((diagonalA[i]&31)-(diagonalB[i]&31))>1);
         Check(diagonalChanges<=2,$"skewed airborne wake lift is independent of quad diagonal (changed pixels: {diagonalChanges})");
+        ushort[] Foam(byte brightness=128) {
+            Clear();var f=F(waterSpray,-1);f.RawTexture=false;
+            HleVertex W(float x,float y,float u,float v) {
+                var p=V(x,y,u,v);p.R=p.G=p.B=brightness;return p;
+            }
+            core.DrawTri(W(8,24,0,2),W(56,24,63,2),W(8,48,0,59),f);
+            core.DrawTri(W(56,24,63,2),W(56,48,63,59),W(8,48,0,59),f);
+            return Finish();
+        }
+        var foam=Foam();
+        Check(Enumerable.Range(28,16).All(y=>foam[y*64+32]!=background),
+            "surface foam has filled longitudinal coverage instead of separate plume outlines");
+        Check(Enumerable.Range(0,64).All(y=>foam[y*64]==background && foam[y*64+63]==background),
+            "surface foam remains bounded to its native effect footprint");
+        for(int i=0;i<18;i++)core.AdvanceFrame();
+        var foamMoved=Foam();
+        Check(Enumerable.Range(28,16).Sum(y=>Enumerable.Range(16,32).Count(x=>foam[y*64+x]!=foamMoved[y*64+x]))>30,
+            "foam flows within a stationary footprint independently of bike movement");
+        var lateFoam=Foam(24);var deadFoam=Foam(0);
+        Check(lateFoam.All(p=>(p&31)>=(background&31)) && lateFoam.Any(p=>(p&31)>(background&31)),
+            "late water effects fade in opacity without becoming dark decals");
+        Check(deadFoam.All(p=>p==background),"expired water effects leave no foam or airborne ghost");
+        var halfFoam=Foam(64);var fullFoam=Foam();
+        // A nearly transparent filament can quantize to the same 5-bit value;
+        // require monotonicity everywhere and strict decay over the full effect.
+        Check(Enumerable.Range(0,4096).All(i=>(lateFoam[i]&31)<=(halfFoam[i]&31) && (halfFoam[i]&31)<=(fullFoam[i]&31))
+            && lateFoam.Sum(p=>p&31)<halfFoam.Sum(p=>p&31) && halfFoam.Sum(p=>p&31)<fullFoam.Sum(p=>p&31),
+            "native particle lifetime gives a monotonic foam opacity fade");
         NativeTextureBindings.OriginalAssetsOnly=false;
     }
 }

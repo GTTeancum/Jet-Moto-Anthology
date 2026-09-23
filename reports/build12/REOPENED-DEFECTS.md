@@ -127,3 +127,14 @@ obvious split was observed in this short sample. These three captures are
 narrow regression evidence, not proof of flicker elimination or all-track
 effect quality. Swamp quality, longer temporal checks and final package
 verification remain outstanding. No deployment or release package was made.
+
+## Surface Wake Replacement
+
+The surface wake now uses animated, overlapping foam coverage, with native
+color and original emission/removal decisions. It no longer samples the fan
+artwork for its surface shape. Airborne droplets remain a separate layer.
+See WAKE-CONTINUITY.md for the implementation, rejected mist/contour versions,
+660 passing pixel checks per backend, seven individually inspected captures
+from the final active-motion/coast runs, and explicit native-lifetime limits.
+Ocean material and lighting were not retuned. Broader flicker, swamp quality
+and release validation are still open; no package or deployment was produced.

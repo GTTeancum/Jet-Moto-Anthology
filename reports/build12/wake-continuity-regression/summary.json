@@ -1,0 +1,52 @@
+[
+  {
+    "test": "WorldLightingTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\WorldLightingTests.log"
+  },
+  {
+    "test": "RiderDetailTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\RiderDetailTests.log"
+  },
+  {
+    "test": "NativeTextureTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\NativeTextureTests.log"
+  },
+  {
+    "test": "NeuralPackTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\NeuralPackTests.log"
+  },
+  {
+    "test": "PerspectiveTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\PerspectiveTests.log"
+  },
+  {
+    "test": "WidescreenTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\WidescreenTests.log"
+  },
+  {
+    "test": "RendererTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\RendererTests.log"
+  },
+  {
+    "test": "EffectTextureTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\EffectTextureTests.log"
+  },
+  {
+    "test": "LauncherTests",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\LauncherTests.log"
+  },
+  {
+    "test": "CdReadRegression",
+    "exitCode": 0,
+    "log": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\JetMoto-RecompOne-Build12\\reports\\build12\\wake-continuity-regression\\CdReadRegression.log"
+  }
+]
