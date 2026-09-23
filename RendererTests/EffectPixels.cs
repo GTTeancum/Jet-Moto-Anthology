@@ -95,6 +95,20 @@ static class EffectPixels
         for(int i=0;i<15;i++)core.AdvanceFrame();
         var airborneMoved=Spray(waterSpray);
         Check(Enumerable.Range(0,32*64).Count(i=>airborneMoved[i]!=airborne[i])>5,"airborne droplets travel independently above stationary native wake geometry");
+        ushort[] SkewedSpray(bool alternateDiagonal) {
+            Clear();var f=F(waterSpray,-1);
+            var a=V(8,32,0,2);var b=V(40,32,63,2);
+            var c=V(24,56,0,59);var d=V(56,56,63,59);
+            if(alternateDiagonal) {
+                core.DrawTri(a,b,d,f);core.DrawTri(a,d,c,f);
+            } else {
+                core.DrawTri(a,b,c,f);core.DrawTri(b,d,c,f);
+            }
+            return Finish();
+        }
+        var diagonalA=SkewedSpray(false);var diagonalB=SkewedSpray(true);
+        int diagonalChanges=Enumerable.Range(0,32*64).Count(i=>Math.Abs((diagonalA[i]&31)-(diagonalB[i]&31))>1);
+        Check(diagonalChanges<=2,$"skewed airborne wake lift is independent of quad diagonal (changed pixels: {diagonalChanges})");
         NativeTextureBindings.OriginalAssetsOnly=false;
     }
 }

@@ -91,3 +91,39 @@ The first fine-spray game test started before its build completed, locking the o
 That fresh headless/muted run completed 76 seconds with expected exit 3. All three native frames (3550, 3554, 3558) were inspected sequentially. Smaller airborne droplets are visible and change position/fade between frames without the previous oversized circles. The surface wake still shows separate repeated plume outlines, so overall effect quality remains unaccepted. This short sequence is not sufficient to clear general water flickering, and reflections/swamp verification remain outstanding.
 
 Validation runner now rejects a mismatched built/runtime DLL and writes app/runtime/replay hashes plus launch/capture parameters to `validation-run.json` for future runs. PowerShell syntax validation passed; that new preflight has not yet been exercised by an actual game run. NativeTextureTests also ran successfully after repairing its RiderGeometry project dependency (see `airborne-native-texture-tests.log`). No release package/deployment; Build 11 untouched.
+
+## Approved Baseline And Wake Geometry Regression
+
+The user subsequently approved `fine-airborne-spray-verified-runtime/frame-003554.png`.
+That approval supersedes the earlier overall appearance rejection above. Preserve
+its ocean, droplet size/color and motion while correcting defects. Later swamp
+runs exercised the runtime-hash preflight successfully; swamp fake-reflection
+surface detail remains an open gate in VALIDATION.md.
+
+Source checkpoint `89956ab` was pushed to the new private repository
+`GTTeancum/Jet-Moto-Anthology`. Local disc, texture pack, generated game code,
+vendor inputs, caches and binaries were excluded from the source checkpoint.
+
+Returning to wakes found an independent geometry defect: airborne lift used
+each triangle's screen bounding width. A skewed sprite therefore changed shape
+when its quad diagonal changed. A new real-pixel regression reproduced this on
+all three GL backends at 1x/2x/4x (12 to 83 changed above-wake pixels).
+
+Lift now uses the recovered horizontal texture axis instead. The same regression
+reports zero changed above-wake pixels for every backend/scale, with 642 checks
+passing per backend and zero failures (`wake-diagonal-after.log`). No shader,
+water hue, droplet radius or animation parameter was changed. The game rebuild
+succeeded with zero warnings/errors after restoring the win-x64 target omitted
+by a prior test-project restore. Native gameplay verification follows separately;
+these tests alone do not clear the broader flicker or release gates.
+
+`wake-diagonal-native-check` then completed 76 seconds headlessly and muted,
+with expected game exit 3 and runner exit 0. Runtime hashes passed preflight.
+All three native captures were inspected individually in chronological order:
+003536 shows the bike approaching water with no prominent wake yet; 003542
+shows fine spray beginning near the bike; 003548 shows developed surface wake
+and airborne droplets. The water retains textured purple/blue response. No
+obvious split was observed in this short sample. These three captures are
+narrow regression evidence, not proof of flicker elimination or all-track
+effect quality. Swamp quality, longer temporal checks and final package
+verification remain outstanding. No deployment or release package was made.

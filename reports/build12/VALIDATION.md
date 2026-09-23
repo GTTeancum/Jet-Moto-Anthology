@@ -10,6 +10,13 @@ results below are superseded by REOPENED-DEFECTS.md where noted.
 
 ## Latest Validation Checkpoint
 
+- Follow-up wake geometry fix: sprite-axis lift replaces per-triangle bounding
+  width. The skewed-quad diagonal regression went from failing on all three GL
+  backends to zero changed above-wake pixels at 1x/2x/4x. All 642 pixel checks
+  passed per backend. Build succeeded with zero warnings/errors. All three
+  captures from the headless, muted `wake-diagonal-native-check` were inspected
+  in order; wake emergence and developed airborne spray are visible. This
+  short check does not clear general flicker or release acceptance.
 - All ten suites in `approved-baseline-regression/summary.json` completed with
   exit code zero. This does not establish visual acceptance.
 - Inspected both native captures in `swamp-reflection-ripples-check`, frames

@@ -783,8 +783,15 @@ public sealed class GlCore : IGpuBackend
         if (!_emittingAirborne && _pendingRepCoverage && f.NativeTexture?.Asset.WaterSpray == true)
         {
             float vMin = Math.Min(a.V, Math.Min(b.V,c.V)), vMax = Math.Max(a.V, Math.Max(b.V,c.V));
-            float width = Math.Max(a.X,Math.Max(b.X,c.X))-Math.Min(a.X,Math.Min(b.X,c.X));
-            if (vMax > vMin && width > 1f && float.IsFinite(width))
+            float uSpan = Math.Max(a.U,Math.Max(b.U,c.U))-Math.Min(a.U,Math.Min(b.U,c.U));
+            float duB=b.U-a.U, dvB=b.V-a.V, duC=c.U-a.U, dvC=c.V-a.V;
+            float determinant=duB*dvC-duC*dvB;
+            // Recover the sprite's horizontal texture axis, not the bounding
+            // width of one triangle: skewed quads must share the same lift.
+            float axisX=((b.X-a.X)*dvC-(c.X-a.X)*dvB)/determinant;
+            float axisY=((b.Y-a.Y)*dvC-(c.Y-a.Y)*dvB)/determinant;
+            float width=MathF.Sqrt(axisX*axisX+axisY*axisY)*uSpan;
+            if (MathF.Abs(determinant)>0.0001f && vMax > vMin && width > 1f && float.IsFinite(width))
             {
                 float lift = Math.Min(width * .38f, 64f);
                 HleVertex Lift(HleVertex v) { v.Y -= lift * (vMax-v.V)/(vMax-vMin); return v; }
