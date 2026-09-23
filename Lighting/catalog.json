@@ -1,0 +1,135 @@
+{
+  "format": 1,
+  "method": "Original static DMD hierarchy geometry; opaque near-LOD heightfield; exact source material receiver identities",
+  "banks": [
+    {
+      "bank": "ALPINE1",
+      "meshes": 476,
+      "instances": 3317,
+      "surfaceRecords": 5936,
+      "heightTriangles": 49295,
+      "occupancyFraction": 0.18477535247802734,
+      "waterIds": []
+    },
+    {
+      "bank": "ALPINE2",
+      "meshes": 625,
+      "instances": 2496,
+      "surfaceRecords": 7806,
+      "heightTriangles": 7474,
+      "occupancyFraction": 0.3524332046508789,
+      "waterIds": []
+    },
+    {
+      "bank": "ALPINE3",
+      "meshes": 296,
+      "instances": 1914,
+      "surfaceRecords": 3507,
+      "heightTriangles": 1690,
+      "occupancyFraction": 0.14017963409423828,
+      "waterIds": []
+    },
+    {
+      "bank": "DARK",
+      "meshes": 317,
+      "instances": 1522,
+      "surfaceRecords": 2185,
+      "heightTriangles": 650,
+      "occupancyFraction": 0.7530975341796875,
+      "waterIds": []
+    },
+    {
+      "bank": "ISLAND1",
+      "meshes": 819,
+      "instances": 72009,
+      "surfaceRecords": 9163,
+      "heightTriangles": 1097,
+      "occupancyFraction": 0.08739757537841797,
+      "waterIds": [
+        "0000C490",
+        "0000C624",
+        "0000C626",
+        "0000CA0B",
+        "0000D1CC"
+      ]
+    },
+    {
+      "bank": "ISLAND2",
+      "meshes": 755,
+      "instances": 2111,
+      "surfaceRecords": 7728,
+      "heightTriangles": 1188,
+      "occupancyFraction": 0.3265047073364258,
+      "waterIds": [
+        "0000C490",
+        "0000C624",
+        "0000C626",
+        "0000CA0B",
+        "0000D1CC"
+      ]
+    },
+    {
+      "bank": "ISLAND3",
+      "meshes": 555,
+      "instances": 9043,
+      "surfaceRecords": 4388,
+      "heightTriangles": 260,
+      "occupancyFraction": 0.06464290618896484,
+      "waterIds": [
+        "0000C490",
+        "0000C624",
+        "0000C626",
+        "0000CA0B",
+        "0000D1CC"
+      ]
+    },
+    {
+      "bank": "SWAMP1",
+      "meshes": 312,
+      "instances": 1525,
+      "surfaceRecords": 3040,
+      "heightTriangles": 2495,
+      "occupancyFraction": 0.031523704528808594,
+      "waterIds": [
+        "00003357",
+        "0000337C",
+        "00008B0D",
+        "0000A522",
+        "0000A56C",
+        "0000ED83"
+      ]
+    },
+    {
+      "bank": "SWAMP2",
+      "meshes": 584,
+      "instances": 1616,
+      "surfaceRecords": 4959,
+      "heightTriangles": 2629,
+      "occupancyFraction": 0.11312675476074219,
+      "waterIds": [
+        "00003357",
+        "0000337C",
+        "00008B0D",
+        "0000A522",
+        "0000A56C",
+        "0000ED83"
+      ]
+    },
+    {
+      "bank": "SWAMP3",
+      "meshes": 248,
+      "instances": 557,
+      "surfaceRecords": 3512,
+      "heightTriangles": 825,
+      "occupancyFraction": 0.057570457458496094,
+      "waterIds": [
+        "00003357",
+        "0000337C",
+        "00008B0D",
+        "0000A522",
+        "0000A56C",
+        "0000ED83"
+      ]
+    }
+  ]
+}

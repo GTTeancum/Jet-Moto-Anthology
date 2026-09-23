@@ -1,0 +1,194 @@
+[
+  {
+    "name": "race-scope",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8014CA18u);",
+    "code": "using var _jmRace = global::JetMoto.Widescreen.EnterRace();"
+  },
+  {
+    "name": "pause-scope",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8011B3D0u);",
+    "code": "using var _jmPause = new global::JetMoto.Widescreen.DeferredMenuScope();"
+  },
+  {
+    "name": "pause-active",
+    "position": "before",
+    "anchor": "c.A0 = 0x80170000u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Lui(4, c.A0);  /* 0x8011B4E8  lui         $a0, 0x8017 */",
+    "code": "_jmPause.Activate();"
+  },
+  {
+    "name": "camera-frustum",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x800F96CCu);",
+    "code": "global::JetMoto.Widescreen.PrepareCamera(mem, c.A0);"
+  },
+  {
+    "name": "visibility-counter",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x800DD2E0u);",
+    "code": "global::JetMoto.Widescreen.ObserveVisibleList(c.A2);"
+  },
+  {
+    "name": "native-file-load",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x800EDF28u);",
+    "code": "using var _jmLoad = global::JetMoto.NativeTextures.ObserveLoad(c, mem, c.A0, c.A1);"
+  },
+  {
+    "name": "native-emission-scope",
+    "position": "before",
+    "anchor": "c.T0 = 0x1F800000u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Lui(8, c.T0);  /* 0x800DD2E0  lui         $t0, 0x1F80 */",
+    "code": "using var _jmTextures = global::JetMoto.NativeTextures.BeginEmission(mem,c.A1,c.A2,c.A3);"
+  },
+  {
+    "name": "native-primitive-begin",
+    "position": "before",
+    "anchor": "{ var _addr = (c.T1 + 0xCu); c.S0 = mem.ReadU32(_addr); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Lw(16, _addr, c.S0); }  /* 0x800DD5B4  lw          $s0, 0xC($t1) */",
+    "code": "_jmTextures.BeginPrimitive(mem, c.T1, c.T2,c.T6);"
+  },
+  {
+    "name": "native-primitive-end",
+    "position": "before",
+    "anchor": "c.S1 = mem.ReadU8((c.T1 + 0x2u)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(17);  /* 0x800DDF44  lbu         $s1, 0x2($t1) */",
+    "code": "_jmTextures.EndPrimitive(mem, c.T2);"
+  },
+  {
+    "name": "native-texture-deferred-packet",
+    "position": "before",
+    "anchor": "c.S1 = mem.ReadU8((c.T1 + 0x3u)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(17);  /* 0x800DDDCC  lbu         $s1, 0x3($t1) */",
+    "code": "_jmTextures.Defer();"
+  },
+  {
+    "name": "native-texture-subdivision-finalized",
+    "position": "before",
+    "anchor": "return;                                                 /* 0x8011014C  jr          $ra */",
+    "code": "global::JetMoto.NativeTextures.FinishSubdivision(mem, c.S0, mem.ReadU32(c.T1 + 4u), c.T8, c.T9, c.A3);"
+  },
+  {
+    "name": "rider-highest-update",
+    "position": "before",
+    "anchor": "mem.WriteU8((c.V0 + 0x7u), (byte)c.V1); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.InvalidateMem((c.V0 + 0x7u), c.V1);  /* 0x801214B4  sb          $v1, 0x7($v0) */",
+    "code": "global::JetMoto.RiderDetail.InitializeIdlePose(mem,c.A1+0x110u); c.V1 = global::JetMoto.RiderDetail.SelectRaceLod(mem, c.V0, c.V1); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(3);"
+  },
+  {
+    "name": "rider-highest-render",
+    "position": "after",
+    "anchor": "c.S2 = mem.ReadU8((c.T0 + 0x7u)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(18);  /* 0x8010F1D0  lbu         $s2, 0x7($t0) */",
+    "code": "c.S2 = global::JetMoto.RiderDetail.SelectDrawLod(mem, c.T0, c.S2);"
+  },
+  {
+    "name": "rider-highest-preview",
+    "position": "before",
+    "anchor": "{ var _v = c.S3; c.S3 = c.S3 - 0x1u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(19, 19, -1, c.S3, _v); }  /* 0x8010ECC0  addiu       $s3, $s3, -0x1 */",
+    "code": "c.S2 = global::JetMoto.RiderDetail.SelectPreviewDistance(mem, c.T0, c.S2); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(18);"
+  },
+  {
+    "name": "rider-matrix-capacity",
+    "position": "before",
+    "anchor": "{ var _v = c.S7; c.S2 = (int)c.S7 < 198 ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Slti(18, 23, 198, c.S2, _v); }  /* 0x8010EE64  slti        $s2, $s7, 0xC6 */",
+    "code": "global::JetMoto.RiderDetail.ObserveMatrixSlot(c.S7);"
+  },
+  {
+    "name": "render-arena-configure",
+    "position": "before",
+    "anchor": "return;                                                 /* 0x8010CC6C  jr          $ra */",
+    "code": "global::JetMoto.RenderArena.Configure(mem, c.V0);"
+  },
+  {
+    "name": "render-arena-light-8010cd00",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 + 0x358u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(2, 2, 856, c.V0, _v); }  /* 0x8010CD00  addiu       $v0, $v0, 0x358 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.LightBase(mem); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-light-8010cd7c",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 + 0x358u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(2, 2, 856, c.V0, _v); }  /* 0x8010CD7C  addiu       $v0, $v0, 0x358 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.LightBase(mem); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-light-8010ce04",
+    "position": "after",
+    "anchor": "{ var _v = c.A1; c.A1 = c.A1 + 0x358u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(5, 5, 856, c.A1, _v); }  /* 0x8010CE04  addiu       $a1, $a1, 0x358 */",
+    "code": "c.A1 = global::JetMoto.RenderArena.LightBase(mem); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(5);"
+  },
+  {
+    "name": "render-arena-light-8010ce90",
+    "position": "after",
+    "anchor": "{ var _v = c.S1; c.S1 = c.S1 + 0x358u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(17, 17, 856, c.S1, _v); }  /* 0x8010CE90  addiu       $s1, $s1, 0x358 */",
+    "code": "c.S1 = global::JetMoto.RenderArena.LightBase(mem); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(17);"
+  },
+  {
+    "name": "render-arena-light-8010be60",
+    "position": "after",
+    "anchor": "{ var _v = c.S1; c.S1 = c.S1 + 0x358u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(17, 17, 856, c.S1, _v); }  /* 0x8010BE60  addiu       $s1, $s1, 0x358 */",
+    "code": "c.S1 = global::JetMoto.RenderArena.LightBase(mem); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(17);"
+  },
+  {
+    "name": "render-arena-root-increment-8010cd44",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 < 0x000000C8u ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sltiu(2, 2, 0x00C8, c.V0, _v); }  /* 0x8010CD44  sltiu       $v0, $v0, 0xC8 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.AllowMatrixIncrement(mem.ReadU32(c.S2)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-root-increment-8010cdd8",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 < 0x000000C8u ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sltiu(2, 2, 0x00C8, c.V0, _v); }  /* 0x8010CDD8  sltiu       $v0, $v0, 0xC8 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.AllowMatrixIncrement(mem.ReadU32(c.S2)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-root-increment-8010ceac",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 < 0x000000C8u ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sltiu(2, 2, 0x00C8, c.V0, _v); }  /* 0x8010CEAC  sltiu       $v0, $v0, 0xC8 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.AllowMatrixIncrement(mem.ReadU32(c.S2)); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-view-registration",
+    "position": "before",
+    "anchor": "mem.WriteU32((c.GP + 0x780u), c.A0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sw(4, (c.GP + 0x780u), c.A0);  /* 0x8010D054  sw          $a0, 0x780($gp) */",
+    "code": "c.A0 = global::JetMoto.RenderArena.RedirectViewBase(mem, c.A0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(4);"
+  },
+  {
+    "name": "render-arena-view-query",
+    "position": "after",
+    "anchor": "{ var _v = c.V0; c.V0 = c.V0 - 0x7B54u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Addi(2, 2, -31572, c.V0, _v); }  /* 0x8010C00C  addiu       $v0, $v0, -0x7B54 */",
+    "code": "c.V0 = global::JetMoto.RenderArena.RedirectViewBase((PSMemory)m, c.V0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "render-arena-root-bounds",
+    "position": "after",
+    "anchor": "{ var _addr = (c.S1 + 0x8u); c.S7 = mem.ReadU32(_addr); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Lw(23, _addr, c.S7); }  /* 0x8010E968  lw          $s7, 0x8($s1) */",
+    "code": "global::JetMoto.RenderArena.CheckMatrixSlot(c.S7);"
+  },
+  {
+    "name": "render-arena-nested-bounds",
+    "position": "after",
+    "anchor": "{ var _v = c.S7; c.S2 = (int)c.S7 < 198 ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Slti(18, 23, 198, c.S2, _v); }  /* 0x8010EE64  slti        $s2, $s7, 0xC6 */",
+    "code": "c.S2 = global::JetMoto.RenderArena.AllowMatrixIncrement(c.S7); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(18);"
+  },
+  {
+    "name": "render-arena-visible-bounds",
+    "position": "after",
+    "anchor": "L8010EB3C: ;",
+    "code": "c.S4 = global::JetMoto.RenderArena.AllowVisible(c.S3); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(20);"
+  },
+  {
+    "name": "render-arena-emission",
+    "position": "before",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x800DD2E0u);",
+    "code": "global::JetMoto.RenderArena.PrepareEmission(c, mem);"
+  },
+  {
+    "name": "render-command-capacity",
+    "position": "before",
+    "anchor": "{ var _s = c.S1; var _t = c.T2; c.S0 = _s < _t ? 1u : 0u; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sltu(16, 17, 10, c.S0, _s, _t); }  /* 0x800DD5A8  sltu        $s0, $s1, $t2 */",
+    "code": "global::JetMoto.RenderArena.CheckPacketSpace(c.T2,c.S1);"
+  },
+  {
+    "name": "native-world-camera",
+    "position": "after",
+    "anchor": "global::JetMoto.Widescreen.PrepareCamera(mem, c.A0);",
+    "code": "global::JetMoto.WorldLighting.BeginCamera(c.A0);"
+  }
+]

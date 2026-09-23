@@ -1,0 +1,29 @@
+﻿{
+    "format":  1,
+    "source_reference":  "https://github.com/xinntao/Real-ESRGAN/blob/master/inference_realesrgan.py",
+    "collected_utc":  "2026-09-21T12:55:59.9832569Z",
+    "checksum_note":  "Hashes are calculated from these downloads for upload-integrity checking; they are not independently verified publisher signatures.",
+    "models":  [
+                   {
+                       "file":  "RealESRGAN_x4plus.pth",
+                       "url":  "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+                       "bytes":  67040989,
+                       "sha256":  "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+                       "purpose":  "Full-size 4x learned super-resolution model for quality comparison."
+                   },
+                   {
+                       "file":  "realesr-general-x4v3.pth",
+                       "url":  "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+                       "bytes":  4885111,
+                       "sha256":  "8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292",
+                       "purpose":  "Compact 4x general-scene super-resolution model."
+                   },
+                   {
+                       "file":  "realesr-general-wdn-x4v3.pth",
+                       "url":  "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth",
+                       "bytes":  4885111,
+                       "sha256":  "1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca",
+                       "purpose":  "Weak-denoise companion for tuning smoothing in the compact model."
+                   }
+               ]
+}

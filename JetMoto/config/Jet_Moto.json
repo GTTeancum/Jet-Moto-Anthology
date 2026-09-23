@@ -1,0 +1,12 @@
+{
+  "game": {
+    "id": "SCUS-94309",
+    "name": "Jet Moto",
+    "output": "../generated"
+  },
+  "cue": "../../disc/Jet Moto (USA)/Jet Moto (USA).cue",
+  "funcMap": "funcmaps/main.json",
+  "linearSweep": true,
+  "addressComments": true,
+  "disasmComments": true
+}

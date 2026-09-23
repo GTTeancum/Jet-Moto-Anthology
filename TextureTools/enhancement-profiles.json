@@ -1,0 +1,498 @@
+{
+  "format": 1,
+  "default": "general-faithful",
+  "general_denoise_strength": 0.25,
+  "note": "Offline processing profiles only; runtime lookup is original bank/ordinal/ID, never these pixel checksums. Identical decoded originals reuse the same result. No anime or face-enhancement models.",
+  "source_pixel_profiles": {
+    "25c0e02b8c112611dc6563383e826b7db3c8e578b2d685f0280b1831e85a6ee1": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0000-00005AFB.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "f88414cd47f389d66c5d26e4d114c8c43c365d0e2bb9fb6ffe35f1cc353b478d": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0006-00001879.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "c28195efd1ec50eeb4720bb3e6984fc9ef89ecbe7e7bb0e92bf789d372c559e3": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0009-00002210.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "bb2bc901cd8cce44e0fd4786610743531f696a5ab024260add777abcbf711c65": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0011-000017C1.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "db571a619281c163c60347c179745fa138bd86c636a929ed975ef8a523fb7ee9": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0012-000018ED.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "8b3689334697d5f03b66a6b6381ae9bfc001fcd597e08da2ed229dae4692f7a7": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0014-000018C8.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "0142f0eb0ab66e5f3cecf5ed1495c549224b329a9bbbdea8b2d261b40b0c148f": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0028-0000223D.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "ff458829b4c0686d053150ae919cc1b4658392a9e1349bf906d49e460be5d156": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0029-00001B6D.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "7435954967559f5ada073bbd5e539ae1d2594ea948476777543227faec2fb8c7": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0030-00001B6A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "1f28159d0761322471a029d4167760903fcb8791c2156099ab99e9c9cc0c538f": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0031-00001B60.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "cdb60a35461b28c5d1314397adfc5a72e1aa58d863cb630b185762165336fdd9": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0032-00001B71.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "5a888d4699afa8f90b1fdcbc9c3b5b8324074e75e8ac230385d14a9b3985359d": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0033-00001B70.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "d1a9301d0ca30e052c70a685e560b45968ac4bc36c5b6dbd704bf55135269593": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0034-00001B6C.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "119f644ef50890c733ec3e9a7f4485100c8103202c844b60127d5563c4ca9978": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0035-0000397D.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "3e8ef34c8049f6a1d957d76a3519e5627a0bf439fe8f41faeb7c7b70cf94dfec": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0045-000018DC.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "5dfbb7723f528b14f3a8fca785411a2cc0c40a41c55919451ec9ba2a698caad4": {
+      "method": "rrdb-surface",
+      "example": "ALPINE1/ALPINE1/0053-00001882.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "dae9c405c74c631631a7b429120e25ed98d720f71baf4ed8688b69551f752ae7": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0005-00005AF5.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "f8724130e404ae74e3ec0e20d00dc3e7bae553146e94dbce1e64bc9ad1274126": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0006-00003CE2.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "2b47a612fa6bbfbe8afffda2e79d3ffded4ed91ed36bc8b9e66980d296475070": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0008-00002214.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e14e9557dcdfee5e4ad20d50bc2cf4ca293013edfc3495434ecdb6220d00dc0e": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0009-00002218.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "bcf0ccd390bc2b87bc6f7baba91badfab89b0d2649d961b84a0e8da180a3743a": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0010-00002215.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "b78687d692156b6188a063ca2433703eb0d91d55fc9189a2b1fa28127d5670b3": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0013-00003EA8.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "43236acf0bce1f20f645df85bb679062c3fe113e155fb2db0bd9e089efecf308": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0014-00005B0B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e2c97e4d06b0e19e78f59750d107dac41bd5e234f6bb765fecc8e80d312bce46": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0015-00003BD0.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "12ad850ee0212d174b7c0f6b6afa628ded16f2fa5a53da815c391dbdc4bc7b7d": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0017-000036A6.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e07d4a0c1b7554012fb2e94258c28f7c95d7f35e9c5d7e7f2e270e2322f8c7bb": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0036-00003E1E.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "bf448219eeed63bb9964ac8fb3c1f0b229d9c49ce5cd73acf2fc80802aeda6c8": {
+      "method": "rrdb-surface",
+      "example": "ALPINE2/ALPINE2/0041-00009981.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "c541556004a61b12244c4ffbd61171e35f93d15397c63c4cad8978bed56232f0": {
+      "method": "rrdb-surface",
+      "example": "ALPINE3/ALPINE3/0006-0000222D.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e140fe17eedc0ce0edc80668a57983f95e351779f9e1ff3b0e2a7d11d3f1bdf0": {
+      "method": "rrdb-surface",
+      "example": "ALPINE3/ALPINE3/0007-0000222C.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "3e6d1414e2012e4b1663ca7d334979b85435110a5c66fc0e8b23442704a4887e": {
+      "method": "rrdb-surface",
+      "example": "ALPINE3/ALPINE3/0008-0000222B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "a0e458cc7b4b63bfd10c08d1ff18ec75fddf9d012285c86c85a677bbee891606": {
+      "method": "rrdb-surface",
+      "example": "ALPINE3/ALPINE3/0031-00001B8A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "20930ccf14283c382d0a85e664064f0327ec0784df34ffad4b61db63f05aa46f": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0050-0000C3B9.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "2e74b905e122d438788f785f63855ac6843c2e904209a97fb1a45b319f046232": {
+      "method": "rrdb-surface",
+      "example": "DARK/DARK/0010-00003E80.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "283df0378425104bcd9156f1e62aac0f3b4f6e260602af447763b0c374aba332": {
+      "method": "rrdb-surface",
+      "example": "DARK/DARK/0033-00003E7A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "b55975c0faee10aa28c601d90731d5689be13bdcc3d161133a63e6c09d78d923": {
+      "method": "rrdb-surface",
+      "example": "DARK/DARK/0043-00003B9B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "fe39d1745e2bd0f32f3665040ada2dd89524156b4106df24c0ce6877134ea41c": {
+      "method": "rrdb-surface",
+      "example": "DARK/DARK/0051-00003D80.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "a69cfcf00644087764403b3f2e794d90b573993f6f2418c9339851975640f2c2": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0009-0000BA2B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "2217d87c7064f4ef2998437c458ee49b6433a54e75a88a4136074de2182c2ef6": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0010-0000B857.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "8992758dd2c7af1b8734ad2f6f198a75bdb422b2d726e77008ff1815a1033b8e": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0011-0000B882.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "5fe5f36e011d108553cc1b93268a970b334418f53787c06625f62b2f03bde4bd": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0017-000006BE.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "fe4668f8dc4b0129686f0a2c6ec01da173f99cd0232c702fcc61bec9b67d4adb": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0040-0000CCC1.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "aa566123dc54739c623e45480a53ac8a2b58cfd74d7dc1943ddef1b592334d90": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0041-0000B888.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "617864ec9b5bd1c4cc85afeffae43165941a1d3e08f0e1a765a334db195f810c": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0043-0000BA11.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e1ff9460246393fa9e8ae5eee8cffe0f578e3ae2bdecaecd67f1035ec4dccc52": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0044-0000B887.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "c51af2da1490d874cdfa2b2b0112ab17197cc6ae9c284b9e736528ad5a991b35": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0066-0000C600.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e2a78c5b2923e11078dc8324e374ace4b1b41b9b8570ec65f093bc23149d0ee2": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0089-0000C7B7.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "d2e4740d533f1c0cd87236f08cf9db74e9246adf289a76da9a9702a87b1b6837": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0098-0000B88A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "f2ec04d56f664fb99746e6be89c36a5507ee53bd4cdc0f19685c34cd732f96d4": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0012-0000C3D4.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "1120a71a3d4b1ebb4c49e0e6b7990f3a73c16c3b5d13a91a7a6d210900bb8d76": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0023-0000C789.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "9b211506fcaa7175123995178d93e81a3d69395bd70d1787e9bc8cf858f28216": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0054-0000C70B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "59699a94c6f6802ffd6b8d68b136eccdd10508828a8ed59ab022f0a9921d0b80": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0061-0000C78A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "530ce6c48128b2927a6c8d9f10ca8e30a4761edb67875367dc2b5bdd831a4e6e": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0102-0000C718.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "5dcc321eed2721956bcded1728e2bac82a7846b5d6a0555d56452f5a0de525f3": {
+      "method": "rrdb-surface",
+      "example": "ISLAND2/ISLAND2/0110-0000C78B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "98115fc8d1590a4dcafebdcd6d48a99ddb1ef43912063c864ba747afa92a9956": {
+      "method": "rrdb-surface",
+      "example": "ISLAND3/ISLAND3/0006-0000C42C.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "cc5d0eb1683ec2dd7db450464d152985aaf190034c2ecda41c9f96f41e39bd0c": {
+      "method": "rrdb-surface",
+      "example": "ISLAND3/ISLAND3/0028-0000B71F.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "6fc19b91d7d3b70a35d343f55c09dc454446c336026042bc2744775ba9e752ac": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0005-00008A14.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "54f62ce03ea3fed3e27e108bf8193b9bf925204b557b4f258536a30927f81b79": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0010-0000A612.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "064f60ac5408da9ac60d66ed2d3e723d5a688ef4511feb7ce7375dadf7935fed": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0015-00008ADF.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "0021a70aac1f9c6a4d2641d78adf75ee06c862b7f2e7f05c12189bfb00c26d21": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0031-00008FD7.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "7dd2a0fcc5ce2069edf8620cb71b6f29dda5c2fff20fa9fa691c8171c0b4dc3b": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0038-00008C68.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "06560d51bed4d1933e50071e5e317b21c5b04cdb859ee10e03cc6b874811ce66": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0042-000089D7.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "8250730dc8c227bf287c032424c6ca0668c0392637162c9cb2acb102952ca53c": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0043-000089DA.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "cca4dc73d5351418d901ef26cdb29453732f17e119f3b84ec7dfad9240d1c15c": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0044-0000A605.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "b81b17e6116117b2bb6f149426d73db083f48468983c5a864cfb9ff696364626": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0055-00008A21.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "883a0fb7f4fcb0a150b747c115501d201859b4c590083f7b5a8bfaf61343d338": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0069-0000A6AD.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "930ffd7c2f8d77aa1811f917ebb9825150f0bf1f4204289fffe9cdf3b9920eef": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0076-00008B04.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "26fdb49ac01db5cb7e1b74e820834484756a115ee8052241f2f3885d12664fe5": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0077-00008AEF.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "10ffcb5f29a970e8b0cefadc3d70a900bbd6e47db01a7b9f495f9a5eb6a7ed70": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0079-00008FA4.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "ad67469d9016b45bec681b9197dce9ca957efd9d5a1629558e8dde24ce8af493": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0083-00008AC8.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "a3ee8a53701dca5f4b6dae44710997a2eba765b384f7504823dbf6a73011dfe9": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0084-0000A252.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "e11d69069271269ad66cad2a0298168d7e900c8412243e25d2de6727a21fc612": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0091-0000A638.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "4dfb84b496926710c755f8b34a12014eb770108c1c814d380f6fde88a31baba8": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0114-00008C39.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "7ba2205e85e0ee2de38c8529ba7995ce4a758a9cb553ac73f7d998f4a7f877c0": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0116-000089C1.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "a29b091016f1e771d559a67440e777e1225e1c49ea9c01989b3cfd863f2ccd2c": {
+      "method": "rrdb-surface",
+      "example": "SWAMP1/SWAMP1/0117-000089C3.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "eaa9c3ea40104f91b31606a04394590360ac3beaacfdcf350c009241863c469c": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0005-00005FBE.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "3d28c2efda00f1958408d82c6d726343fe37d2143d4dfb147ddc31cecb5bdc18": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0006-00005FBD.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "b216025a4a4b7cf085020ded078cb9fe8da47c40676b3f7b940f7a97b49f7c75": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0018-00005FB9.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "0b1a0607ef900864f72fb89d8a25e448a6c684c68d6003a9d8ca1cda4022d6ed": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0023-0000642A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "d7ef9689b6cef9b6776e6f34229cea0a2a399b320c56f124722224da845ba6d9": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0024-00006429.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "5b6d9b964dbd6349878480a5d82a84acb7c37052f6c93827d11c7a900cc1b611": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0025-00006447.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "335a8c2947d40f50c4d6f724dfdf81c48a1d65bd480f896831adbb5b50b2978d": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0035-000034C6.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "690aa43b10a4c4329f0d8ab8cabdad53f38806a4e2ed98ddb5cd4fe53f8dba8d": {
+      "method": "rrdb-surface",
+      "example": "SWAMP2/SWAMP2/0046-0001C908.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "7e4cadba20392766d5db5f39727a151f4687bc823acf11e24a114dc7bdcc559f": {
+      "method": "rrdb-surface",
+      "example": "SWAMP3/SWAMP3/0029-00008C2B.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "ac92a1c7cf329e8189b89ef6afdf85fa23d7e763a8e7b0da08dbb9c58abe68e8": {
+      "method": "rrdb-surface",
+      "example": "SWAMP3/SWAMP3/0094-00008C2A.png",
+      "review": "Opaque environmental photo/surface candidate, visually checked in source contact sheet."
+    },
+    "b268c347418a454528ababf0049304e3613f0f4d322811a91ec80454026ac431": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0007-0000DA75.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "ae65f21bc1586831030d33daefc4fc0a66fb42c5c1a65936ffd53c4d69cc24a6": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0016-0000DA76.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "7d2295b48f8965714cb1a0a6ca500ed039ecd4367fb435f13e388dfcb9e7bdc4": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0019-0000C396.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "55945d9ed0d77361659dd01b266fda288d76bbf97cd7a62e4fe79992062a0946": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0020-0000C40A.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "1eb311f223c6305d124f2484293dc3bac8d253f93ffccc56fcc6817fdb3fe2eb": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0058-0000C9AC.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "d81f6710b0c8202edb03d71fdae6fe03dc18921e91a3d8e4e2758e897f104f53": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0059-0000C466.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "f6f9f6b123f2541b3d8aabfc14aa1364b23c90eb2956fefa520f57ebcc52eb61": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0069-0000C4AD.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "cf7cdcfc1d401070acba9b800cecc9c7395521b51794d7e73b2d5a7daa5f980d": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0070-0000C3B7.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "c87d6e6b204b54f8b2e393b69a4a5f81f0bcb9d89f73a916ea7623d627ad173d": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0071-0000C3A8.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "d9a51ad315a109873b0159a041456482587123fbce9eeccd418b3e02956ea50e": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0073-0000B7AB.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "cffc7ecfa797e106f47549a1c00ea92078a1a10b21f62923f7413f93039600fd": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0087-0000C3AA.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "c4530e5b093fbb9163a07821a16658fadd10d238b0d03932836960dc6d9dbfce": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0101-0000C9AD.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "1591a3f5f603826bd1b52150279887d6bbd461a44bae590a29d899fa9313335f": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0102-0000C397.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    },
+    "52bab9d67ee9b8dca40063c6b2baede72b7b31d24692bd3c709efd10f5490945": {
+      "method": "rrdb-surface",
+      "example": "ISLAND1/ISLAND1/0114-00005B34.png",
+      "review": "Reviewed road/sand/stone/building surface."
+    }
+  }
+}

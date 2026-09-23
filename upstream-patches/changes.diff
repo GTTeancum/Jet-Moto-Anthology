@@ -1,0 +1,2392 @@
+--- a/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs
++++ b/RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs
+@@ -63,6 +63,7 @@
+         sb.AppendLine(noInline);
+ 
+         var body = new StringBuilder();
++        body.AppendLine($"        RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x{func.Start:X8}u);");
+         if (ctx.Debug)
+             body.AppendLine(
+                 $"        System.Console.WriteLine(\"{func.EmittedName} @ {func.OverlayName} @ 0x{func.Start:X8}\");");
+@@ -77,7 +78,10 @@
+             {
+                 body.AppendLine($"        L{instr.Vram:X8}: ;");
+                 if (ctx.BackEdges.Contains(instr.Vram))
++                {
++                    body.AppendLine($"        RecompOne.Runtime.Diagnostics.ExecutionTrace.Block(0x{instr.Vram:X8}u);");
+                     body.AppendLine("        RecompOne.Runtime.Interrupts.Poll(c, m);");
++                }
+             }
+ 
+             if (instr.HasDelaySlot)
+--- a/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs
++++ b/RecompOne.Recompiler/CodeGen/InstructionEmitter.cs
+@@ -215,11 +215,11 @@
+             14 => rt == 0 ? "" : Track1($"{RT} = {RS} ^ 0x{immU:X4}u;", $"Ori({rt}, {rs}, 0x{immU:X4}, {RT}, _v)", rs),
+             15 => rt == 0 ? "" : $"{RT} = 0x{(uint)immU << 16:X8}u;" + Hook($"Lui({rt}, {RT})"),
+             32 => rt == 0 ? "" : $"{RT} = (uint)(sbyte)mem.ReadU8({Addr(rs, imm, moved, reloc)});" + Hook($"Invalidate({rt})"),
+-            33 => rt == 0 ? "" : $"{RT} = (uint)(short)mem.ReadU16({Addr(rs, imm, moved, reloc)});" + Hook($"Lh({rt}, {Addr(rs, imm, moved, reloc)}, {RT})"),
++            33 => rt == 0 ? "" : $"{{ var _addr = {Addr(rs, imm, moved, reloc)}; {RT} = (uint)(short)mem.ReadU16(_addr);" + Hook($"Lh({rt}, _addr, {RT})") + " }",
+             34 => rt == 0 ? "" : $"{RT} = mem.ReadWordLeft({RT}, {Addr(rs, imm, moved, reloc)});" + Hook($"Invalidate({rt})"),
+-            35 => rt == 0 ? "" : $"{RT} = mem.ReadU32({Addr(rs, imm, moved, reloc)});" + Hook($"Lw({rt}, {Addr(rs, imm, moved, reloc)}, {RT})"),
++            35 => rt == 0 ? "" : $"{{ var _addr = {Addr(rs, imm, moved, reloc)}; {RT} = mem.ReadU32(_addr);" + Hook($"Lw({rt}, _addr, {RT})") + " }",
+             36 => rt == 0 ? "" : $"{RT} = mem.ReadU8({Addr(rs, imm, moved, reloc)});" + Hook($"Invalidate({rt})"),
+-            37 => rt == 0 ? "" : $"{RT} = mem.ReadU16({Addr(rs, imm, moved, reloc)});" + Hook($"Lh({rt}, {Addr(rs, imm, moved, reloc)}, {RT})"),
++            37 => rt == 0 ? "" : $"{{ var _addr = {Addr(rs, imm, moved, reloc)}; {RT} = mem.ReadU16(_addr);" + Hook($"Lh({rt}, _addr, {RT})") + " }",
+             38 => rt == 0 ? "" : $"{RT} = mem.ReadWordRight({RT}, {Addr(rs, imm, moved, reloc)});" + Hook($"Invalidate({rt})"),
+             40 => $"mem.WriteU8({Addr(rs, imm, moved, reloc)}, (byte){RT});" + Hook($"InvalidateMem({Addr(rs, imm, moved, reloc)}, {RT})"),
+             41 => $"mem.WriteU16({Addr(rs, imm, moved, reloc)}, (ushort){RT});" + Hook($"Sh({rt}, {Addr(rs, imm, moved, reloc)}, {RT})"),
+--- /dev/null
++++ b/RecompOne.Runtime/Assets/Native/NativeTextureBindings.cs
+@@ -0,0 +1,175 @@
++using System.Buffers.Binary;
++using System.Runtime.CompilerServices;
++using RecompOne.Runtime.Memory;
++using StbImageSharp;
++
++namespace RecompOne.Runtime.Assets.Native;
++
++/// <summary>A replacement identified by an original source asset, never by VRAM contents.</summary>
++public sealed class NativeTextureAsset(string key, string file, int sourceWidth, int sourceHeight, bool allowEffectCoverage = false)
++{
++    public string Key { get; } = key;
++    public string FilePath { get; } = file;
++    public int SourceWidth { get; } = sourceWidth;
++    public int SourceHeight { get; } = sourceHeight;
++    public bool AllowsEffectCoverage { get; } = allowEffectCoverage;
++    public bool CoverageLoaded => _texture?.Coverage == true;
++    public long BoundCommands, ResolvedCommands;
++    private bool _attempted;
++    private ReplacementTexture? _texture;
++    public ReplacementTexture? GetTexture()
++    {
++        if (_attempted) return _texture;
++        _attempted = true;
++        if (!File.Exists(FilePath)) return null;
++        try
++        {
++            if (new FileInfo(FilePath).Length > 64 * 1024 * 1024) throw new InvalidDataException("PNG exceeds the 64 MiB file limit.");
++            var data = File.ReadAllBytes(FilePath);
++            // Bound allocation before handing a file to the image decoder. Only PNG is accepted.
++            if (data.Length < 33 || data.Length > 64 * 1024 * 1024 ||
++                !data.AsSpan(0, 8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10}) ||
++                !data.AsSpan(12,4).SequenceEqual("IHDR"u8)) throw new InvalidDataException("Expected a PNG image.");
++            uint w = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(16,4));
++            uint h = BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(20,4));
++            if (SourceWidth < 1 || SourceHeight < 1 || w != SourceWidth * 4 || h != SourceHeight * 4 ||
++                w > 4096 || h > 4096 || (long)w*h > 16*1024*1024)
++                throw new InvalidDataException($"Expected exactly {SourceWidth*4} x {SourceHeight*4} (4x). Got {w} x {h}.");
++            var image = ImageResult.FromMemory(data, ColorComponents.RedGreenBlueAlpha);
++            // Smooth alpha is opt-in for a verified original particle identity AND
++            // an adjacent versioned material file. Old packs/overrides keep their
++            // categorical PS1 alpha; unrelated texture IDs cannot enable this mode.
++            bool coverage = false;
++            string metadataPath = FilePath + ".material.json";
++            if (File.Exists(metadataPath))
++            {
++                if (!AllowsEffectCoverage) throw new InvalidDataException("Effect coverage is not allowed for this source asset.");
++                if (new FileInfo(metadataPath).Length > 4096) throw new InvalidDataException("Effect material metadata is too large.");
++                using var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(metadataPath));
++                var m = metadata.RootElement;
++                if (m.GetProperty("format").GetString() != "jetmoto-effect-material-1" ||
++                    m.GetProperty("sourceKey").GetString() != Key ||
++                    m.GetProperty("sourceWidth").GetInt32() != SourceWidth ||
++                    m.GetProperty("sourceHeight").GetInt32() != SourceHeight ||
++                    m.GetProperty("alphaMode").GetString() != "coverage")
++                    throw new InvalidDataException("Effect material identity, dimensions or format mismatch.");
++                coverage = true;
++            }
++            if (!coverage)
++                for (int i = 3; i < image.Data.Length; i += 4)
++                    if (image.Data[i] is not (0 or 128 or 255))
++                        throw new InvalidDataException("Alpha must be 0 (transparent), 128 (STP), or 255 (opaque).");
++            _texture = new ReplacementTexture { Width=image.Width, Height=image.Height,
++                ScaleX=4, ScaleY=4, Rgba=image.Data, Nearest=!coverage, Coverage=coverage };
++            System.Threading.Interlocked.Increment(ref NativeTextureBindings.ImagesLoaded);
++            if (coverage) {
++                System.Threading.Interlocked.Increment(ref NativeTextureBindings.EffectImagesLoaded);
++                Console.WriteLine($"[JetMoto:effects] Original asset {Key}: 4x replacement art, smooth coverage, original animation.");
++            }
++        }
++        catch (Exception e) when (e is not OutOfMemoryException)
++        { Console.WriteLine($"[JetMoto:native-textures] Original fallback for {Key}: {e.Message}"); }
++        return _texture;
++    }
++}
++
++/// <summary>Immutable native material. It can safely outlive the emulated command buffer.</summary>
++public sealed record NativeTextureMaterial(NativeTextureAsset Asset, int U0, int V0, int Width, int Height,
++    ushort TPage, ushort Clut)
++{
++    public bool Accepts(ushort page, ushort clut, int uMin, int vMin, int uMax, int vMax,
++        int andX, int andY, int orX, int orY)
++    {
++        // ABR and dither changes do not change the source image. Palette/depth/page changes do.
++        if ((page & 0x19f) != (TPage & 0x19f) || (((page >> 7)&3) < 2 && clut != Clut)) return false;
++        if (uMin < 0 || vMin < 0 || uMax > 255 || vMax > 255 || uMin > uMax || vMin > vMax) return false;
++        static bool Inside(int lo,int hi,int mask,int bits,int origin,int size)
++        {
++            if(mask==255 && bits==0) return lo>=origin && hi<origin+size;
++            if(origin<=0 && origin+size>=256) return true;
++            for(int v=lo;v<=hi;v++) if(((v&mask)|bits)<origin || ((v&mask)|bits)>=origin+size)return false;
++            return true;
++        }
++        return Inside(uMin,uMax,andX,orX,U0,Width) && Inside(vMin,vMax,andY,orY,V0,Height);
++    }
++}
++
++/// <summary>
++/// Provenance only. No pixel reads, hashes, VRAM rectangles or framebuffer inspection.
++/// A game-specific native renderer binds an original material to the command it emitted.
++/// Every payload byte write invalidates that command; ordering-table headers are not tagged.
++/// </summary>
++public static class NativeTextureBindings
++{
++    private static bool _originalAssetsOnly;
++    public static bool OriginalAssetsOnly
++    {
++        get => _originalAssetsOnly;
++        set { if (_originalAssetsOnly != value) Array.Clear(_words); _originalAssetsOnly=value; }
++    }
++    public static long ImagesLoaded, CommandsBound, CommandsResolved, RejectedDraws, EffectImagesLoaded, EffectCommandsResolved;
++    private sealed class Token(uint start, NativeTextureMaterial material)
++    { public readonly uint Start=start; public readonly NativeTextureMaterial Material=material; public bool Valid=true; }
++    private static Token?[] _words=[];
++    private static uint _mask, _hostSize;
++    public static void Init(uint size)
++    {
++        if (size < 0x200000 || size > 0x800000 || (size & (size-1)) != 0) throw new ArgumentOutOfRangeException(nameof(size));
++        _mask=size-1; _hostSize=0; _words=new Token?[size/4];
++    }
++    public static void ConfigureHostScratch(uint size)
++    {
++        if(size==0 || size>MemoryMap.HostScratchMaxSize || (size&3)!=0)throw new ArgumentOutOfRangeException(nameof(size));
++        if(_words.Length==0)throw new InvalidOperationException("Native provenance is not initialized.");
++        if(_hostSize==size)return;
++        if(_hostSize!=0)throw new InvalidOperationException("Native workspace cannot be silently resized.");
++        Array.Resize(ref _words,checked((int)((_mask+1+size)/4)));_hostSize=size;
++    }
++    private static bool Address(uint address, out uint offset, out uint remaining)
++    {
++        uint p=address&0x1fffffffu; offset=remaining=0;
++        if(_words.Length==0)return false;
++        if(p<MemoryMap.RamWindow){offset=p&_mask;remaining=_mask+1-offset;return true;}
++        uint h=p-MemoryMap.HostScratchBase;
++        if(h>=_hostSize)return false;
++        offset=_mask+1+h;remaining=_hostSize-h;return true;
++    }
++    [MethodImpl(MethodImplOptions.AggressiveInlining)]
++    public static void Invalidate(uint address, int bytes)
++    {
++        if (!OriginalAssetsOnly || bytes<=0) return;
++        for(int i=0;i<bytes;)
++        {
++            if(!Address(address+(uint)i,out uint off,out _))return;
++            int slot=(int)(off>>2);
++            var t=_words[slot];if(t!=null){t.Valid=false;_words[slot]=null;}
++            i+=Math.Min(bytes-i,4-(int)(off&3));
++        }
++    }
++    public static bool Bind(uint command, int wordCount, NativeTextureMaterial material)
++    {
++        if (!OriginalAssetsOnly || (command&3)!=0 || wordCount < 1 || wordCount>16 ||
++            !Address(command,out uint off,out uint remaining) || (uint)wordCount*4 > remaining) return false;
++        var token=new Token(off,material);
++        for (int i=0;i<wordCount;i++)
++        {
++            int slot=(int)(off>>2)+i;
++            if (_words[slot] is {} old) old.Valid=false;
++            _words[slot]=token;
++        }
++        System.Threading.Interlocked.Increment(ref CommandsBound);
++        System.Threading.Interlocked.Increment(ref material.Asset.BoundCommands);
++        return true;
++    }
++    public static NativeTextureMaterial? Resolve(uint command)
++    {
++        if (!OriginalAssetsOnly || (command&3)!=0 || !Address(command,out uint off,out _)) return null;
++        var token=_words[off>>2];
++        if (token is not {Valid:true} || token.Start!=off) return null;
++        System.Threading.Interlocked.Increment(ref CommandsResolved);
++        System.Threading.Interlocked.Increment(ref token.Material.Asset.ResolvedCommands);
++        if (token.Material.Asset.CoverageLoaded) System.Threading.Interlocked.Increment(ref EffectCommandsResolved);
++        return token.Material;
++    }
++    public static string Summary => $"native[bound={CommandsBound},resolved={CommandsResolved},png={ImagesLoaded},draw-fallback={RejectedDraws},effects={EffectImagesLoaded},effect-resolved={EffectCommandsResolved}]";
++}
+--- /dev/null
++++ b/RecompOne.Runtime/Assets/Native/WorldSurface.cs
+@@ -0,0 +1,85 @@
++using System.Numerics;
++using RecompOne.Runtime.Memory;
++
++namespace RecompOne.Runtime.Assets.Native;
++
++/// <summary>Small explicit row-major rotation, independent of host matrix conventions.</summary>
++public readonly struct WorldBasis(float a,float b,float c,float d,float e,float f,float g,float h,float i)
++{
++    public readonly float A=a,B=b,C=c,D=d,E=e,F=f,G=g,H=h,I=i;
++    public static WorldBasis Identity => new(1,0,0,0,1,0,0,0,1);
++    public Vector3 Apply(Vector3 v)=>new(A*v.X+B*v.Y+C*v.Z,D*v.X+E*v.Y+F*v.Z,G*v.X+H*v.Y+I*v.Z);
++    public WorldBasis Transpose()=>new(A,D,G,B,E,H,C,F,I);
++    public static WorldBasis operator*(WorldBasis x,WorldBasis y){var t=y.Transpose();var v0=x.Apply(new(t.A,t.B,t.C));var v1=x.Apply(new(t.D,t.E,t.F));var v2=x.Apply(new(t.G,t.H,t.I));return new(v0.X,v1.X,v2.X,v0.Y,v1.Y,v2.Y,v0.Z,v1.Z,v2.Z);}
++    public float Distance(WorldBasis o)=>MathF.Abs(A-o.A)+MathF.Abs(B-o.B)+MathF.Abs(C-o.C)+MathF.Abs(D-o.D)+MathF.Abs(E-o.E)+MathF.Abs(F-o.F)+MathF.Abs(G-o.G)+MathF.Abs(H-o.H)+MathF.Abs(I-o.I);
++    public float Determinant=>A*(E*I-F*H)-B*(D*I-F*G)+C*(D*H-E*G);
++    // The original engine scales projection rows (e.g. vertical 0.9). A camera
++    // basis is invertible but not necessarily orthonormal; transposition is NOT
++    // its inverse. Object instance rotations remain separately validated.
++    public WorldBasis Inverse { get { float d=Determinant;return new((E*I-F*H)/d,(C*H-B*I)/d,(B*F-C*E)/d,(F*G-D*I)/d,(A*I-C*G)/d,(C*D-A*F)/d,(D*H-E*G)/d,(B*G-A*H)/d,(A*E-B*D)/d); } }
++    public bool IsCameraTransform=>float.IsFinite(Determinant)&&MathF.Abs(Determinant)>.04f&&MathF.Abs(Determinant)<8&&float.IsFinite(A+B+C+D+E+F+G+H+I);
++    public bool IsRotation=>(Transpose()*this).Distance(Identity)<.035f;
++}
++
++/// <summary>Verified original-track height data, never the screen framebuffer.</summary>
++public sealed class WorldScene(string name,byte[] heightRgba,int size,Vector2 origin,Vector2 extent,Vector2 heightRange,Vector3 sunlight)
++{
++    public string Name {get;}=name;
++    public byte[] HeightRgba {get;}=heightRgba;
++    public int MapSize {get;}=size;
++    public Vector2 Origin {get;}=origin;
++    public Vector2 Extent {get;}=extent;
++    public Vector2 HeightRange {get;}=heightRange;
++    public Vector3 Sunlight {get;}=Vector3.Normalize(sunlight);
++}
++
++/// <summary>Immutable per-camera snapshot. Separate snapshots prevent split-screen contamination.</summary>
++public sealed class WorldCamera(WorldScene scene,WorldBasis rotation,Vector3 translation,float time)
++{
++    public WorldScene Scene {get;}=scene;
++    public WorldBasis Rotation {get;}=rotation;
++    public Vector3 Translation {get;}=translation;
++    public Vector3 Eye {get;}=rotation.Inverse.Apply(-translation);
++    public float Time {get;}=time;
++}
++
++/// <summary>Native source-primitive plane and camera, not a texture-color guess.</summary>
++public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal,int kind,float centerX,float centerY,float projection)
++{
++    public WorldCamera Camera {get;}=camera;
++    public Vector3 Point {get;}=point;
++    public Vector3 Normal {get;}=Vector3.Normalize(normal);
++    public int Kind {get;}=kind;
++    public float CenterX {get;}=centerX;
++    public float CenterY {get;}=centerY;
++    public float Projection {get;}=projection;
++    public bool AtPixel(float x,float y,out Vector3 world,out float inverseDepth)
++    {
++        world=default;inverseDepth=0;
++        if(!(Projection>0) || !float.IsFinite(x)||!float.IsFinite(y))return false;
++        Vector3 ray=Camera.Rotation.Inverse.Apply(new((x-CenterX)/Projection,(y-CenterY)/Projection,1));
++        float denominator=Vector3.Dot(ray,Normal);
++        if(MathF.Abs(denominator)<1e-6f)return false;
++        float depth=Vector3.Dot(Point-Camera.Eye,Normal)/denominator;
++        if(!float.IsFinite(depth)||depth<.02f||depth>50000)return false;
++        world=Camera.Eye+ray*depth;inverseDepth=1f/depth;
++        return float.IsFinite(world.X)&&float.IsFinite(world.Y)&&float.IsFinite(world.Z);
++    }
++}
++
++/// <summary>Separate provenance for verified world polygons, including untextured ones.
++/// Payload mutations invalidate old identity. OT headers are deliberately not tagged.</summary>
++public static class WorldSurfaceBindings
++{
++    public static bool Enabled;
++    public static long Bound, Resolved, Invalidated, LitTriangles, WaterTriangles;
++    private sealed class Token(uint offset,WorldSurface surface){public readonly uint Offset=offset;public readonly WorldSurface Surface=surface;public bool Valid=true;}
++    private static Token?[] _words=[];private static uint _mask,_hostSize;
++    public static void Init(uint size){if(size<0x200000||size>0x800000||(size&(size-1))!=0)throw new ArgumentOutOfRangeException(nameof(size));_mask=size-1;_hostSize=0;_words=new Token?[size/4];}
++    public static void ConfigureHostScratch(uint size){if(size==0||size>MemoryMap.HostScratchMaxSize||(size&3)!=0||_words.Length==0)throw new ArgumentOutOfRangeException(nameof(size));if(_hostSize==size)return;if(_hostSize!=0)throw new InvalidOperationException("World provenance workspace cannot be resized");Array.Resize(ref _words,checked((int)((_mask+1+size)/4)));_hostSize=size;}
++    private static bool Address(uint a,out uint offset,out uint remaining){offset=remaining=0;if(_words.Length==0)return false;uint p=a&0x1fffffff;if(p<MemoryMap.RamWindow){offset=p&_mask;remaining=_mask+1-offset;return true;}uint h=p-MemoryMap.HostScratchBase;if(h>=_hostSize)return false;offset=_mask+1+h;remaining=_hostSize-h;return true;}
++    public static void Invalidate(uint address,int bytes){if(!Enabled||bytes<=0)return;for(int n=0;n<bytes;){if(!Address(address+(uint)n,out uint offset,out _))return;var t=_words[offset>>2];if(t!=null){if(t.Valid)Invalidated++;t.Valid=false;_words[offset>>2]=null;}n+=Math.Min(bytes-n,4-(int)(offset&3));}}
++    public static bool Bind(uint address,int words,WorldSurface surface){if(!Enabled||(address&3)!=0||words<1||words>16||!Address(address,out uint offset,out uint remaining)||(uint)words*4>remaining)return false;var t=new Token(offset,surface);for(int i=0;i<words;i++){int slot=(int)(offset>>2)+i;if(_words[slot] is {} old)old.Valid=false;_words[slot]=t;}Bound++;return true;}
++    public static WorldSurface? Resolve(uint address){if(!Enabled||(address&3)!=0||!Address(address,out uint offset,out _))return null;var t=_words[offset>>2];if(t is not {Valid:true}||t.Offset!=offset)return null;Resolved++;return t.Surface;}
++    public static string Summary=>$"world[bound={Bound},resolved={Resolved},litTri={LitTriangles},waterTri={WaterTriangles}]";
++}
+--- a/RecompOne.Runtime/Assets/Replacements.cs
++++ b/RecompOne.Runtime/Assets/Replacements.cs
+@@ -197,6 +197,8 @@
+ 
+ public sealed class ReplacementTexture
+ {
++    public bool Nearest; // Classic native art keeps categorical alpha and nearest sampling.
++    public bool Coverage; // Explicit original-particle material: continuous coverage, not a PS1 STP bit.
+     public int Width, Height;
+     public float ScaleX = 1f, ScaleY = 1f;
+     public byte[] Rgba = [];
+--- /dev/null
++++ b/RecompOne.Runtime/Diagnostics/ExecutionTrace.cs
+@@ -0,0 +1,46 @@
++using System.Runtime.CompilerServices;
++
++namespace RecompOne.Runtime.Diagnostics;
++
++/// <summary>Optional lightweight PC breadcrumbs for recompilation bring-up. No game-state changes.</summary>
++public static class ExecutionTrace
++{
++    public static bool Enabled;
++    public static volatile bool StopRequested;
++    private static uint _lastAddress;
++    private static uint _lastFunction;
++    private static readonly uint[] _recent = new uint[64];
++    private static long _sequence;
++    public static uint LastAddress => Volatile.Read(ref _lastAddress);
++    public static uint LastFunction => Volatile.Read(ref _lastFunction);
++    public sealed class StopSignal : Exception;
++
++    [MethodImpl(MethodImplOptions.AggressiveInlining)]
++    public static void Enter(uint address)
++    {
++        if (StopRequested) throw new StopSignal();
++        if (!Enabled) return;
++        Volatile.Write(ref _lastAddress, address);
++        Volatile.Write(ref _lastFunction, address);
++        long index = _sequence;
++        Volatile.Write(ref _recent[(int)(index & 63)], address);
++        Volatile.Write(ref _sequence, index + 1);
++    }
++
++    [MethodImpl(MethodImplOptions.AggressiveInlining)]
++    public static void Block(uint address)
++    {
++        if (StopRequested) throw new StopSignal();
++        if (Enabled) Volatile.Write(ref _lastAddress, address);
++    }
++
++    public static uint[] RecentFunctions()
++    {
++        long end = Volatile.Read(ref _sequence);
++        int count = (int)Math.Min(end, _recent.Length);
++        var result = new uint[count];
++        for (int i = 0; i < count; i++)
++            result[i] = Volatile.Read(ref _recent[(int)((end - count + i) & 63)]);
++        return result;
++    }
++}
+--- a/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
++++ b/RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs
+@@ -13,6 +13,8 @@
+         public float Clut, Texpage;
+         public float U, V;
+         public float W;
++        public float WX,WY,WZ,WQ;
++        public float NX,NY,NZ,SurfaceKind;
+     }
+ 
+     private const int MaxVerts = 0x40000;
+@@ -63,7 +65,11 @@
+     private float _kRepX, _kRepY, _kRepW, _kRepH;
+     private int _kRepClutCount;
+     private int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
+-    private int _uRepRect, _uRepClutCount;
++    private int _uRepRect, _uRepClutCount, _uRepCoverage;
++    private Assets.Native.WorldCamera? _worldCamera;
++    private readonly Dictionary<Assets.Native.WorldScene,uint> _worldMaps=[];
++    private int _uWorldBounds,_uWorldHeightRange,_uWorldLight,_uWorldEye,_uWorldTime;
++    private bool _kRepCoverage, _pendingRepCoverage;
+     private int _uPresentOrigin, _uPresentSize, _uPresentTexSize, _uPresent24Origin, _uPresent24Size;
+ 
+     public bool Ready { get; private set; }
+@@ -80,6 +86,8 @@
+ 
+     public unsafe void InitGl()
+     {
++        // Jet Moto: neither the guest draw-mode bit nor host GL may add dithering.
++        _gl.Disable(EnableCap.Dither);
+         _vram.Init();
+ 
+         var primVs = _legacy ? GlShaders.PrimVs120 : GlShaders.PrimVs;
+@@ -106,9 +114,16 @@
+         _uPosBias = _gl.GetUniformLocation(_progPrim, "uPosBias");
+         _uFbInv = _gl.GetUniformLocation(_progPrim, "uFbInv");
+         _uRepRect = _gl.GetUniformLocation(_progPrim, "uRepRect");
++        _uRepCoverage = _gl.GetUniformLocation(_progPrim, "uRepCoverage");
+         _uRepClutCount = _gl.GetUniformLocation(_progPrim, "uRepClutCount");
+ 
++        _uWorldBounds=_gl.GetUniformLocation(_progPrim,"uWorldBounds");
++        _uWorldHeightRange=_gl.GetUniformLocation(_progPrim,"uWorldHeightRange");
++        _uWorldLight=_gl.GetUniformLocation(_progPrim,"uWorldLight");
++        _uWorldEye=_gl.GetUniformLocation(_progPrim,"uWorldEye");
++        _uWorldTime=_gl.GetUniformLocation(_progPrim,"uWorldTime");
+         _gl.UseProgram(_progPrim);
++        _gl.Uniform1(_gl.GetUniformLocation(_progPrim,"uWorldHeight"),5);
+         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uVram"), 0);
+         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uDest"), 1);
+         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uExtTex"), 2);
+@@ -150,6 +165,8 @@
+         _gl.VertexAttribPointer(4, 2, VertexAttribPointerType.Float, false, stride, (void*)28);
+         _gl.EnableVertexAttribArray(5);
+         _gl.VertexAttribPointer(5, 1, VertexAttribPointerType.Float, false, stride, (void*)36);
++        _gl.EnableVertexAttribArray(6);_gl.VertexAttribPointer(6,4,VertexAttribPointerType.Float,false,stride,(void*)40);
++        _gl.EnableVertexAttribArray(7);_gl.VertexAttribPointer(7,4,VertexAttribPointerType.Float,false,stride,(void*)56);
+ 
+         // fullscreen quad for present, real vbo since gl_VertexID without arrays does not draw on mesa for some reason?? or i did it wrong?
+         _presentVao = _gl.GenVertexArray();
+@@ -192,6 +209,7 @@
+ 
+     private int _clsClipX0 = int.MinValue, _clsClipY0, _clsClipX1, _clsClipY1;
+     private long _clsVersion = -1;
++    private float _clsWideAspect = float.NaN;
+     private GlDisplayRt? _clsResult;
+ 
+     private void InvalidateClassify()
+@@ -202,7 +220,7 @@
+     private GlDisplayRt? Classify()
+     {
+         if (_clsClipX0 == _env.ClipX0 && _clsClipY0 == _env.ClipY0 && _clsClipX1 == _env.ClipX1 &&
+-            _clsClipY1 == _env.ClipY1 && _clsVersion == GpuHle.ViewVersion)
++            _clsClipY1 == _env.ClipY1 && _clsVersion == GpuHle.ViewVersion && _clsWideAspect == GpuHle.WideAspect)
+         {
+             if (_clsResult != null) _clsResult.Stamp = ++_rtStamp;
+             return _clsResult;
+@@ -213,6 +231,7 @@
+         _clsClipX1 = _env.ClipX1;
+         _clsClipY1 = _env.ClipY1;
+         _clsVersion = GpuHle.ViewVersion;
++        _clsWideAspect = GpuHle.WideAspect;
+         _clsResult = ClassifySlow();
+         return _clsResult;
+     }
+@@ -289,6 +308,8 @@
+ 
+         if (_rts[slot] is { } old)
+         {
++            // A mode/size transition must finish the old batch before deleting its FBO.
++            if (_count > 0) Flush();
+             if (old.Dirty) Writeback(old);
+             old.Destroy(_gl);
+             InvalidateClassify();
+@@ -367,7 +388,7 @@
+     {
+         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
+         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
+-        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut
++        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage
+                                           && (_pendingRepTex == 0 || (_kRepX == _pendingRepX && _kRepY == _pendingRepY
+                                               && _kRepW == _pendingRepW && _kRepH == _pendingRepH))
+                                           && _kTransparent == transparent && _kBlend == blend && _kImage == image
+@@ -379,19 +400,42 @@
+                                           _kClipX1 == _env.ClipX1 && _kClipY1 == _env.ClipY1;
+     }
+ 
++    private float _kViewShiftX;
++
++    private static bool IsHalfView(GlDisplayRt rt, int x0, int x1) =>
++        x1 - x0 + 1 == rt.W / 2 && (x0 == rt.X || x0 == rt.X + rt.W / 2);
++
++    // Side-by-side gameplay needs a new centre for each camera, not a stretched
++    // image or a one-sided extension. Keep the shared divider fixed. All geometry
++    // and HUD positions inside that viewport receive only this translation.
++    private float ViewShift(GlDisplayRt? rt)
++    {
++        if (rt is not { Margin: > 0 } || !IsHalfView(rt, _env.ClipX0, _env.ClipX1)) return 0;
++        float source = GpuHle.SourceAspect > 0 ? GpuHle.SourceAspect : GpuHle.BaseAspect;
++        float shift = rt.W * (GpuHle.WideAspect / source - 1f) / 4f;
++        return _env.ClipX0 == rt.X ? -shift : shift;
++    }
++
+     private void Begin(in PrimFlags f, int vertsNeeded)
+     {
++        var nextCamera=f.WorldSurface?.Camera;
++        if(_count>0 && !ReferenceEquals(_worldCamera,nextCamera))Flush();
++        _worldCamera=nextCamera;
+         var transparent = f.SemiTrans;
+         var blend = f.BlendMode;
+         var image = f.UseImage ? f.Image : -1;
+         var target = Classify();
+         if (_count > 0 && (target != _kTarget || !DesiredMatches(transparent, blend, image))) Flush();
++        // Legacy GL composites against a destination snapshot. Each coverage
++        // primitive must see earlier overlapping particles, not a stale batch.
++        if (_legacy && _count > 0 && (_kRepCoverage || _pendingRepCoverage)) Flush();
+         if (_count + vertsNeeded > MaxVerts) Flush();
+         CheckTextureFeedback(f);
+ 
+         if (target != null) ClearMargin(target);
+ 
+         _kTarget = target;
++        _kViewShiftX = ViewShift(target);
+         _kImage = image;
+         _kTransparent = transparent;
+         _kBlend = blend;
+@@ -406,6 +450,7 @@
+         _kClipX1 = _env.ClipX1;
+         _kClipY1 = _env.ClipY1;
+         _kRepTex = _pendingRepTex;
++        _kRepCoverage = _pendingRepCoverage;
+         _kRepClut = _pendingRepClut;
+         _kRepClutCount = _pendingRepClutCount;
+         _kRepX = _pendingRepX;
+@@ -457,11 +502,28 @@
+     {
+         _pendingRepTex = 0;
+         _pendingRepClut = 0;
++        _pendingRepCoverage = false;
+ 
+         if (!f.Textured || f.UseImage) return;
+ 
+         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
+         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
++
++        // Build06: the original model material selects the image, not a live VRAM hash.
++        if (f.NativeTexture is {} native && native.Accepts(f.TPage, f.Clut, uMin, vMin, uMax, vMax,
++                twAndX, twAndY, twOrX, twOrY) && native.Asset.GetTexture() is {} replacement)
++        {
++            _pendingRepTex = EnsureRepTexture(replacement);
++            _pendingRepCoverage = replacement.Coverage;
++            _pendingRepX = native.U0; _pendingRepY = native.V0;
++            _pendingRepW = native.Width; _pendingRepH = native.Height;
++            return;
++        }
++        if (Assets.Native.NativeTextureBindings.OriginalAssetsOnly)
++        {
++            if (f.NativeTexture != null) System.Threading.Interlocked.Increment(ref Assets.Native.NativeTextureBindings.RejectedDraws);
++            return; // Original hardware sampling, NEVER VRAM replacement matching.
++        }
+ 
+         if (!Assets.Textures.TextureResolver.Resolve(f.TPage, f.Clut, uMin, vMin, uMax, vMax,
+                 twAndX, twAndY, twOrX, twOrY, out var res))
+@@ -490,8 +552,8 @@
+         _gl.ActiveTexture(TextureUnit.Texture7);
+         handle = _gl.GenTexture();
+         _gl.BindTexture(TextureTarget.Texture2D, handle);
+-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
++        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(tex.Nearest ? GLEnum.Nearest : GLEnum.Linear));
++        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)(tex.Nearest ? GLEnum.Nearest : GLEnum.Linear));
+         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+         _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8, (uint)tex.Width, (uint)tex.Height, 0,
+@@ -521,41 +583,66 @@
+         return handle;
+     }
+ 
+-    private bool DitherOf(in PrimFlags f)
+-    {
+-        return _env.Dither && (f.Gouraud || (f.Textured && !f.RawTexture));
+-    }
+-
+-    private GlVertex V(in HleVertex v, in PrimFlags f, bool dither)
+-    {
++    private uint WorldMap(Assets.Native.WorldScene scene)
++    {
++        if(_worldMaps.TryGetValue(scene,out uint texture))return texture;
++        texture=_gl.GenTexture();_gl.ActiveTexture(TextureUnit.Texture5);_gl.BindTexture(TextureTarget.Texture2D,texture);
++        _gl.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMinFilter,(int)GLEnum.Linear);
++        _gl.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureMagFilter,(int)GLEnum.Linear);
++        _gl.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapS,(int)GLEnum.ClampToEdge);
++        _gl.TexParameter(TextureTarget.Texture2D,TextureParameterName.TextureWrapT,(int)GLEnum.ClampToEdge);
++        _gl.TexImage2D<byte>(TextureTarget.Texture2D,0,InternalFormat.Rgba8,(uint)scene.MapSize,(uint)scene.MapSize,0,PixelFormat.Rgba,PixelType.UnsignedByte,scene.HeightRgba);
++        _worldMaps.Add(scene,texture);_gl.ActiveTexture(TextureUnit.Texture0);return texture;
++    }
++    private void SetWorldUniforms()
++    {
++        if(_worldCamera is not {} camera)return;
++        var scene=camera.Scene;uint texture=WorldMap(scene);
++        _gl.ActiveTexture(TextureUnit.Texture5);_gl.BindTexture(TextureTarget.Texture2D,texture);
++        _gl.Uniform4(_uWorldBounds,scene.Origin.X,scene.Origin.Y,scene.Extent.X,scene.Extent.Y);
++        _gl.Uniform2(_uWorldHeightRange,scene.HeightRange.X,scene.HeightRange.Y);
++        _gl.Uniform3(_uWorldLight,scene.Sunlight.X,scene.Sunlight.Y,scene.Sunlight.Z);
++        _gl.Uniform3(_uWorldEye,camera.Eye.X,camera.Eye.Y,camera.Eye.Z);
++        _gl.Uniform1(_uWorldTime,camera.Time);_gl.ActiveTexture(TextureUnit.Texture0);
++    }
++
++    // All primitives are undithered. The shader's former dither flag is not emitted.
++    private GlVertex V(in HleVertex v, in PrimFlags f)
++    {
++        float x = v.X + _kViewShiftX;
+         var raw = f.Textured && f.RawTexture;
+         float cr = raw ? 128f : v.R, cg = raw ? 128f : v.G, cb = raw ? 128f : v.B;
+         var tpage = f.UseImage ? 0x4000 : f.Textured ? f.TPage & 0x1FF : 0x8000;
+-        if (dither && _pendingRepTex == 0) tpage |= 0x400;
+         if (_pendingRepTex != 0) tpage |= 0x2000;
+         else if (_pendingRepClut != 0) tpage |= 0x1000;
+         if (_count == 0)
+         {
+-            _drawMinX = _drawMaxX = v.X;
++            _drawMinX = _drawMaxX = x;
+             _drawMinY = _drawMaxY = v.Y;
+         }
+         else
+         {
+-            if (v.X < _drawMinX) _drawMinX = v.X;
+-            if (v.X > _drawMaxX) _drawMaxX = v.X;
++            if (x < _drawMinX) _drawMinX = x;
++            if (x > _drawMaxX) _drawMaxX = x;
+             if (v.Y < _drawMinY) _drawMinY = v.Y;
+             if (v.Y > _drawMaxY) _drawMaxY = v.Y;
+         }
+ 
+-        return new GlVertex
+-        {
+-            X = v.X, Y = v.Y,
++        var output = new GlVertex
++        {
++            X = x, Y = v.Y,
+             R = cr, G = cg, B = cb,
+             Clut = f.Clut & 0x7FFF,
+             Texpage = tpage,
+             U = v.U, V = v.V,
+-            W = v.HasGteZ && v.Z > 0f ? v.Z : 1f
++            W = v.HasGteZ && float.IsFinite(v.Z) && v.Z > 0f ? v.Z : 1f
+         };
++        if(f.WorldSurface is {} world && world.AtPixel(v.X-f.DrawOffsetX,v.Y-f.DrawOffsetY,out var position,out float inverseDepth))
++        {
++            output.WX=position.X*inverseDepth;output.WY=position.Y*inverseDepth;output.WZ=position.Z*inverseDepth;output.WQ=inverseDepth;
++            output.NX=world.Normal.X;output.NY=world.Normal.Y;output.NZ=world.Normal.Z;output.SurfaceKind=world.Kind;
++        }
++        return output;
+     }
+ 
+     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
+@@ -564,47 +651,75 @@
+             (int)Math.Min(a.U, Math.Min(b.U, c.U)), (int)Math.Min(a.V, Math.Min(b.V, c.V)),
+             (int)Math.Max(a.U, Math.Max(b.U, c.U)), (int)Math.Max(a.V, Math.Max(b.V, c.V)));
+         Begin(f, 3);
+-        var dith = DitherOf(f);
+-        _verts[_count++] = V(a, f, dith);
+-        _verts[_count++] = V(b, f, dith);
+-        _verts[_count++] = V(c, f, dith);
++        int start = _count;
++        _verts[_count++] = V(a, f);
++        _verts[_count++] = V(b, f);
++        _verts[_count++] = V(c, f);
++        // A triangle needs a coherent depth for every corner. Never mix W=1
++        // fallback vertices with camera-space depths from unrelated corners.
++        if (!a.HasGteZ || !b.HasGteZ || !c.HasGteZ ||
++            !float.IsFinite(a.Z) || !float.IsFinite(b.Z) || !float.IsFinite(c.Z) ||
++            a.Z <= 0f || b.Z <= 0f || c.Z <= 0f)
++            _verts[start].W = _verts[start + 1].W = _verts[start + 2].W = 1f;
++        if(_verts[start].SurfaceKind==0||_verts[start+1].SurfaceKind==0||_verts[start+2].SurfaceKind==0)
++            _verts[start].SurfaceKind=_verts[start+1].SurfaceKind=_verts[start+2].SurfaceKind=0;
++        else if(_verts[start].SurfaceKind>1.5f)Assets.Native.WorldSurfaceBindings.WaterTriangles++;
++        else Assets.Native.WorldSurfaceBindings.LitTriangles++;
+     }
+ 
+     public void DrawRect(in HleRect r, in PrimFlags f)
+     {
+         ResolveReplacement(f, r.U, r.V, r.U + Math.Max(0, r.W - 1), r.V + Math.Max(0, r.H - 1));
+         Begin(f, 6);
+-        var a = new HleVertex { X = r.X, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
+-        var b = new HleVertex { X = r.X + r.W, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
+-        var c = new HleVertex { X = r.X, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
++        float x0 = r.X, x1 = r.X + r.W;
++        // Solid clears/fades which cover the active gameplay viewport also cover
++        // its new wings. Blackwater Falls uses this rectangle as its sky. Support
++        // full-width, top/bottom and side-by-side viewports, while excluding partial
++        // HUD rectangles, textured images and smaller inset/rear-view windows.
++        if (GpuHle.WideAspect > 0 && _kTarget is { Margin: > 0 } rt && !f.Textured && !f.UseImage)
++        {
++            bool fullWidth = _env.ClipX0 <= rt.X && _env.ClipX1 >= rt.X + rt.W - 1;
++            bool halfWidth = IsHalfView(rt, _env.ClipX0, _env.ClipX1);
++            if ((fullWidth || halfWidth) && x0 <= _env.ClipX0 && x1 >= _env.ClipX1 + 1 &&
++                r.Y <= Math.Max(rt.Y, _env.ClipY0) && r.Y + r.H >= Math.Min(rt.Y + rt.H, _env.ClipY1 + 1))
++            {
++                int left = _env.ClipX0 <= rt.X ? rt.X - rt.Margin : _env.ClipX0;
++                int right = _env.ClipX1 >= rt.X + rt.W - 1 ? rt.X + rt.W + rt.Margin : _env.ClipX1 + 1;
++                x0 = Math.Min(x0, left - _kViewShiftX);
++                x1 = Math.Max(x1, right - _kViewShiftX);
++            }
++        }
++        var a = new HleVertex { X = x0, Y = r.Y, R = r.R, G = r.G, B = r.B, U = r.U, V = r.V };
++        var b = new HleVertex { X = x1, Y = r.Y, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = r.V };
++        var c = new HleVertex { X = x0, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
+         var d = new HleVertex
+-            { X = r.X + r.W, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
+-        _verts[_count++] = V(a, f, false);
+-        _verts[_count++] = V(b, f, false);
+-        _verts[_count++] = V(c, f, false);
+-        _verts[_count++] = V(b, f, false);
+-        _verts[_count++] = V(d, f, false);
+-        _verts[_count++] = V(c, f, false);
++            { X = x1, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
++        _verts[_count++] = V(a, f);
++        _verts[_count++] = V(b, f);
++        _verts[_count++] = V(c, f);
++        _verts[_count++] = V(b, f);
++        _verts[_count++] = V(d, f);
++        _verts[_count++] = V(c, f);
+     }
+ 
+     public void DrawLine(in HleVertex a, in HleVertex b, in PrimFlags f)
+     {
+         _pendingRepTex = 0;
+         _pendingRepClut = 0;
++        _pendingRepCoverage = false;
+         Begin(f, 6);
+-        var dith = _env.Dither;
+         float x1 = a.X, y1 = a.Y;
+         float x2 = b.X, y2 = b.Y;
+         float dx = x2 - x1, dy = y2 - y1;
+ 
+         if (dx == 0 && dy == 0)
+         {
+-            LineVert(x1, y1, a, f, dith);
+-            LineVert(x1 + 1, y1, a, f, dith);
+-            LineVert(x1 + 1, y1 + 1, a, f, dith);
+-            LineVert(x1 + 1, y1 + 1, a, f, dith);
+-            LineVert(x1, y1 + 1, a, f, dith);
+-            LineVert(x1, y1, a, f, dith);
++            LineVert(x1, y1, a, f);
++            LineVert(x1 + 1, y1, a, f);
++            LineVert(x1 + 1, y1 + 1, a, f);
++            LineVert(x1 + 1, y1 + 1, a, f);
++            LineVert(x1, y1 + 1, a, f);
++            LineVert(x1, y1, a, f);
+             return;
+         }
+ 
+@@ -624,20 +739,20 @@
+             else y1++;
+         }
+ 
+-        LineVert(x1, y1, a, f, dith);
+-        LineVert(x2, y2, b, f, dith);
+-        LineVert(x2 + xo, y2 + yo, b, f, dith);
+-        LineVert(x2 + xo, y2 + yo, b, f, dith);
+-        LineVert(x1 + xo, y1 + yo, a, f, dith);
+-        LineVert(x1, y1, a, f, dith);
+-    }
+-
+-    private void LineVert(float x, float y, in HleVertex src, in PrimFlags f, bool dither)
++        LineVert(x1, y1, a, f);
++        LineVert(x2, y2, b, f);
++        LineVert(x2 + xo, y2 + yo, b, f);
++        LineVert(x2 + xo, y2 + yo, b, f);
++        LineVert(x1 + xo, y1 + yo, a, f);
++        LineVert(x1, y1, a, f);
++    }
++
++    private void LineVert(float x, float y, in HleVertex src, in PrimFlags f)
+     {
+         var v = src;
+         v.X = x;
+         v.Y = y;
+-        _verts[_count++] = V(v, f, dither);
++        _verts[_count++] = V(v, f);
+     }
+ 
+     public void FillRect(int x, int y, int w, int h, ushort color15)
+@@ -732,6 +847,9 @@
+ 
+     public void Flush()
+     {
++        // Reassert even for an empty batch: transfers and presentation also call Flush.
++        // This keeps native framebuffer dithering off if another GL user changed state.
++        _gl.Disable(EnableCap.Dither);
+         if (_count == 0) return;
+ 
+         var rt = _kTarget;
+@@ -778,10 +896,12 @@
+             clipY0 = _kClipY0 - rt.Y;
+             clipX1 = _kClipX1 - rt.X + rt.Margin;
+             clipY1 = _kClipY1 - rt.Y;
+-            if (rt.Margin > 0 && _kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1)
++            if (rt.Margin > 0 && ((_kClipX0 <= rt.X && _kClipX1 >= rt.X + rt.W - 1) ||
++                IsHalfView(rt, _kClipX0, _kClipX1)))
+             {
+-                clipX0 = 0;
+-                clipX1 = rt.Wide1x - 1;
++                // Extend only external edges; never cross a split-screen divider.
++                if (_kClipX0 <= rt.X) clipX0 = 0;
++                if (_kClipX1 >= rt.X + rt.W - 1) clipX1 = rt.Wide1x - 1;
+             }
+         }
+ 
+@@ -814,6 +934,8 @@
+         }
+ 
+         _gl.UseProgram(_progPrim);
++        SetWorldUniforms();
++        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? 1f : 0f);
+         _gl.BindVertexArray(_vao);
+         _gl.ActiveTexture(TextureUnit.Texture0);
+         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
+@@ -874,6 +996,22 @@
+         if (_legacy)
+         {
+             _gl.Disable(EnableCap.Blend);
++            _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
++        }
++        else if (_kRepCoverage)
++        {
++            // Coverage blends even when the original polygon opcode is opaque.
++            // The shader scales the original src/dst factors by coverage. A
++            // subtractive effect needs one pass, because there are no STP/opaque
++            // categories mixed inside this explicitly authored material.
++            _gl.Enable(EnableCap.Blend);
++            _gl.BlendFuncSeparate(BlendingFactor.Src1Color, BlendingFactor.Src1Alpha,
++                BlendingFactor.One, BlendingFactor.Zero);
++            _gl.BlendEquationSeparate(_kTransparent && _kBlend == 2
++                ? BlendEquationModeEXT.FuncReverseSubtract : BlendEquationModeEXT.FuncAdd,
++                BlendEquationModeEXT.FuncAdd);
++            SetBlend(!_kTransparent ? 1f : _kBlend switch {0=>0.5f,3=>0.25f,_=>1f},
++                !_kTransparent ? 0f : _kBlend == 0 ? 0.5f : 1f);
+             _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);
+         }
+         else if (!_kTransparent)
+@@ -991,10 +1129,16 @@
+         {
+             if (_rts[i] is not { } rt) continue;
+             if (rt.Dirty) Writeback(rt);
+-            if (_frame - rt.LastDrawFrame > 300)
++            // A displayed framebuffer remains valid even when a slow frame or
++            // static pause screen produces no geometry. VRAM writes synchronize
++            // these targets; elapsed host frames are not an invalidation signal.
++            bool displayed = dispX >= rt.X && dispY >= rt.Y &&
++                dispX + w <= rt.X + rt.W && dispY + h <= rt.Y + rt.H;
++            if (!displayed && _frame - rt.LastDrawFrame > 300)
+             {
+                 rt.Destroy(_gl);
+                 _rts[i] = null;
++                InvalidateClassify();
+             }
+         }
+ 
+@@ -1002,14 +1146,21 @@
+         if (!rgb24)
+             foreach (var rt in _rts)
+             {
+-                if (rt == null || _frame - rt.LastDrawFrame > 4) continue;
++                if (rt == null) continue;
+                 if (dispX < rt.X || dispY < rt.Y || dispX + w > rt.X + rt.W || dispY + h > rt.Y + rt.H) continue;
+                 if (src == null || rt.LastDrawFrame > src.LastDrawFrame) src = rt;
+             }
+ 
+-        var w1x = src != null ? w + src.Margin * 2 : w;
++        // Pause/front-end screens may reuse the last race framebuffer without redrawing it.
++        // Crop its centre rather than squeezing old widescreen side pixels into 4:3.
++        var presentMargin = GpuHle.WideAspect > 0f && src != null ? src.Margin : 0;
++        var w1x = w + presentMargin * 2;
++        // The allocation is integer-rounded, but the sampled field of view is exact.
++        // This avoids the ~0.31% squeeze of presenting all 428 columns as 16:9.
++        var sampleWidth = presentMargin > 0 ? w * GpuHle.WideAspect / GpuHle.SourceAspect : w;
++        var sampleInset = (w1x - sampleWidth) * 0.5f;
+         var h1x = h;
+-        var aspect = src is { Margin: > 0 } ? GpuHle.WideAspect :
++        var aspect = presentMargin > 0 ? GpuHle.WideAspect :
+             src != null ? GpuHle.SourceAspect : GpuHle.OutputAspect;
+ 
+ 
+@@ -1039,8 +1190,8 @@
+         }
+         else if (src != null)
+         {
+-            _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X), dispY - src.Y);
+-            _gl.Uniform2(_uPresentSize, (float)w1x, h1x);
++            _gl.Uniform2(_uPresentOrigin, (float)(dispX - src.X + src.Margin - presentMargin + sampleInset), dispY - src.Y);
++            _gl.Uniform2(_uPresentSize, sampleWidth, (float)h1x);
+             _gl.Uniform2(_uPresentTexSize, (float)src.Wide1x, src.H);
+         }
+         else
+@@ -1174,6 +1325,7 @@
+ 
+     public void Dispose()
+     {
++        foreach(uint texture in _worldMaps.Values)_gl.DeleteTexture(texture);_worldMaps.Clear();
+         foreach (var rt in _rts) rt?.Destroy(_gl);
+         _vram.Dispose();
+         if (_vbo != 0) _gl.DeleteBuffer(_vbo);
+--- a/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
++++ b/RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs
+@@ -64,13 +64,16 @@
+                                  layout(location = 3) in float inTexpageF;
+                                  layout(location = 4) in vec2  inUV;
+                                  layout(location = 5) in float inW;
++layout(location=6) in vec4 inWorldQ;
++layout(location=7) in vec4 inSurface;
++out vec4 vWorldQ;
++flat out vec4 vSurface;
+ 
+                                  noperspective out vec4 vColor;
+-                                 out vec2 vUV;
++                                 out vec3 vUVQ;
+                                  flat out ivec2 clutBase;
+                                  flat out ivec2 pageBase;
+                                  flat out int   texMode;
+-                                 flat out int   vDither;
+                                  flat out int   vRepClut;
+ 
+                                  uniform vec2 uVertexOffset;
+@@ -78,41 +81,40 @@
+                                  uniform vec2 uFbInv;
+ 
+                                  void main() {
++ vWorldQ=inWorldQ;vSurface=inSurface;
+                                      vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
+-                                     gl_Position = vec4(p * inW, 0.0, inW);
+-
++                                     // Keep screen-space clipping independent of camera depth.
++                                     // Interpolate U/Z, V/Z and 1/Z, then divide per fragment.
++                                     gl_Position = vec4(p, 0.0, 1.0);
++
++                                     vUVQ = vec3(inUV, 1.0) / inW;
+                                      int inClut = int(inClutF + 0.5);
+                                      int inTexpage = int(inTexpageF + 0.5);
+ 
+                                      vColor = vec4(inColorF, 0.0) / 255.0;
+-                                     vDither = (inTexpage >> 10) & 1;
+                                      vRepClut = (inTexpage >> 12) & 1;
+ 
+                                      if ((inTexpage & 0x8000) != 0) {
+                                          texMode = 4;
+                                      } else if ((inTexpage & 0x4000) != 0) {
+                                          texMode = 5;
+-                                         vUV = inUV;
+                                      } else if ((inTexpage & 0x2000) != 0) {
+                                          texMode = 6;
+-                                         vUV = inUV;
+                                      } else {
+                                          texMode = (inTexpage >> 7) & 3;
+-                                         vUV = inUV;
+                                          pageBase = ivec2((inTexpage & 0xf) * 64, ((inTexpage >> 4) & 1) * 256);
+                                          clutBase = ivec2((inClut & 0x3f) * 16, (inClut >> 6) & 0x1ff);
+                                      }
+                                  }
+-                                 """;
++""";
+ 
+     public const string PrimFs = """
+                                  #version 330 core
+                                  noperspective in vec4 vColor;
+-                                 in vec2 vUV;
++                                 in vec3 vUVQ;
+                                  flat in ivec2 clutBase;
+                                  flat in ivec2 pageBase;
+                                  flat in int   texMode;
+-                                 flat in int   vDither;
+                                  flat in int   vRepClut;
+ 
+                                  layout(location = 0, index = 0) out vec4 FragColor;
+@@ -124,6 +126,7 @@
+                                  uniform sampler2D uRepTex;
+                                  uniform sampler2D uRepClut;
+                                  uniform vec4  uRepRect;
++                                    uniform float uRepCoverage;
+                                  uniform float uRepClutCount;
+                                  uniform ivec4 uTexWindow;
+                                  uniform vec4  uBlend;
+@@ -133,12 +136,6 @@
+                                  uniform int   uScale;
+                                  uniform vec2  uPosBias;
+ 
+-                                 const int ditherTbl[16] = int[16](
+-                                     -4,  0, -3,  1,
+-                                      2, -2,  3, -1,
+-                                     -3,  1, -4,  0,
+-                                      3, -1,  2, -2 );
+-
+                                  int u5(float f) { return int(floor(f * 31.0 + 0.5)); }
+                                  vec4 fetch(ivec2 c) { return texelFetch(uVram, (c & ivec2(1023, 511)) * uScale, 0); }
+                                  int fetch16(ivec2 c) {
+@@ -146,18 +143,72 @@
+                                      return u5(p.r) | (u5(p.g) << 5) | (u5(p.b) << 10) | (int(ceil(p.a)) << 15);
+                                  }
+                                  vec3 quant5(ivec3 c8) {
+-                                     if (vDither != 0) {
+-                                         ivec2 vp = ivec2(floor(gl_FragCoord.xy / float(uScale) - uPosBias));
+-                                         c8 = clamp(c8 + ditherTbl[(vp.y & 3) * 4 + (vp.x & 3)], 0, 255);
+-                                     }
++                                     // Jet Moto: retain PS1 color precision, with no spatial dither.
+                                      return vec3(min(c8 >> 3, 31)) / 31.0;
+                                  }
+ 
+-                                 void main() {
++                                 in vec4 vWorldQ;
++flat in vec4 vSurface;
++// Native, original-geometry-bound lighting. Unmarked primitives are bit-identical.
++uniform sampler2D uWorldHeight;
++uniform vec4 uWorldBounds;
++uniform vec2 uWorldHeightRange;
++uniform vec3 uWorldLight;
++uniform vec3 uWorldEye;
++uniform float uWorldTime;
++float originalHeight(vec2 p) {
++    vec2 uv=(p-uWorldBounds.xy)/uWorldBounds.zw;
++    if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)return -100000.0;
++    vec4 h=texture(uWorldHeight,uv);
++    if(h.b<0.05)return -100000.0;
++    return uWorldHeightRange.x+dot(h.rg,vec2(65280.0,255.0))/65535.0*uWorldHeightRange.y;
++}
++vec3 lightOriginalSurface(vec3 color) {
++    if(vSurface.w<0.5 || vWorldQ.w<=0.0)return color;
++    vec3 p=vWorldQ.xyz/vWorldQ.w;
++    vec3 n=normalize(vSurface.xyz);
++    vec3 L=normalize(uWorldLight);
++    float shadow=0.0;
++    float distanceAlong=2.0;
++    for(int k=0;k<9;k++){
++        vec3 samplePoint=p+L*distanceAlong;
++        shadow=max(shadow,smoothstep(1.5,4.0,originalHeight(samplePoint.xy)-samplePoint.z));
++        distanceAlong*=2.0;
++    }
++    float ao=0.0;
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy+vec2(5.0,0.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy-vec2(5.0,0.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy+vec2(0.0,5.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy-vec2(0.0,5.0))-p.z);
++    float sun=1.0-0.40*shadow;
++    float diffuse=max(dot(n,L),0.0);
++    float illumination=(0.78+0.18*diffuse*sun+0.04*max(n.z,0.0))*(1.0-0.045*ao)*(1.0-0.16*shadow);
++    vec3 shaded=color*clamp(illumination,0.65,1.04);
++    if(vSurface.w<1.5)return clamp(shaded,0.0,1.0);
++    // Waves perturb a shading normal only. Original geometry, alpha, UV animation
++    // and draw order stay intact. Coordinates are native world units, not pixels.
++    float a=dot(p.xy,vec2(0.73,0.31))+uWorldTime*1.15;
++    float b=dot(p.xy,vec2(-0.29,1.07))-uWorldTime*0.87;
++    float c=dot(p.xy,vec2(1.67,-0.43))+uWorldTime*1.57;
++    vec2 slope=0.070*cos(a)*vec2(.73,.31)+0.042*cos(b)*vec2(-.29,1.07)+0.018*cos(c)*vec2(1.67,-.43);
++    vec3 waterN=normalize(vec3(-slope,1.0));
++    vec3 V=normalize(uWorldEye-p);
++    float fresnel=0.035+0.28*pow(1.0-clamp(dot(waterN,V),0.0,1.0),5.0);
++    float glint=pow(max(dot(reflect(-L,waterN),V),0.0),64.0)*sun;
++    // Restrained sky-environment approximation, not a claimed scene reflection.
++    vec3 sky=vec3(0.32,0.45,0.55)*(0.82+0.18*waterN.z);
++    shaded=mix(shaded,sky,fresnel*0.65);
++    shaded+=vec3(0.20,0.20,0.17)*glint;
++    shaded*=0.98+0.035*sin(a)*sin(b);
++    return clamp(shaded,0.0,1.0);
++}
++
++void main() {
++                                     vec2 vUV = vUVQ.xy / vUVQ.z;
+                                      if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
+ 
+                                      if (texMode == 4) {
+-                                         FragColor = vec4(quant5(ivec3(vColor.rgb * 255.0 + 0.5)), uSetMask);
++                                         FragColor = vec4(lightOriginalSurface(quant5(ivec3(vColor.rgb * 255.0 + 0.5))), uSetMask);
+                                          BlendColor = uBlend;
+                                          return;
+                                      }
+@@ -166,7 +217,7 @@
+                                          vec4 img = texture(uExtTex, vUV);
+                                          if (img.a < 0.5) discard;
+                                          ivec3 e8 = (ivec3(img.rgb * 255.0 + 0.5) * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+-                                         FragColor = vec4(quant5(e8), uSetMask);
++                                         FragColor = vec4(lightOriginalSurface(quant5(e8)), uSetMask);
+                                          BlendColor = uBlend;
+                                          return;
+                                      }
+@@ -177,14 +228,24 @@
+                                      uv &= ivec2(0xff);
+ 
+                                      if (texMode == 6) {
+-                                         vec2 win = vec2(uTexWindow.xy) + 1.0;
+-                                         vec2 fuv = mod(vUV, win) + vec2(uTexWindow.zw);
++                                         // Apply bitwise PS1 texture-window semantics to the integer
++                                         // texel address, retaining fractional coordinates for native 4x art.
++                                         vec2 whole = floor(vUV);
++                                         ivec2 mapped = ((ivec2(whole) & uTexWindow.xy) | uTexWindow.zw) & ivec2(255);
++                                         vec2 fuv = vec2(mapped) + fract(vUV);
+                                          vec2 t = (fuv - uRepRect.xy) / uRepRect.zw;
+                                          vec4 img = texture(uRepTex, t);
++                                         if (uRepCoverage > 0.5) {
++                                             if (img.a <= 0.0) discard;
++                                             ivec3 e8 = (ivec3(img.rgb * 255.0 + 0.5) * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
++                                             FragColor = vec4(lightOriginalSurface(quant5(e8)), uSetMask);
++                                             BlendColor = vec4(uBlend.rgb * img.a, 1.0 - img.a + uBlend.a * img.a);
++                                             return;
++                                         }
+                                          if (img.a < 0.5) discard;
+                                          ivec3 e8 = (ivec3(img.rgb * 255.0 + 0.5) * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+                                          float stp = img.a < 0.95 ? 1.0 : 0.0;
+-                                         FragColor = vec4(quant5(e8), max(stp, uSetMask));
++                                         FragColor = vec4(lightOriginalSurface(quant5(e8)), max(stp, uSetMask));
+                                          BlendColor = stp > 0.5 ? uBlend : uBlendOpaque;
+                                          return;
+                                      }
+@@ -211,7 +272,7 @@
+                                          if (texel.a < 0.5) discard;
+                                          ivec3 e8 = (ivec3(texel.rgb * 255.0 + 0.5) * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+                                          float stp = texel.a < 0.95 ? 1.0 : 0.0;
+-                                         FragColor = vec4(quant5(e8), max(stp, uSetMask));
++                                         FragColor = vec4(lightOriginalSurface(quant5(e8)), max(stp, uSetMask));
+                                          BlendColor = stp > 0.5 ? uBlend : uBlendOpaque;
+                                          return;
+                                      }
+@@ -219,10 +280,10 @@
+                                      if (texel.rgb == vec3(0.0) && texel.a < 0.5) discard;
+                                      ivec3 t8 = ivec3(texel.rgb * 31.0 + 0.5) << 3;
+                                      ivec3 c8 = (t8 * ivec3(vColor.rgb * 255.0 + 0.5)) >> 7;
+-                                     FragColor = vec4(quant5(c8), max(texel.a, uSetMask));
++                                     FragColor = vec4(lightOriginalSurface(quant5(c8)), max(texel.a, uSetMask));
+                                      BlendColor = texel.a >= 0.5 ? uBlend : uBlendOpaque;
+                                  }
+-                                 """;
++""";
+ 
+     public const string FullscreenVs120 = """
+                                           #version 120
+@@ -305,17 +366,20 @@
+                                     #version 120
+                                     attribute vec2  inPos;
+                                     attribute float inW;
++attribute vec4 inWorldQ;
++attribute vec4 inSurface;
++varying vec4 vWorldQ;
++varying vec4 vSurface;
+                                     attribute vec3  inColorF;
+                                     attribute float inClutF;
+                                     attribute float inTexpageF;
+                                     attribute vec2  inUV;
+ 
+                                     varying vec4  vColor;
+-                                    varying vec2  vUV;
++                                    varying vec3  vUVQ;
+                                     varying vec2  vClutBase;
+                                     varying vec2  vPageBase;
+                                     varying float vTexMode;
+-                                    varying float vDither;
+                                     varying float vRepClut;
+ 
+                                     uniform vec2 uVertexOffset;
+@@ -325,16 +389,18 @@
+                                     float bitAt(float v, float bit) { return floor(mod(v / bit, 2.0)); }
+ 
+                                     void main() {
++ vWorldQ=inWorldQ;vSurface=inSurface;
+                                         vec2 p = (inPos + uVertexOffset + uPosBias) * uFbInv - 1.0;
+-                                        gl_Position = vec4(p * inW, 0.0, inW);
++                                        // Keep screen-space clipping independent of camera depth.
++                                     // Interpolate U/Z, V/Z and 1/Z, then divide per fragment.
++                                     gl_Position = vec4(p, 0.0, 1.0);
+ 
+                                         float tp = floor(inTexpageF + 0.5);
+                                         float clut = floor(inClutF + 0.5);
+ 
+                                         vColor = vec4(inColorF / 255.0, 0.0);
+-                                        vDither = bitAt(tp, 1024.0);
+                                         vRepClut = bitAt(tp, 4096.0);
+-                                        vUV = inUV;
++                                        vUVQ = vec3(inUV, 1.0) / inW;
+                                         vClutBase = vec2(0.0);
+                                         vPageBase = vec2(0.0);
+ 
+@@ -350,17 +416,16 @@
+                                             vClutBase = vec2(mod(clut, 64.0) * 16.0, mod(floor(clut / 64.0), 512.0));
+                                         }
+                                     }
+-                                    """;
++""";
+ 
+     //gl 2.1 has no dual source blending =/ has to do by hand
+     public const string PrimFs120 = """
+                                     #version 120
+                                     varying vec4  vColor;
+-                                    varying vec2  vUV;
++                                    varying vec3  vUVQ;
+                                     varying vec2  vClutBase;
+                                     varying vec2  vPageBase;
+                                     varying float vTexMode;
+-                                    varying float vDither;
+                                     varying float vRepClut;
+ 
+                                     uniform sampler2D uVram;
+@@ -369,6 +434,7 @@
+                                     uniform sampler2D uRepTex;
+                                     uniform sampler2D uRepClut;
+                                     uniform vec4  uRepRect;
++                                    uniform float uRepCoverage;
+                                     uniform float uRepClutCount;
+                                     uniform vec4  uTexWindow;
+                                     uniform float uSetMask;
+@@ -382,6 +448,20 @@
+ 
+                                     float u5(float f) { return floor(f * 31.0 + 0.5); }
+ 
++                                    // GLSL 1.20 has no bitwise integer operators. Reconstruct exactly
++                                    // eight bits; modulo(mask+1) is wrong for non-contiguous windows.
++                                    float windowByte(float v, float andMask, float orMask) {
++                                        float result = 0.0;
++                                        for (int bit = 0; bit < 8; ++bit) {
++                                            float weight = exp2(float(bit));
++                                            float vb = mod(floor(v / weight), 2.0);
++                                            float ab = mod(floor(andMask / weight), 2.0);
++                                            float ob = mod(floor(orMask / weight), 2.0);
++                                            result += max(vb * ab, ob) * weight;
++                                        }
++                                        return result;
++                                    }
++
+                                     vec4 fetch(vec2 c) {
+                                         vec2 w = vec2(mod(c.x, 1024.0), mod(c.y, 512.0));
+                                         return texture2D(uVram, (w * uScale + 0.5) / uVramSize);
+@@ -393,17 +473,7 @@
+                                     }
+ 
+                                     vec3 quant5(vec3 c8) {
+-                                        if (vDither > 0.5) {
+-                                            vec2 vp = floor(gl_FragCoord.xy / uScale - uPosBias);
+-                                            float col = mod(vp.x, 4.0);
+-                                            float row = mod(vp.y, 4.0);
+-                                            float d = 0.0;
+-                                            if (row < 0.5)      d = col < 0.5 ? -4.0 : (col < 1.5 ?  0.0 : (col < 2.5 ? -3.0 :  1.0));
+-                                            else if (row < 1.5) d = col < 0.5 ?  2.0 : (col < 1.5 ? -2.0 : (col < 2.5 ?  3.0 : -1.0));
+-                                            else if (row < 2.5) d = col < 0.5 ? -3.0 : (col < 1.5 ?  1.0 : (col < 2.5 ? -4.0 :  0.0));
+-                                            else                d = col < 0.5 ?  3.0 : (col < 1.5 ? -1.0 : (col < 2.5 ?  2.0 : -2.0));
+-                                            c8 = clamp(c8 + d, 0.0, 255.0);
+-                                        }
++                                        // Same undithered conversion as the modern shader.
+                                         return min(floor(c8 / 8.0), 31.0) / 31.0;
+                                     }
+ 
+@@ -414,7 +484,64 @@
+                                         return dst + src * 0.25;
+                                     }
+ 
+-                                    void main() {
++                                    varying vec4 vWorldQ;
++varying vec4 vSurface;
++// Native, original-geometry-bound lighting. Unmarked primitives are bit-identical.
++uniform sampler2D uWorldHeight;
++uniform vec4 uWorldBounds;
++uniform vec2 uWorldHeightRange;
++uniform vec3 uWorldLight;
++uniform vec3 uWorldEye;
++uniform float uWorldTime;
++float originalHeight(vec2 p) {
++    vec2 uv=(p-uWorldBounds.xy)/uWorldBounds.zw;
++    if(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)return -100000.0;
++    vec4 h=texture2D(uWorldHeight,uv);
++    if(h.b<0.05)return -100000.0;
++    return uWorldHeightRange.x+dot(h.rg,vec2(65280.0,255.0))/65535.0*uWorldHeightRange.y;
++}
++vec3 lightOriginalSurface(vec3 color) {
++    if(vSurface.w<0.5 || vWorldQ.w<=0.0)return color;
++    vec3 p=vWorldQ.xyz/vWorldQ.w;
++    vec3 n=normalize(vSurface.xyz);
++    vec3 L=normalize(uWorldLight);
++    float shadow=0.0;
++    float distanceAlong=2.0;
++    for(int k=0;k<9;k++){
++        vec3 samplePoint=p+L*distanceAlong;
++        shadow=max(shadow,smoothstep(1.5,4.0,originalHeight(samplePoint.xy)-samplePoint.z));
++        distanceAlong*=2.0;
++    }
++    float ao=0.0;
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy+vec2(5.0,0.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy-vec2(5.0,0.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy+vec2(0.0,5.0))-p.z);
++    ao+=smoothstep(2.0,10.0,originalHeight(p.xy-vec2(0.0,5.0))-p.z);
++    float sun=1.0-0.40*shadow;
++    float diffuse=max(dot(n,L),0.0);
++    float illumination=(0.78+0.18*diffuse*sun+0.04*max(n.z,0.0))*(1.0-0.045*ao)*(1.0-0.16*shadow);
++    vec3 shaded=color*clamp(illumination,0.65,1.04);
++    if(vSurface.w<1.5)return clamp(shaded,0.0,1.0);
++    // Waves perturb a shading normal only. Original geometry, alpha, UV animation
++    // and draw order stay intact. Coordinates are native world units, not pixels.
++    float a=dot(p.xy,vec2(0.73,0.31))+uWorldTime*1.15;
++    float b=dot(p.xy,vec2(-0.29,1.07))-uWorldTime*0.87;
++    float c=dot(p.xy,vec2(1.67,-0.43))+uWorldTime*1.57;
++    vec2 slope=0.070*cos(a)*vec2(.73,.31)+0.042*cos(b)*vec2(-.29,1.07)+0.018*cos(c)*vec2(1.67,-.43);
++    vec3 waterN=normalize(vec3(-slope,1.0));
++    vec3 V=normalize(uWorldEye-p);
++    float fresnel=0.035+0.28*pow(1.0-clamp(dot(waterN,V),0.0,1.0),5.0);
++    float glint=pow(max(dot(reflect(-L,waterN),V),0.0),64.0)*sun;
++    // Restrained sky-environment approximation, not a claimed scene reflection.
++    vec3 sky=vec3(0.32,0.45,0.55)*(0.82+0.18*waterN.z);
++    shaded=mix(shaded,sky,fresnel*0.65);
++    shaded+=vec3(0.20,0.20,0.17)*glint;
++    shaded*=0.98+0.035*sin(a)*sin(b);
++    return clamp(shaded,0.0,1.0);
++}
++
++void main() {
++                                        vec2 vUV = vUVQ.xy / vUVQ.z;
+                                         vec2 destUv = gl_FragCoord.xy / uDestSize;
+                                         vec4 dstTexel = texture2D(uDest, destUv);
+                                         if (uCheckMask > 0.5 && dstTexel.a >= 0.5) discard;
+@@ -422,6 +549,7 @@
+                                         vec3 rgb;
+                                         float stp;
+                                         float mask;
++                                        float coverage = 1.0;
+ 
+                                         if (vTexMode > 3.5 && vTexMode < 4.5) {
+                                             rgb = vColor.rgb * 255.0;
+@@ -434,8 +562,9 @@
+                                             stp = 1.0;
+                                             mask = uSetMask;
+                                         } else {
+-                                            vec2 win = uTexWindow.xy + 1.0;
+-                                            vec2 fuv = vec2(mod(vUV.x, win.x), mod(vUV.y, win.y)) + uTexWindow.zw;
++                                            vec2 whole = floor(vUV);
++                                            vec2 fuv = vec2(windowByte(whole.x, uTexWindow.x, uTexWindow.z),
++                                                            windowByte(whole.y, uTexWindow.y, uTexWindow.w)) + fract(vUV);
+ 
+ 
+                                             float rawU = dFdx(vUV.x) < 0.0 ? ceil(vUV.x - 0.0001) : floor(vUV.x + 0.0001);
+@@ -444,12 +573,20 @@
+                                             if (vTexMode > 5.5) {
+                                                 vec2 t = (fuv - uRepRect.xy) / uRepRect.zw;
+                                                 vec4 img = texture2D(uRepTex, t);
+-                                                if (img.a < 0.5) discard;
++                                                if (uRepCoverage > 0.5) {
++                                                    if (img.a <= 0.0) discard;
++                                                    coverage = img.a;
++                                                    stp = 1.0;
++                                                    mask = uSetMask;
++                                                } else {
++                                                    if (img.a < 0.5) discard;
++                                                    stp = img.a < 0.95 ? 1.0 : 0.0;
++                                                    mask = max(stp, uSetMask);
++                                                }
+                                                 rgb = floor(img.rgb * 255.0 + 0.5) * floor(vColor.rgb * 255.0 + 0.5) / 128.0;
+-                                                stp = img.a < 0.95 ? 1.0 : 0.0;
+-                                                mask = max(stp, uSetMask);
+                                             } else {
+-                                                vec2 uv = vec2(mod(rawU, win.x), mod(rawV, win.y)) + uTexWindow.zw;
++                                                vec2 uv = vec2(windowByte(rawU, uTexWindow.x, uTexWindow.z),
++                                                               windowByte(rawV, uTexWindow.y, uTexWindow.w));
+                                                 uv = vec2(mod(uv.x, 256.0), mod(uv.y, 256.0));
+                                                 vec4 texel;
+ 
+@@ -486,16 +623,16 @@
+                                             }
+                                         }
+ 
+-                                        vec3 outRgb = quant5(floor(rgb));
+-                                        if (uSemiTrans * stp > 0.5) outRgb = clamp(blendWith(outRgb, dstTexel.rgb), 0.0, 1.0);
+-
++                                        vec3 outRgb = lightOriginalSurface(quant5(floor(rgb)));
++                                        if (uSemiTrans * stp > 0.5) outRgb = blendWith(outRgb, dstTexel.rgb);
++                                        outRgb = clamp(mix(dstTexel.rgb, outRgb, coverage), 0.0, 1.0);
+                                         gl_FragColor = vec4(outRgb, mask);
+                                     }
+-                                    """;
++""";
+ 
+     private static readonly (uint Index, string Name)[] PrimAttribs =
+     [
+-        (0, "inPos"), (1, "inColorF"), (2, "inClutF"), (3, "inTexpageF"), (4, "inUV")
++        (0, "inPos"), (1, "inColorF"), (2, "inClutF"), (3, "inTexpageF"), (4, "inUV"), (5, "inW"), (6, "inWorldQ"), (7, "inSurface")
+     ];
+ 
+     public static uint BuildPrim(GL gl, string vsSrc, string fsSrc, string name)
+@@ -606,4 +743,4 @@
+ 
+         return sh;
+     }
+-}+}
+--- a/RecompOne.Runtime/Gpu/Gpu.cs
++++ b/RecompOne.Runtime/Gpu/Gpu.cs
+@@ -38,6 +38,7 @@
+     private readonly uint[] _fifo = new uint[1024];
+     private int _fifoCount;
+     private uint _fifoBase;
++    private uint _inputAddress;
+     private int _need;
+     private bool _polyline;
+ 
+@@ -125,28 +126,32 @@
+ 
+     private void Push(uint word)
+     {
++        if (_fifoCount == 0) _fifoBase = _inputAddress;
++        else if (_fifoBase != 0u && _inputAddress != _fifoBase + (uint)_fifoCount * 4u)
++            _fifoBase = 0u; // A non-contiguous/unaddressed stream has no safe memory provenance.
++        if (_fifoCount < _fifo.Length) _fifo[_fifoCount++] = word;
++    }
++
++    public uint FifoBase => _fifoBase;
++
++    public void WriteGp0Packet(ReadOnlySpan<uint> words, uint baseAddress = 0u)
++    {
++        if (words.Length == 0) return;
++
+         if (_fifoCount == 0) _fifoBase = 0u;
+-        if (_fifoCount < _fifo.Length) _fifo[_fifoCount++] = word;
+-    }
+-
+-    public uint FifoBase => _fifoBase;
+-
+-    public void WriteGp0Packet(ReadOnlySpan<uint> words, uint baseAddress = 0u)
+-    {
+-        if (words.Length == 0) return;
+-
+-        _fifoBase = 0u;
+ 
+         if (_loadImage || _polyline || _fifoCount != 0 || words.Length > _fifo.Length)
+         {
+-            foreach (var w in words) WriteGp0(w);
++            for (int i = 0; i < words.Length; i++)
++                WriteGp0(words[i], baseAddress == 0 ? 0 : baseAddress + (uint)i * 4u);
+             return;
+         }
+ 
+         var need = CommandLength(words[0]);
+         if (need != words.Length)
+         {
+-            foreach (var w in words) WriteGp0(w);
++            for (int i = 0; i < words.Length; i++)
++                WriteGp0(words[i], baseAddress == 0 ? 0 : baseAddress + (uint)i * 4u);
+             return;
+         }
+ 
+@@ -157,8 +162,9 @@
+         if (!_loadImage) _fifoCount = 0;
+     }
+ 
+-    public void WriteGp0(uint word)
+-    {
++    public void WriteGp0(uint word, uint sourceAddress = 0u)
++    {
++        _inputAddress = sourceAddress;
+         if (_loadImage)
+         {
+             StoreImageHalfword((ushort)word);
+--- a/RecompOne.Runtime/Gpu/GpuHleForward.cs
++++ b/RecompOne.Runtime/Gpu/GpuHleForward.cs
+@@ -18,7 +18,8 @@
+         {
+             ClipX0 = _drawAreaLeft, ClipY0 = _drawAreaTop, ClipX1 = _drawAreaRight, ClipY1 = _drawAreaBottom,
+             TwMaskX = _texWinMaskX, TwMaskY = _texWinMaskY, TwOffX = _texWinOffX, TwOffY = _texWinOffY,
+-            SetMask = _setMask, CheckMask = _checkMask, Dither = _dither
++            // Preserve _dither for guest GPUSTAT readback only; never forward it for rendering.
++            SetMask = _setMask, CheckMask = _checkMask, Dither = false
+         };
+     }
+ 
+@@ -44,7 +45,10 @@
+         return new PrimFlags
+         {
+             Textured = tex, SemiTrans = semi, RawTexture = raw, Gouraud = gouraud, TPage = (ushort)CurTPage(),
+-            Clut = (ushort)clut
++            Clut = (ushort)clut,
++            NativeTexture = tex ? Assets.Native.NativeTextureBindings.Resolve(_fifoBase) : null,
++            WorldSurface = Assets.Native.WorldSurfaceBindings.Resolve(_fifoBase),
++            DrawOffsetX=_drawOffsetX,DrawOffsetY=_drawOffsetY
+         };
+     }
+ 
+--- a/RecompOne.Runtime/Gpu/GpuRaster.cs
++++ b/RecompOne.Runtime/Gpu/GpuRaster.cs
+@@ -29,6 +29,7 @@
+         Span<Vert> v = stackalloc Vert[4];
+         Span<uint> words = stackalloc uint[4];
+         Span<uint> seqs = stackalloc uint[4];
++        v.Clear(); words.Clear(); seqs.Clear();
+         var idx = 1;
+         var clut = 0;
+         int cr = (int)(cmd & 0xFF), cg = (int)((cmd >> 8) & 0xFF), cb = (int)((cmd >> 16) & 0xFF);
+@@ -65,20 +66,21 @@
+                             Pgxp.PgxpMemory.TryLoad(_fifoBase + (uint)slot * 4u, vw, out px, out py, out pw,
+                                 out validW, out seq, out transform);
+ 
+-                if (!found) found = Pgxp.PgxpGpu.TryGetVertex(vw, 0u, false, out px, out py, out pw, out validW, out seq, out transform);
+-
+-                if (found)
++                if (!found && !Pgxp.Pgxp.RequiredPerspective) found = Pgxp.PgxpGpu.TryGetVertex(vw, 0u, false, out px, out py, out pw, out validW, out seq, out transform);
++
++                if (found && (!Pgxp.Pgxp.RequiredPerspective || validW))
+                 {
+                     v[i].Pw = pw;
++                    v[i].PreciseW = validW; // exact memory provenance validates depth independently of XY tolerance
+                     v[i].Transform = transform != 0 ? transform : -1;
+                     seqs[i] = seq;
+ 
+-                    if (WithinTolerance(px, py, vw))
++                    if (float.IsFinite(px) && float.IsFinite(py) && WithinTolerance(px, py, vw))
+                     {
+                         v[i].Px = _drawOffsetX + px;
+                         v[i].Py = _drawOffsetY + py;
+                         v[i].Precise = true;
+-                        v[i].PreciseW = validW;
++
+                     }
+                 }
+             }
+@@ -126,11 +128,19 @@
+             }
+         }
+ 
+-        if (Pgxp.Pgxp.Enabled) ResolveAmbiguous(v, words, seqs, n);
++        if (Pgxp.Pgxp.Enabled && !Pgxp.Pgxp.RequiredPerspective) ResolveAmbiguous(v, words, seqs, n);
+ 
+         var invalidW = false;
+         for (var i = 0; i < n; i++)
+-            if (!v[i].PreciseW || v[i].Pw <= 0f) invalidW = true;
++            if (!v[i].PreciseW || !float.IsFinite(v[i].Pw) || v[i].Pw <= 0f) invalidW = true;
++
++        if (Pgxp.Pgxp.RequiredPerspective)
++        {
++            int precise = 0;
++            for (int i = 0; i < n; i++) if (v[i].PreciseW) precise++;
++            Pgxp.PerspectiveDiagnostics.Record(tex, n, precise, !invalidW);
++
++        }
+ 
+         HleTri(v[0], v[1], v[2], invalidW, tex, gouraud, semi, raw, clut);
+         if (quad) HleTri(v[1], v[2], v[3], invalidW, tex, gouraud, semi, raw, clut);
+--- a/RecompOne.Runtime/Gpu/Hle/HleTypes.cs
++++ b/RecompOne.Runtime/Gpu/Hle/HleTypes.cs
+@@ -16,6 +16,9 @@
+     public bool Textured, SemiTrans, RawTexture, Gouraud;
+     public ushort TPage;
+     public ushort Clut;
++    public Assets.Native.NativeTextureMaterial? NativeTexture;
++    public Assets.Native.WorldSurface? WorldSurface;
++    public int DrawOffsetX,DrawOffsetY;
+     public int OtIndex;
+     public bool UseImage;
+     public int Image;
+--- /dev/null
++++ b/RecompOne.Runtime/Gpu/Pgxp/PerspectiveDiagnostics.cs
+@@ -0,0 +1,20 @@
++using System.Threading;
++
++namespace RecompOne.Runtime.Pgxp;
++
++/// <summary>Counts submitted polygons, not frames or a guarantee of visual correctness.</summary>
++public static class PerspectiveDiagnostics
++{
++    private static long _textured, _corrected, _flat, _partial, _vertices, _tracked;
++    public static string Summary => $"perspective={Interlocked.Read(ref _corrected)}/{Interlocked.Read(ref _textured)} flat2DOrUntracked={Interlocked.Read(ref _flat)} partialDepth={Interlocked.Read(ref _partial)} trackedVertices={Interlocked.Read(ref _tracked)}/{Interlocked.Read(ref _vertices)}";
++    public static void Record(bool textured, int count, int tracked, bool corrected)
++    {
++        if (!textured) return;
++        Interlocked.Increment(ref _textured);
++        Interlocked.Add(ref _vertices, count);
++        Interlocked.Add(ref _tracked, tracked);
++        if (corrected) Interlocked.Increment(ref _corrected);
++        else if (tracked == 0) Interlocked.Increment(ref _flat);
++        else Interlocked.Increment(ref _partial);
++    }
++}
+--- a/RecompOne.Runtime/Gpu/Pgxp/Pgxp.cs
++++ b/RecompOne.Runtime/Gpu/Pgxp/Pgxp.cs
+@@ -5,6 +5,16 @@
+ public static class Pgxp
+ {
+     public static bool Shown = true;
++
++    // Game-selected policy, not a saved preference. Reloading/resetting UI settings
++    // cannot silently bring affine mapping back. Other RecompOne games are unaffected.
++    public static bool RequiredPerspective { get; private set; }
++    public static void RequirePerspectiveCorrection()
++    {
++        RequiredPerspective = true;
++        Shown = false;
++        Load();
++    }
+     
+     public const string KeyEnable = "pgxp.enable";
+     public const string KeyCulling = "pgxp.culling";
+@@ -43,6 +53,15 @@
+         MemoryTracking = Enabled && view.GetBool(KeyMemory, true);
+         Tolerance = view.GetFloat(KeyTolerance, DefaultTolerance);
+         
++        if (RequiredPerspective)
++        {
++            Enabled = TextureCorrection = CpuTracking = MemoryTracking = true;
++            // Keep the game's original visibility/backface decisions, and never
++            // borrow depth from unrelated vertices which happen to share screen XY.
++            Culling = VertexCache = CacheW = false;
++            Tolerance = DefaultTolerance;
++            Shown = false;
++        }
+         _loaded = true;
+     }
+     
+--- a/RecompOne.Runtime/Gpu/Pgxp/PgxpCpu.cs
++++ b/RecompOne.Runtime/Gpu/Pgxp/PgxpCpu.cs
+@@ -14,21 +14,21 @@
+     
+     public static void Reset()
+     {
+-        for (var i = 0; i < _gpr.Length; i++) _gpr[i].Flags = PgxpFlags.None;
++        Array.Clear(_gpr);
+         
+         _gpr[0].X = 0f;
+         _gpr[0].Y = 0f;
+         _gpr[0].Z = 0f;
+         _gpr[0].Value = 0u;
+-        _gpr[0].Flags = PgxpFlags.ValidAll;
+-        
+-        _hi.Flags = PgxpFlags.None;
+-        _lo.Flags = PgxpFlags.None;
++        _gpr[0].Flags = PgxpFlags.ValidLow;
++        
++        _hi = default;
++        _lo = default;
+     }
+     
+     public static void Mfc2(int rt, int rd, uint value)
+     {
+-        if (!Pgxp.CpuTracking) return;
++        if (!Pgxp.CpuTracking || rt == 0) return;
+         
+         ref var src = ref PgxpGte.Data(rd);
+         PgxpFlags.Validate(ref src, value);
+@@ -50,7 +50,7 @@
+     }
+     public static void Lw(int rt, uint address, uint value)
+     {
+-        if (!Pgxp.CpuTracking) return;
++        if (!Pgxp.CpuTracking || rt == 0) return;
+         
+         PgxpMemory.LoadInto(address, value, ref _gpr[rt]);
+     }
+@@ -76,7 +76,7 @@
+ 
+     public static void Lh(int rt, uint address, uint value)
+     {
+-        if (!Pgxp.CpuTracking) return;
++        if (!Pgxp.CpuTracking || rt == 0) return;
+         
+         PgxpMemory.LoadHalf(address, value, ref _gpr[rt]);
+     }
+@@ -179,6 +179,13 @@
+         ret.Y = (float)y;
+         ret.Transform = a.Transform != 0 ? a.Transform : b.Transform;
+         ret.Value = rdVal;
++        if (Pgxp.RequiredPerspective)
++        {
++            bool aw = (a.Flags & PgxpFlags.Valid2) != 0, bw = (b.Flags & PgxpFlags.Valid2) != 0;
++            if (aw && bw && !SameOrigin(in a, in b)) ret.Flags &= ~PgxpFlags.Valid2;
++            else if (!aw && bw)
++            { ret.Z = b.Z; ret.Count = b.Count; ret.Transform = b.Transform; ret.Flags |= PgxpFlags.Valid2; }
++        }
+         
+         _gpr[rd] = ret;
+     }
+@@ -206,6 +213,12 @@
+         ret.Y = (float)y;
+         ret.Transform = a.Transform != 0 ? a.Transform : b.Transform;
+         ret.Value = rdVal;
++        if (Pgxp.RequiredPerspective)
++        {
++            bool aw = (a.Flags & PgxpFlags.Valid2) != 0, bw = (b.Flags & PgxpFlags.Valid2) != 0;
++            if (aw && bw && !SameOrigin(in a, in b)) ret.Flags &= ~PgxpFlags.Valid2;
++
++        }
+         
+         _gpr[rd] = ret;
+     }
+@@ -235,18 +248,22 @@
+         else if (high == (ushort)(rtVal >> 16)) ret.Y = b.Y;
+         else ret.Y = (short)high;
+         
+-        if ((a.Flags & PgxpFlags.Valid2) != 0)
+-        {
+-            ret.Z = a.Z;
+-            ret.Flags |= PgxpFlags.Valid2;
+-        }
+-        else if ((b.Flags & PgxpFlags.Valid2) != 0)
+-        {
+-            ret.Z = b.Z;
+-            ret.Flags |= PgxpFlags.Valid2;
+-        }
+-        
+-        ret.Transform = 0;
++        bool aw = (a.Flags & PgxpFlags.Valid2) != 0, bw = (b.Flags & PgxpFlags.Valid2) != 0;
++        if ((aw || bw) && (!Pgxp.RequiredPerspective || !aw || !bw || SameOrigin(in a, in b)))
++        {
++            var origin = aw ? a : b;
++            // A bitwise result may copy/mask coordinate halves, not invent new ones.
++            bool lowCopied = low == 0 || low == (ushort)rsVal || low == (ushort)rtVal;
++            bool highCopied = high == 0 || high == (ushort)(rsVal >> 16) || high == (ushort)(rtVal >> 16);
++            if (!Pgxp.RequiredPerspective || (lowCopied && highCopied))
++            {
++                ret.Z = origin.Z;
++                ret.Count = origin.Count;
++                ret.Transform = origin.Transform;
++                ret.Flags |= PgxpFlags.Valid2;
++            }
++        }
++
+         ret.Value = rdVal;
+         _gpr[rd] = ret;
+     }
+@@ -275,7 +292,8 @@
+         }
+         
+         ret.Flags |= PgxpFlags.Valid1;
+-        ret.Transform = 0;
++        ret.Transform = src.Transform;
++        if (Pgxp.RequiredPerspective && imm != 0xFFFF && rtVal != rsVal) ret.Flags &= ~PgxpFlags.Valid2;
+         ret.Value = rtVal;
+         
+         _gpr[rt] = ret;
+@@ -296,7 +314,8 @@
+             ret.Flags |= PgxpFlags.Valid0;
+         }
+         
+-        ret.Transform = 0;
++        ret.Transform = src.Transform;
++        if (Pgxp.RequiredPerspective && rtVal != rsVal) ret.Flags &= ~PgxpFlags.Valid2;
+         ret.Value = rtVal;
+         _gpr[rt] = ret;
+     }
+@@ -315,6 +334,7 @@
+         ret.Transform = 0;
+         ret.Value = rtVal;
+         
++        if (Pgxp.RequiredPerspective) PgxpFlags.SetValue(ref ret, rtVal);
+         _gpr[rt] = ret;
+     }
+     
+@@ -332,6 +352,7 @@
+         ret.Transform = 0;
+         ret.Value = rtVal;
+         
++        if (Pgxp.RequiredPerspective) PgxpFlags.SetValue(ref ret, rtVal);
+         _gpr[rt] = ret;
+     }
+     
+@@ -352,6 +373,7 @@
+         ret.Transform = 0;
+         ret.Value = rdVal;
+         
++        if (Pgxp.RequiredPerspective) PgxpFlags.SetValue(ref ret, rdVal);
+         _gpr[rd] = ret;
+     }
+     
+@@ -372,6 +394,7 @@
+         ret.Transform = 0;
+         ret.Value = rdVal;
+         
++        if (Pgxp.RequiredPerspective) PgxpFlags.SetValue(ref ret, rdVal);
+         _gpr[rd] = ret;
+     }
+     
+@@ -407,7 +430,7 @@
+         
+         ret.X = (float)x;
+         ret.Y = (float)y;
+-        ret.Transform = 0;
++        ret.Transform = src.Transform;
+         ret.Value = rdVal;
+         
+         _gpr[rd] = ret;
+@@ -461,7 +484,7 @@
+         
+         ret.X = (float)PgxpFlags.F16Sign(x);
+         ret.Y = (float)PgxpFlags.F16Sign(y);
+-        ret.Transform = 0;
++        ret.Transform = src.Transform;
+         ret.Value = rdVal;
+         
+         _gpr[rd] = ret;
+@@ -475,6 +498,12 @@
+         PgxpFlags.Validate(ref b, rtVal);
+         Pair(ref a, ref b, rsVal, rtVal);
+         
++        if (Pgxp.RequiredPerspective)
++        {
++            PgxpFlags.SetValue(ref _lo, loVal);
++            PgxpFlags.SetValue(ref _hi, hiVal);
++            return; // integer scalar multiplication/division is not a new GTE vertex
++        }
+         _lo = a;
+         _hi = a;
+         
+@@ -510,6 +539,12 @@
+         PgxpFlags.Validate(ref b, rtVal);
+         Pair(ref a, ref b, rsVal, rtVal);
+         
++        if (Pgxp.RequiredPerspective)
++        {
++            PgxpFlags.SetValue(ref _lo, loVal);
++            PgxpFlags.SetValue(ref _hi, hiVal);
++            return; // integer scalar multiplication/division is not a new GTE vertex
++        }
+         _lo = a;
+         _hi = a;
+         
+@@ -573,6 +608,9 @@
+         _lo.Value = loVal;
+     }
+     
++    private static bool SameOrigin(in PgxpValue a, in PgxpValue b) =>
++        a.Count == b.Count && a.Z == b.Z && a.Transform == b.Transform;
++
+     private static void Pair(ref PgxpValue a, ref PgxpValue b, uint aVal, uint bVal)
+     {
+         var validA = (a.Flags & PgxpFlags.ValidLow) == PgxpFlags.ValidLow;
+--- a/RecompOne.Runtime/Gpu/Pgxp/PgxpMemory.cs
++++ b/RecompOne.Runtime/Gpu/Pgxp/PgxpMemory.cs
+@@ -1,125 +1,182 @@
++using System.Runtime.CompilerServices;
++using RecompOne.Runtime.Memory;
++
+ namespace RecompOne.Runtime.Pgxp;
+ 
++/// <summary>Precision metadata keyed to real RAM/scratchpad words, never MMIO aliases.</summary>
+ public static class PgxpMemory
+ {
++    // Private shadow flags: each surviving coordinate half can retain its origin
++    // while the other half is overwritten. Valid2 is set only when BOTH halves
++    // have the same origin. No extra full-size metadata arrays are needed.
++    private const uint DepthLow = 1u << 4, DepthHigh = 1u << 12;
+     private static PgxpValue[] _shadow = [];
+-    private static uint _mask;
+-    
++    private static uint _ramMask, _ramWords, _hostBytes;
++
+     public static void Init(uint ramSize)
+     {
+-        _shadow = new PgxpValue[ramSize >> 2];
+-        _mask = ramSize - 4u;
++        if (ramSize < MemoryMap.RetailRamSize || ramSize > MemoryMap.RamWindow || (ramSize & (ramSize - 1)) != 0)
++            throw new ArgumentOutOfRangeException(nameof(ramSize));
++        _hostBytes = 0;
++        _ramMask = ramSize - 1u;
++        _ramWords = ramSize >> 2;
++        _shadow = new PgxpValue[_ramWords + (MemoryMap.ScratchpadWindow >> 2)];
+     }
+-    
+-    public static void Free()
++    public static void Free() { _shadow = []; _hostBytes = 0; }
++
++    public static void ConfigureHostScratch(uint size)
+     {
+-        _shadow = [];
++        if (size == 0 || size > MemoryMap.HostScratchMaxSize || (size & 3) != 0)
++            throw new ArgumentOutOfRangeException(nameof(size));
++        if (_shadow.Length == 0) throw new InvalidOperationException("Precision memory is not initialized.");
++        if (_hostBytes == size) return;
++        if (_hostBytes != 0) throw new InvalidOperationException("Precision workspace cannot be silently resized.");
++        Array.Resize(ref _shadow, checked((int)(_ramWords + (MemoryMap.ScratchpadWindow >> 2) + (size >> 2))));
++        _hostBytes = size;
+     }
+-    
++
++    [MethodImpl(MethodImplOptions.AggressiveInlining)]
++    private static bool TryIndex(uint address, out int index)
++    {
++        index = 0;
++        if (_shadow.Length == 0) return false;
++        uint physical = address & MemoryMap.PhysicalMask;
++        if (physical < MemoryMap.RamWindow)
++        {
++            index = (int)((physical & _ramMask) >> 2);
++            return true;
++        }
++        uint scratch = physical - MemoryMap.ScratchpadBase;
++        if (scratch < MemoryMap.ScratchpadWindow)
++        {
++            index = (int)(_ramWords + (scratch >> 2));
++            return true;
++        }
++        uint host = physical - MemoryMap.HostScratchBase;
++        if (host >= _hostBytes) return false;
++        index = (int)(_ramWords + (MemoryMap.ScratchpadWindow >> 2) + (host >> 2));
++        return true;
++    }
++
+     public static void Store(uint address, in PgxpValue value, uint written)
+     {
+-        if (!Pgxp.MemoryTracking || _shadow.Length == 0) return;
++        if (!Pgxp.MemoryTracking || (address & 3) != 0 || !TryIndex(address, out int i)) return;
++        _shadow[i] = value;
++        _shadow[i].Value = written;
++        _shadow[i].Flags &= ~(DepthLow | DepthHigh);
++        if ((value.Flags & PgxpFlags.Valid2) != 0)
++        {
++            if ((value.Flags & PgxpFlags.Valid0) != 0) _shadow[i].Flags |= DepthLow;
++            if ((value.Flags & PgxpFlags.Valid1) != 0) _shadow[i].Flags |= DepthHigh;
++        }
++    }
+ 
+-        ref var slot = ref _shadow[Index(address)];
+-        slot = value;
+-        slot.Value = written;
+-    }
+-    
+     public static void StoreHalf(uint address, in PgxpValue src, ushort written)
+     {
+-        if (!Pgxp.MemoryTracking || _shadow.Length == 0) return;
+-        
+-        ref var slot = ref _shadow[Index(address)];
+-        var srcValid = (src.Flags & PgxpFlags.Valid0) != 0;
+-        
+-        slot.Transform = src.Transform;
+-        
+-        if ((address & 2u) != 0)
++        if (!Pgxp.MemoryTracking || (address & 1) != 0 || !TryIndex(address, out int i)) return;
++        ref var slot = ref _shadow[i];
++        bool high = (address & 2) != 0;
++        uint own = high ? PgxpFlags.Valid1 : PgxpFlags.Valid0;
++        uint ownDepth = high ? DepthHigh : DepthLow, otherDepth = high ? DepthLow : DepthHigh;
++        bool srcValid = (src.Flags & PgxpFlags.Valid0) != 0;
++        bool srcDepth = srcValid && (src.Flags & PgxpFlags.Valid2) != 0;
++        bool sameOrigin = srcDepth && (slot.Flags & otherDepth) != 0 &&
++            slot.Count == src.Count && slot.Z == src.Z && slot.Transform == src.Transform;
++        if (high)
+         {
+             slot.Y = src.X;
+-            slot.Flags = (slot.Flags & ~PgxpFlags.Valid1) | (srcValid ? PgxpFlags.Valid1 : PgxpFlags.None);
+-            slot.Value = (slot.Value & 0x0000FFFFu) | ((uint)written << 16);
++            slot.Value = (slot.Value & 0xFFFF) | ((uint)written << 16);
+         }
+         else
+         {
+             slot.X = src.X;
+-            slot.Flags = (slot.Flags & ~PgxpFlags.Valid0) | (srcValid ? PgxpFlags.Valid0 : PgxpFlags.None);
+-            slot.Value = (slot.Value & 0xFFFF0000u) | written;
++            slot.Value = (slot.Value & 0xFFFF0000) | written;
+         }
+-        
+-        if ((src.Flags & PgxpFlags.Valid2) == 0) return;
+-        
+-        slot.Z = src.Z;
+-        slot.Flags |= PgxpFlags.Valid2;
++        slot.Flags = (slot.Flags & ~(own | ownDepth | PgxpFlags.Valid2)) | (srcValid ? own : 0u);
++        if (srcDepth)
++        {
++            // When replacing last frame's coordinates one half at a time, keep
++            // the new half's origin even though its old partner does not match.
++            // The second new half can then complete the coherent pair.
++            if (!sameOrigin) slot.Flags &= ~otherDepth;
++            slot.Z = src.Z;
++            slot.Count = src.Count;
++            slot.Transform = src.Transform;
++            slot.Flags |= ownDepth;
++        }
++        if ((slot.Flags & (DepthLow | DepthHigh | PgxpFlags.ValidLow)) ==
++            (DepthLow | DepthHigh | PgxpFlags.ValidLow)) slot.Flags |= PgxpFlags.Valid2;
+     }
+-    
++
+     public static void LoadHalf(uint address, uint value, ref PgxpValue dest)
+     {
+-        if (_shadow.Length == 0)
+-        {
+-            dest.Flags = PgxpFlags.None;
+-            dest.Value = value;
+-            return;
+-        }
+-        
+-        ref var slot = ref _shadow[Index(address)];
+-        var high = (address & 2u) != 0;
+-        var valid = high ? (slot.Flags & PgxpFlags.Valid1) != 0 : (slot.Flags & PgxpFlags.Valid0) != 0;
+-        var stored = high ? slot.Value >> 16 : slot.Value & 0xFFFFu;
+-        
++        dest = default;
++        dest.Value = value;
++        if (!Pgxp.MemoryTracking || (address & 1) != 0 || !TryIndex(address, out int i)) return;
++        ref var slot = ref _shadow[i];
++        bool high = (address & 2) != 0;
++        uint flag = high ? PgxpFlags.Valid1 : PgxpFlags.Valid0;
++        uint stored = high ? slot.Value >> 16 : slot.Value & 0xFFFF;
++        if ((slot.Flags & flag) == 0 || stored != (value & 0xFFFF)) return;
+         dest.X = high ? slot.Y : slot.X;
+-        dest.Y = dest.X < 0f ? -1f : 0f;
++        dest.Y = (short)(value >> 16); // signed LH and unsigned LHU differ here
+         dest.Z = slot.Z;
+-        dest.Value = value;
+-        dest.Flags = valid && stored == (value & 0xFFFFu) ? PgxpFlags.Valid0 | PgxpFlags.Valid1 | (slot.Flags & PgxpFlags.Valid2) : PgxpFlags.None;
++        dest.Count = slot.Count;
++        dest.Transform = slot.Transform;
++        dest.Flags = PgxpFlags.ValidLow | ((slot.Flags & (high ? DepthHigh : DepthLow)) != 0 ? PgxpFlags.Valid2 : 0u);
+     }
+-    
++
+     public static void LoadInto(uint address, uint value, ref PgxpValue dest)
+     {
+-        if (_shadow.Length == 0)
++        dest = default;
++        if (Pgxp.MemoryTracking && (address & 3) == 0 && TryIndex(address, out int i))
+         {
+-            dest.Flags = PgxpFlags.None;
+-            dest.Value = value;
+-            return;
++            dest = _shadow[i];
++            if (dest.Value != value) dest.Flags = PgxpFlags.None;
+         }
+-        
+-        dest = _shadow[Index(address)];
+-        if (dest.Value != value) dest.Flags = PgxpFlags.None;
+         dest.Value = value;
+     }
++
+     public static void Invalidate(uint address, uint written)
+     {
++        if (!Pgxp.MemoryTracking || !TryIndex(address, out int i)) return;
++        _shadow[i] = new PgxpValue { Value = written };
++    }
++
++    /// <summary>
++    /// Called before every ordinary guest write, including HLE/bulk writes. The
++    /// generated SW/SH/SWC2 hook then attaches new metadata, if any. Invalidation
++    /// must happen even when the new integer happens to equal an old coordinate.
++    /// </summary>
++    public static void InvalidateBytes(uint address, int length)
++    {
+         if (!Pgxp.MemoryTracking || _shadow.Length == 0) return;
++        for (int k = 0; k < length;)
++        {
++            uint a = address + (uint)k;
++            int part = Math.Min(length - k, 4 - (int)(a & 3));
++            if (TryIndex(a, out int i))
++            {
++                ref var slot = ref _shadow[i];
++                int first = (int)(a & 3), last = first + part - 1;
++                if (first < 2) slot.Flags &= ~(PgxpFlags.Valid0 | DepthLow | PgxpFlags.Valid2);
++                if (last >= 2) slot.Flags &= ~(PgxpFlags.Valid1 | DepthHigh | PgxpFlags.Valid2);
++                if ((slot.Flags & PgxpFlags.ValidLow) == 0) slot = default;
++            }
++            k += part;
++        }
++    }
+ 
+-        ref var slot = ref _shadow[Index(address)];
+-        slot.Flags = PgxpFlags.None;
+-        slot.Value = written;
+-    }
+-    public static bool TryLoad(uint address, uint packed, out float x, out float y, out float w, out bool validW,
+-        out uint seq, out int transform)
++    public static bool TryLoad(uint address, uint packed, out float x, out float y, out float w,
++        out bool validW, out uint seq, out int transform)
+     {
+-        transform = 0;
+-        x = 0f;
+-        y = 0f;
+-        w = 1f;
+-        validW = false;
+-        seq = 0u;
+-        if (!Pgxp.MemoryTracking || _shadow.Length == 0) return false;
+-
+-        ref var slot = ref _shadow[Index(address)];
++        x = y = 0f; w = 1f; validW = false; seq = 0; transform = 0;
++        if (!Pgxp.MemoryTracking || (address & 3) != 0 || !TryIndex(address, out int i)) return false;
++        ref var slot = ref _shadow[i];
+         if (!PgxpFlags.Matches(in slot, packed)) return false;
+-        
+-        validW = (slot.Flags & PgxpFlags.Valid2) != 0;
+-        x = slot.X;
+-        y = slot.Y;
+-        w = slot.Z;
+-        seq = slot.Count;
+-        transform = slot.Transform;
++        if (!float.IsFinite(slot.X) || !float.IsFinite(slot.Y)) return false;
++        validW = (slot.Flags & PgxpFlags.Valid2) != 0 && float.IsFinite(slot.Z) && slot.Z > 0f;
++        x = slot.X; y = slot.Y; w = slot.Z; seq = slot.Count; transform = slot.Transform;
+         return true;
+     }
+-    
+-    private static uint Index(uint address)
+-    {
+-        return (address & _mask) >> 2;
+-    }
+ }
+--- a/RecompOne.Runtime/Gpu/Pgxp/PgxpValue.cs
++++ b/RecompOne.Runtime/Gpu/Pgxp/PgxpValue.cs
+@@ -49,6 +49,8 @@
+         value.Z = 0f;
+         value.Value = architectural;
+         value.Flags = ValidLow;
++        value.Count = 0;
++        value.Transform = 0;
+     }
+     
+     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+@@ -60,7 +62,9 @@
+         value.Y = (short)(architectural >> 16);
+         value.Z = 0f;
+         value.Value = architectural;
+-        value.Flags |= ValidLow;
++        value.Flags = ValidLow;
++        value.Count = 0;
++        value.Transform = 0;
+     }
+     
+     public static uint ToTolerance(in PgxpValue value, uint architectural, float tolerance)
+--- a/RecompOne.Runtime/Hardware/Gte.cs
++++ b/RecompOne.Runtime/Hardware/Gte.cs
+@@ -328,7 +328,7 @@
+         SY[1] = SY[2];
+         SY[2] = (short)ny;
+ 
+-        if (Pgxp.Pgxp.Enabled) PushPrecise(m3, nx, ny);
++        if (Pgxp.Pgxp.Enabled) PushPrecise(m1, m2, m3, sf, lm, nx, ny);
+ 
+         if (last)
+         {
+@@ -343,14 +343,19 @@
+         if ((FLAG & 0x7F87E000u) != 0) FLAG |= 0x80000000u;
+     }
+ 
+-    private static void PushPrecise(long zAcc, int nx, int ny)
++    private static void PushPrecise(long xAcc, long yAcc, long zAcc, int sf, bool lm, int nx, int ny)
+     {
+         var z = zAcc * (1.0 / 4096.0);
+         var w = Math.Max(z, H / 2.0);
+-        var hDivSz = H / w;
+-
+-        var px = (float)(OFX / 65536.0 + IR1 * hDivSz);
+-        var py = (float)(OFY / 65536.0 + IR2 * hDivSz);
++        var hDivSz = w > 0.0 ? H / w : 0.0;
++        double x = IR1, y = IR2;
++        if (Pgxp.Pgxp.RequiredPerspective && sf == 12)
++        {
++            x = Math.Clamp(xAcc / 4096.0, lm ? 0 : -32768, 32767);
++            y = Math.Clamp(yAcc / 4096.0, lm ? 0 : -32768, 32767);
++        }
++        var px = (float)(OFX / 65536.0 + x * hDivSz);
++        var py = (float)(OFY / 65536.0 + y * hDivSz);
+ 
+         px = Math.Clamp(px, -0x400, 0x3FF);
+         py = Math.Clamp(py, -0x400, 0x3FF);
+--- a/RecompOne.Runtime/Memory/Dma.cs
++++ b/RecompOne.Runtime/Memory/Dma.cs
+@@ -87,23 +87,26 @@
+         var sync = (chcr >> 9) & 3u;
+         if (sync == 2)
+         {
+-            var addr = madr & Runtime.RamWordMask;
++            uint addr;
++            if(_mem is PSMemory mapped){if(!mapped.TryGpuWordAddress(madr,out addr))return;}
++            else addr=madr&Runtime.RamWordMask;
+             for (var guard = 0; guard < 0x100000; guard++)
+             {
+                 var header = _mem.ReadU32(addr);
+                 var count = header >> 24;
+                 for (uint i = 0; i < count; i++)
+-                    _gpu.WriteGp0(_mem.ReadU32(addr + 4u + i * 4u));
++                    _gpu.WriteGp0(_mem.ReadU32(addr + 4u + i * 4u), addr + 4u + i * 4u);
+                 var next = header & 0xFFFFFFu;
+-                if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
+-                addr = next & Runtime.RamWordMask;
++                if(_mem is PSMemory mappedNext)
++                {if(!mappedNext.TryGpuWordAddress(next,out addr))break;}
++                else {if(next==0xFFFFFFu || (next&0x800000u)!=0)break;addr=next&Runtime.RamWordMask;}
+             }
+         }
+         else if ((chcr & 1u) != 0)
+         {
+             var words = WordCount(bcr);
+             for (uint i = 0; i < words; i++)
+-                _gpu.WriteGp0(_mem.ReadU32(madr + i * 4u));
++                _gpu.WriteGp0(_mem.ReadU32(madr + i * 4u), madr + i * 4u);
+         }
+         else
+         {
+--- a/RecompOne.Runtime/Memory/MemoryMap.cs
++++ b/RecompOne.Runtime/Memory/MemoryMap.cs
+@@ -2,6 +2,10 @@
+ 
+ public static class MemoryMap
+ {
++    // Opt-in host-only CPU workspace. Never mirrors PS1 RAM, MMIO or GPU VRAM.
++    public const uint HostScratchBase = 0x00800000;
++    public const uint HostScratchMaxSize = 0x00700000;
++
+     public const uint RamBase = 0x00000000;
+     public const uint RamWindow = 0x00800000;
+     public const uint RetailRamSize = 0x00200000;
+--- a/RecompOne.Runtime/Memory/PSMemory.cs
++++ b/RecompOne.Runtime/Memory/PSMemory.cs
+@@ -1,3 +1,4 @@
++using RecompOne.Runtime.Assets.Native;
+ using System.Buffers.Binary;
+ using System.Runtime.CompilerServices;
+ using System.Runtime.InteropServices;
+@@ -10,6 +11,51 @@
+ public sealed class PSMemory : IMemory
+ {
+     private readonly byte[] _ram;
++    private byte[] _hostScratch = [];
++    private uint _hostGpuOffset, _hostGpuSize;
++    public int HostScratchSize => _hostScratch.Length;
++
++    /// <summary>Allocate an opt-in, bounded host CPU workspace without changing PS1 RAM mirroring.</summary>
++    public void EnsureHostScratch(int size)
++    {
++        if (size <= 0 || size > MemoryMap.HostScratchMaxSize || (size & 3) != 0)
++            throw new ArgumentOutOfRangeException(nameof(size));
++        if (_hostScratch.Length != 0 && _hostScratch.Length != size)
++            throw new InvalidOperationException("Host workspace cannot be silently resized.");
++        if (_hostScratch.Length == 0) _hostScratch = new byte[size];
++        Pgxp.PgxpMemory.ConfigureHostScratch((uint)size);
++        NativeTextureBindings.ConfigureHostScratch((uint)size);
++        WorldSurfaceBindings.ConfigureHostScratch((uint)size);
++    }
++    public bool IsWorkMemoryRange(uint address, long bytes)
++    {
++        if (bytes < 0) return false;
++        uint p=address&0x1fffffffu;
++        return p+(long)bytes<=_ram.Length ||
++            (p>=MemoryMap.HostScratchBase && p-MemoryMap.HostScratchBase+(long)bytes<=_hostScratch.Length);
++    }
++    public void EnableHostGpuRange(uint offset,uint size)
++    {
++        if ((offset&3)!=0 || size==0 || (size&3)!=0 || offset+(long)size>_hostScratch.Length)
++            throw new ArgumentOutOfRangeException(nameof(size));
++        if (_hostGpuSize!=0 && (_hostGpuOffset!=offset || _hostGpuSize!=size))
++            throw new InvalidOperationException("The host GPU command range cannot be silently moved.");
++        _hostGpuOffset=offset;_hostGpuSize=size;
++    }
++    public bool TryGpuWordAddress(uint address,out uint resolved)
++    {
++        uint link=address&0xffffffu;
++        resolved=0;
++        if (link==0xffffffu) return false;
++        uint off=link-MemoryMap.HostScratchBase;
++        // Bit 23 is normally an end marker. Only an explicitly registered host
++        // command range may use it as part of a real 24-bit packet address.
++        if (_hostGpuSize!=0 && off>=_hostGpuOffset && off-_hostGpuOffset<_hostGpuSize)
++        { resolved=link&~3u; return true; }
++        if ((link&0x800000u)!=0)return false;
++        resolved=link&_ramMask&~3u;return true;
++    }
++
+     private readonly byte[] _scratchpad = new byte[MemoryMap.ScratchpadWindow];
+     private readonly byte[] _hwregs = new byte[MemoryMap.HwRegsSize];
+     private readonly byte[] _bios = new byte[MemoryMap.BiosSize];
+@@ -25,10 +71,15 @@
+ 
+     public bool TryWords(uint address, int count, out ReadOnlySpan<uint> words)
+     {
++        if (count < 0) { words=default; return false; }
++        uint host=(address&0x1fffffffu)-MemoryMap.HostScratchBase;
++        if(count>=0 && (address&3u)==0 && host<(uint)_hostScratch.Length && host+(long)count*4<=_hostScratch.Length)
++        {words=MemoryMarshal.Cast<byte,uint>(_hostScratch.AsSpan((int)host,count*4));return true;}
++
+         var phys = MemoryMap.ToPhysical(address);
+         var off = phys & _ramMask;
+ 
+-        if (phys >= MemoryMap.RamWindow || (off & 3u) != 0 || off + (uint)count * 4u > (uint)_ram.Length)
++        if (phys >= MemoryMap.RamWindow || (off & 3u) != 0 || off + (long)count * 4L > _ram.Length)
+         {
+             words = default;
+             return false;
+@@ -60,6 +111,11 @@
+         
+         Runtime.RamSize = size;
+         Pgxp.PgxpMemory.Init(size);
++        Assets.Native.NativeTextureBindings.Init(size);
++        Assets.Native.WorldSurfaceBindings.Init(size);
++        Pgxp.PgxpGte.Invalidate();
++        Pgxp.PgxpCpu.Reset();
++        Pgxp.PgxpGpu.Init();
+ 
+         _dma = new Dma(this, _gpu, _spu, _mdec, () => Runtime.DispatchIrq(3));
+         Runtime.Gpu = _gpu;
+@@ -115,6 +171,14 @@
+     {
+         var phys = MemoryMap.ToPhysical(address);
+ 
++        if (phys - MemoryMap.HostScratchBase < (uint)_hostScratch.Length)
++        {
++            uint off = phys - MemoryMap.HostScratchBase;
++            if (size < 0 || off + (long)size > _hostScratch.Length)
++                throw new InvalidOperationException($"access crossing the host workspace: 0x{address:X8}");
++            return _hostScratch.AsSpan((int)off, size);
++        }
++
+         if (phys < MemoryMap.RamWindow)
+             return _ram.AsSpan((int)(phys & _ramMask), size);
+ 
+@@ -205,6 +269,9 @@
+     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+     public void WriteU8(uint address, byte value)
+     {
++        if (Pgxp.Pgxp.RequiredPerspective) Pgxp.PgxpMemory.InvalidateBytes(address, 1);
++        Assets.Native.NativeTextureBindings.Invalidate(address, 1);
++        Assets.Native.WorldSurfaceBindings.Invalidate(address, 1);
+         var phys = MemoryMap.ToPhysical(address);
+         var off = phys & _ramMask;
+         if (_frozenCount == 0 && phys < MemoryMap.RamWindow && off < (uint)_ram.Length && !RamLogger.TrackWrites)
+@@ -227,6 +294,9 @@
+     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+     public void WriteU16(uint address, ushort value)
+     {
++        if (Pgxp.Pgxp.RequiredPerspective) Pgxp.PgxpMemory.InvalidateBytes(address, 2);
++        Assets.Native.NativeTextureBindings.Invalidate(address, 2);
++        Assets.Native.WorldSurfaceBindings.Invalidate(address, 2);
+         var phys = MemoryMap.ToPhysical(address);
+         var off = phys & _ramMask;
+         if (_frozenCount == 0 && phys < MemoryMap.RamWindow && off + 2u <= (uint)_ram.Length && !RamLogger.TrackWrites)
+@@ -250,6 +320,9 @@
+     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+     public void WriteU32(uint address, uint value)
+     {
++        if (Pgxp.Pgxp.RequiredPerspective) Pgxp.PgxpMemory.InvalidateBytes(address, 4);
++        Assets.Native.NativeTextureBindings.Invalidate(address, 4);
++        Assets.Native.WorldSurfaceBindings.Invalidate(address, 4);
+         var phys = MemoryMap.ToPhysical(address);
+         var off = phys & _ramMask;
+         if (_frozenCount == 0 && phys < MemoryMap.RamWindow && off + 4u <= (uint)_ram.Length && !RamLogger.TrackWrites)
+--- a/RecompOne.Runtime/sdk/LibCd.cs
++++ b/RecompOne.Runtime/sdk/LibCd.cs
+@@ -173,6 +173,14 @@
+                 m.WriteU8(buf + (uint)(i * size + j), data[j]);
+         }
+ 
++        // A completed bulk read must publish the status of the read, not the
++        // preceding Setloc/Setmode command. Jet Moto checks result[0] == 0x22
++        // after CdReadSync and retries forever when it sees only StatMotor.
++        // Do this only AFTER all requested sector data has been copied.
++        _status = (byte)(StatMotor | StatRead);
++        _com = ReadN;
++        Array.Clear(_lastResult);
++        _lastResult[0] = _status;
+         _lastIntr = Complete;
+         c.V0 = 1;
+         FireRead(c, m);
+@@ -271,7 +279,7 @@
+         _status = StatMotor;
+         if (!_cddaAutoPause) return;
+ 
+-        _lastIntr = DataEnd;
++        // Data events belong to CdReady, not the command completion returned by CdSync.
+         _dataIntr = DataEnd;
+         Log.Sdk($"DataEnd being deliver");
+         if (LibDs.Active)
+@@ -320,7 +328,7 @@
+                 for (var i = 0; i < DataCbBurst && _cbData != 0; i++)
+                 {
+                     if (FrameBudgetSpent()) break;
+-                    _lastIntr = DataReady;
++                    // Do not overwrite the command-completion latch with a data interrupt.
+                     _dataIntr = DataReady;
+                     var lba = CurrentLba;
+                     _int1Lba = lba;
+@@ -586,7 +594,7 @@
+                 var lba = CurrentLba;
+                 _int1Lba = lba;
+                 FifoReload(lba);
+-                _lastIntr = DataReady;
++                // Do not overwrite the command-completion latch with a data interrupt.
+                 _dataIntr = DataReady;
+                 _cdDataPending = false;
+                 c.A0 = DataReady;
+@@ -814,7 +822,7 @@
+ 
+                 _int1Lba = lba;
+                 FifoReload(lba);
+-                _lastIntr = DataReady;
++                // Do not overwrite the command-completion latch with a data interrupt.
+                 _dataIntr = DataReady;
+                 _cdDataPending = false;
+                 served = true;
+--- a/RecompOne.Runtime/sdk/LibGpu.cs
++++ b/RecompOne.Runtime/sdk/LibGpu.cs
+@@ -15,7 +15,9 @@
+         var gpu = Runtime.Gpu;
+         if (gpu == null) return;
+ 
+-        var addr = c.A0 & Runtime.RamWordMask;
++        uint addr;
++        if (m is PSMemory mapped) { if(!mapped.TryGpuWordAddress(c.A0,out addr))return; }
++        else addr=c.A0&Runtime.RamWordMask;
+         var custom = GpuPrims.Any && GpuPrims.OtLength > 0;
+         var otBase = GpuPrims.OtBase & Runtime.RamWordMask;
+         var otEnd = otBase + (uint)GpuPrims.OtLength * 4u;
+@@ -34,12 +36,13 @@
+                     gpu.WriteGp0Packet(words, addr + 4u);
+                 else
+                     for (var i = 0; i < count; i++)
+-                        gpu.WriteGp0(m.ReadU32(addr + 4u + (uint)i * 4u));
++                        gpu.WriteGp0(m.ReadU32(addr + 4u + (uint)i * 4u), addr + 4u + (uint)i * 4u);
+             }
+ 
+             var next = header & 0xFFFFFFu;
+-            if (next == 0xFFFFFFu || (next & 0x800000u) != 0) break;
+-            addr = next & Runtime.RamWordMask;
++            if(m is PSMemory mappedNext)
++            {if(!mappedNext.TryGpuWordAddress(next,out addr))break;}
++            else {if(next==0xFFFFFFu || (next&0x800000u)!=0)break;addr=next&Runtime.RamWordMask;}
+         }
+ 
+         if (custom) GpuPrims.Clear();

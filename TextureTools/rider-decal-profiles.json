@@ -1,0 +1,34 @@
+{
+  "0000ED7E": {
+    "source": "ISLAND1/ISLAND1/0035-0000ED2A.png",
+    "crop": [
+      39,
+      1,
+      90,
+      51
+    ],
+    "target": [
+      93.6,
+      169.7,
+      17.2,
+      15.5
+    ],
+    "kind": "axiom"
+  },
+  "0000ED7F": {
+    "source": "ISLAND1/ISLAND1/0036-00005B22.png",
+    "crop": [
+      20,
+      0,
+      109,
+      64
+    ],
+    "target": [
+      90.0,
+      168.0,
+      21.0,
+      18.0
+    ],
+    "kind": "mountain-dew"
+  }
+}

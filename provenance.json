@@ -1,0 +1,67 @@
+{
+  "project": "Jet Moto / RecompOne",
+  "build": "11",
+  "status": "native geometry lighting and native water shading, active on normal launch; cumulative source release",
+  "basedOn": "delivered Build10 with preview removed and original Build09 presentation restored",
+  "upstreamCommit": "d81dec8c9622fdcd0865d73588a3baa8d3c3a605",
+  "sdk": "10.0.401",
+  "version": "0.11.0",
+  "originalBootSha256": "f1ad5aa4a092c9fc2a7f2d6795951a60a4419d02a0a3d0ea2a200fabc7a0ce48",
+  "defaultDeploymentDirectory": "D:\\Programming\\GitHub\\Jet-Moto-Recomp\\Jet Moto",
+  "previewRemoved": true,
+  "enabledByDefault": true,
+  "cumulativeOverlayFiles": 23,
+  "hooks": 32,
+  "originalGeneratedInstructions": "unchanged after removing explicit verified integration hooks",
+  "texturePNGs": 1406,
+  "textureAndEffectFiles": "all unchanged from Build10/Build09",
+  "lightingTrackBanks": 10,
+  "gameplay": {
+    "final-joyride": {
+      "exit_code": 3,
+      "duration_seconds": 303.34,
+      "smoke_deadline": 300,
+      "CUE_argument": false,
+      "audio": "null; not listened to",
+      "worldLighting": "lighting[epoch=2939,camera=0,calibrated=2192,matched=64279,mismatch=0,faces=552418,attempt=1969031,mesh=552418,poly=552418,badR=0,water=216284] world[bound=423859,resolved=802330,litTri=418088,waterTri=384057]",
+      "nativeTextureSummary": "native[bound=2218178,resolved=3717790,png=121,draw-fallback=0,effects=2,effect-resolved=1984] material[seen=3759472,linked=3600674,unmapped=158798,packets=2218178,bad=0,deferred=9460,subdivided=9460]",
+      "legacyVramMatcher": "calls=0 untextured=0 rejected-size=0 rejected-gpudirty=0 hashed=0 memo-hits=0 tiles=0"
+    },
+    "final-swamp": {
+      "exit_code": 3,
+      "duration_seconds": 243.38,
+      "smoke_deadline": 240,
+      "CUE_argument": false,
+      "audio": "null; not listened to",
+      "worldLighting": "lighting[epoch=1672,camera=0,calibrated=721,matched=31631,mismatch=0,faces=204365,attempt=1063878,mesh=204365,poly=204365,badR=0,water=0] world[bound=167337,resolved=331336,litTri=331297,waterTri=0]",
+      "nativeTextureSummary": "native[bound=1847292,resolved=3012699,png=132,draw-fallback=0,effects=1,effect-resolved=1060] material[seen=3346490,linked=3312421,unmapped=34069,packets=1847292,bad=0,deferred=3380,subdivided=3380]",
+      "legacyVramMatcher": "calls=0 untextured=0 rejected-size=0 rejected-gpudirty=0 hashed=0 memo-hits=0 tiles=0"
+    }
+  },
+  "tests": {
+    "worldUnit": 107,
+    "GPU_pixel": 1719,
+    "GPU_pixel_new_world": 162,
+    "GPU_static": 13,
+    "GPU_childSuites": 3,
+    "nativeAsset": 149,
+    "perspective": 56,
+    "widescreen": 108,
+    "riderPoseArena": 1771,
+    "launcher": 14,
+    "effectCompatibility": 34,
+    "CD": 11,
+    "runtimePNGs": 1406,
+    "regeneratedCode": "exact byte match after original-disc recompilation and32hooks",
+    "lightingDataReproduction": "every delivered file byte-identical on independent rerun"
+  },
+  "windows": "managed win-x64 publish passed; native Windows execution and PowerShell deployment not tested",
+  "limits": [
+    "Bounded static top-height occlusion, not full multi-layer shadow maps",
+    "No new dynamic actor shadow maps; original rider shadows retained",
+    "Water has analytic normals/highlights and sky approximation, not reflection of rendered scene objects",
+    "Unknown or inconsistent receiver geometry uses original rendering",
+    "No exhaustive all-track, audio or full multiplayer validation"
+  ],
+  "validationReport": "BUILD11-REPORT.md"
+}

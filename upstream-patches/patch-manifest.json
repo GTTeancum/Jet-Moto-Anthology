@@ -1,0 +1,150 @@
+{
+  "commit": "d81dec8c9622fdcd0865d73588a3baa8d3c3a605",
+  "files": [
+    {
+      "path": "RecompOne.Recompiler/CodeGen/FunctionEmmiter.cs",
+      "beforeSha256": "32ab606837de2d07fbd72208449e6d17d96a43dc918de5902c876e0cf638abca",
+      "afterSha256": "09b7ffc187e8af90b073b1c77aee3723d4102c149e0eff44a683fc7ca3004329"
+    },
+    {
+      "path": "RecompOne.Recompiler/CodeGen/InstructionEmitter.cs",
+      "beforeSha256": "4d8990f783a659e12356223b8fe14795d3af55a08658302bd0d7c4e40269d969",
+      "afterSha256": "391d4a7f2a3c378ae10a709dbcc8cfdeaa91b56fb2de058bcb85a05e3bbfe8fe"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Replacements.cs",
+      "beforeSha256": "2f307fb915fff8f5c80c75b081133690ff4c53aaba852a9566b199fbdcca9ea9",
+      "afterSha256": "60f0e379125b87cca65d48d0017a7bb5889a735b8c9bb0df178b0adf6607f4e4"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Native/NativeTextureBindings.cs",
+      "beforeSha256": null,
+      "afterSha256": "fafd57c21148bd1b4f6d49cc33793cd28d1e5982a1bc3feb07febd551af35a8a"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Native/RiderShadowMap.cs",
+      "beforeSha256": null,
+      "afterSha256": "45b4bbbf34ac52b29b98597b2c691635d7c438655029e28d2fa7f094d2072e9c"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Native/WaterDetailData.cs",
+      "beforeSha256": null,
+      "afterSha256": "9356c3ba1ced661a6be2f45575abd0c3cebf30e10acb54d875a7a0f6b3b5266a"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Native/WorldSurface.cs",
+      "beforeSha256": null,
+      "afterSha256": "febe0b4064b4a8d6013b7401516624eac1e4fa3b7323fe8a51c54cdc9d0fa533"
+    },
+    {
+      "path": "RecompOne.Runtime/Diagnostics/ExecutionTrace.cs",
+      "beforeSha256": null,
+      "afterSha256": "f3d540222787bd9cee5b2494482464b5d73acb626ab1f55d9b3b4369e4058ff4"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Gpu.cs",
+      "beforeSha256": "f7c550c22354c9175c252cee1eab4b2deea991f48f55f8685fe9be8421307b9e",
+      "afterSha256": "6e231420bcdc8bde1bc3c3434f737aa2bfc5c8ef54d200428ba1938bf9276085"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/GpuHleForward.cs",
+      "beforeSha256": "0c2434a9c44e62d424c9eafe04d8060c03684c5d8df2c83c77deba7df8eddd3e",
+      "afterSha256": "bbd1124fde302fae9c1aaadfe847e62914300386dfb8caa290639aabe4246614"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/GpuRaster.cs",
+      "beforeSha256": "203d1278ee72abd505100b594b6d43dde672d6dd5fba6c5ff4c10117f4228b6d",
+      "afterSha256": "f2cecb80e9ec086543887970baf3201553fbf29b10fffca2cadb7ec08f2343a9"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs",
+      "beforeSha256": "d0c60fcf492aeca8b0d41ab012cf59ad70477e9715a38f50c4ae3094a8a64f44",
+      "afterSha256": "9bec052d9c117d0c6641504d8998237c7ff87995cc23f2907c02e889ee944673"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs",
+      "beforeSha256": "4c6b2c15a4506e40b2127e1a2404f5e7dba9e5012f9fcd9edbcbffb90601bf49",
+      "afterSha256": "0bed3f9694cddd72952f741f0b576a1e389eb259e25890f9c820f5ee6466e36a"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Hle/HleTypes.cs",
+      "beforeSha256": "a174c464f8537bdc2bc2a1e5ad336dae71f98b6b0b132dc54bac920c390ba6c5",
+      "afterSha256": "950748cf621bca462245ba4668b2d65075d2a51a4e70a3f64ce6feb504f55ecd"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Pgxp/PerspectiveDiagnostics.cs",
+      "beforeSha256": null,
+      "afterSha256": "c959cca681515811dbcdfd498db02bdee627f25490c15c46aea89f9cf8a73bb9"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Pgxp/Pgxp.cs",
+      "beforeSha256": "6ac8f11c5dec18689d69da4873ea171f9957d560c5bb4dc0cf28c78dc3fa70ab",
+      "afterSha256": "fb28f79d1a5086f6eabb8f4dec399fdbeed1ae9adb34a48f5373aa8463440983"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Pgxp/PgxpCpu.cs",
+      "beforeSha256": "3e9f8b514e6873629cb5fb589cc8bd900a1b795d4a3a9ddf1c789c2271ec65a0",
+      "afterSha256": "ff8c23868d9512a3ca264398ee89d8597c3a0f575a3674125988aeaa06bbe0aa"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Pgxp/PgxpMemory.cs",
+      "beforeSha256": "c79a3f0ba4b7f17455a18fe5d0b8db25ff45f16420a630de8906bcfd462ea2a5",
+      "afterSha256": "750fb34453516fd5b03338e439fc96a2d06bae78257b122391ae2ea1cded7d84"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Pgxp/PgxpValue.cs",
+      "beforeSha256": "40747ae229f6ed65cdbc3549b70ed919bf5e1fa6e29d39ec1cdb28413eb87a7b",
+      "afterSha256": "6d67493042f68333922672b075b787f045fc1dbc7faf2ee334977b4ee526c60e"
+    },
+    {
+      "path": "RecompOne.Runtime/Hardware/Controller.cs",
+      "beforeSha256": "5cb8e34d91928805e4f2aecbd03b1f0e3e00914bf00a4fd7a9a51452ea513951",
+      "afterSha256": "2e38c020addf7284ac13d264c8c27f69d6535189ee41a8ff27fcb904a9aa35d6"
+    },
+    {
+      "path": "RecompOne.Runtime/Hardware/Gte.cs",
+      "beforeSha256": "f1038c818c4df03eaad993909c04d78e800b0489d348435cbf342212eab6afc7",
+      "afterSha256": "31802d979ace458f926b2f3771bf535eaff87ccbd84e284f8bd5d5a032f66ba5"
+    },
+    {
+      "path": "RecompOne.Runtime/Host/Audio.cs",
+      "beforeSha256": "4badf66f693f25ca6ba57e9d2cec3c2021cb7c63178797d3957b9c6291c0c9a3",
+      "afterSha256": "d54c0444f5b89c79ad99c45477d23306dc54d5bce4df7cda6a1856ff6b84702a"
+    },
+    {
+      "path": "RecompOne.Runtime/Host/InputManager.cs",
+      "beforeSha256": "1e6a0a36074ef39b1d6cb57d1d9a38e34992ca672d7454244a70bf57308aec62",
+      "afterSha256": "e04be6c6a9a33e35ea6a2e7aecedf5e48849f144d18c31235e5901fbc4c23c70"
+    },
+    {
+      "path": "RecompOne.Runtime/Host/Window/HostWindow.cs",
+      "beforeSha256": "c5b099fd04c150c63782df6a3bdb7eaeb02ce4a9b7b55d4156d404100b8b2b64",
+      "afterSha256": "bff564d3197b45f179fd4f6d94c847bf50aac10307d78df4fc8eda6bd524bb15"
+    },
+    {
+      "path": "RecompOne.Runtime/Memory/Dma.cs",
+      "beforeSha256": "e163b3512f333e6b149a71f72f35401920f5692cc4175443dc4488f0b6d545ea",
+      "afterSha256": "c7eb0ccd69892c229cddc7dd3d608545406e15007aac25dd40d87d3191a82cb5"
+    },
+    {
+      "path": "RecompOne.Runtime/Memory/MemoryMap.cs",
+      "beforeSha256": "1f88cd72fe9e0d911dee68cac743ed01d0beaf08050581320a81320eeccb2af3",
+      "afterSha256": "5f44c5b960194ac6c7e535cb351c2492c29bbc70001cd6c551a906fe829508c7"
+    },
+    {
+      "path": "RecompOne.Runtime/Memory/PSMemory.cs",
+      "beforeSha256": "9cbad86050a2b92c23a6467d3cd9274427f0a05bd3319c13a5f2873e0beef8b5",
+      "afterSha256": "75f212df96cedd8c156d55c1b887ea36b4c9a6fe30ae15c3d1a2e6f5407af60f"
+    },
+    {
+      "path": "RecompOne.Runtime/sdk/LibCd.cs",
+      "beforeSha256": "6ebc103edcc8ee09d1a2c3cc8cbb074c6afc1bec6d02277e99efd90459b149f4",
+      "afterSha256": "cc57ea6b8f83129e3eb172c113ebe8c23f06795c04a1055c5eb749bfc9f0efea"
+    },
+    {
+      "path": "RecompOne.Runtime/sdk/LibGpu.cs",
+      "beforeSha256": "123b7a58f848b1ebb61213b0671a3fe4ab8d5eb9c109974049898e8d9b2ad3e5",
+      "afterSha256": "dd731dd4792878003159ca8c50286c06b6a30cd0eb0b639851bbfb1d79dee9ed"
+    }
+  ]
+}
