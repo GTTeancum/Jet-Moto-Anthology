@@ -1,14 +1,65 @@
 # Build 12 Validation
 
-Status: VISUAL BASELINE APPROVED BY USER; VALIDATION IN PROGRESS, NOT YET PACKAGED.
+Status: USER-APPROVED PLAYABLE CHECKPOINT; FINAL RELEASE GATES STILL OPEN. NOT PACKAGED.
+On 2026-09-24, after testing the current isolated Build 12 with the world-span
+clipping repair, the user said "I think this is great" and requested a commit
+and push. Preserve this playable baseline. Earlier rejection notes below are
+historical context, not the user's latest assessment. Swamp detail and broader
+validation remain unfinished; spray is explicitly deferred.
+Current remaining work: [To-do](TODO.md).
+Latest clipping repair, matched native coverage evidence, and regression results:
+[Geometry coverage checkpoint](GEOMETRY-COVERAGE-CHECKPOINT.md).
+Latest wider ocean and swamp checks:
+[Water transition and swamp checkpoint](WATER-TRANSITION-SWAMP-CHECKPOINT.md).
+Latest source-geometry diagnostic and dry-sand streak evidence:
+[Shoreline order checkpoint](SHORELINE-ORDER-CHECKPOINT.md).
+Latest water-only correction and remaining native flicker:
+[Water horizon checkpoint](WATER-HORIZON-CHECKPOINT.md).
+User priority update: spray work is deferred. Do not spend further iterations
+on spray quality until resumed; current focus is water stability/appearance,
+original hues, and lighting. Existing spray limitations remain documented,
+not silently classified as complete.
+Spray projection evidence and native atlas-state isolation:
+[Spray projection checkpoint](SPRAY-PROJECTION-CHECKPOINT.md).
+Complementary open-water failure and emission diagnostics:
+[Wet transition checkpoint](WET-TRANSITION-CHECKPOINT.md).
+Road spray rejection and replay-clock correction:
+[Road emission checkpoint](ROAD-EMISSION-CHECKPOINT.md).
+Latest distance-selection investigation (opt-in, native coverage failed):
+[Water LOD checkpoint](WATER-LOD-CHECKPOINT.md).
+Latest composition fix and six-frame native failure review:
+[Additive water checkpoint](ADDITIVE-WATER-CHECKPOINT.md).
+The a50bab8 wake is a speckled strip, not an accepted replacement. The user
+also reports unstable water, missing opponent wakes and missing land effects.
+Prior pixel tests and isolated captures did not cover those requirements.
+The muted frame-material-audit replay reproduced the dense purple water and
+flat speckled wake. Frames 004150, 004157 and 004162 were inspected in order;
+these are failure evidence, not release proofs. Rider/material logging is
+being extended before the replacement is accepted on any surface.
+
 The user approved `fine-airborne-spray-verified-runtime/frame-003554.png` with
-"PERFECT. That's great. That's what I'm looking for". Preserve this appearance.
+"PERFECT. That's great. That's what I'm looking for". This is a historical
+single-image reference, not approval of the current implementation.
 SHA256: `43AD4B79175BA7A99B3030E557F21D191B6051B1056D7D5E0E1D4273A0963654`.
 Remaining gates: swamp material/fake-reflection checks, temporal stability,
 and final package verification. The historical
 results below are superseded by REOPENED-DEFECTS.md where noted.
 
 ## Latest Validation Checkpoint
+
+- See DISTANCE-AND-SPRAY-CHECKPOINT.md for the latest filtering fix, native
+  captures inspected in order, spray projection diagnosis and current tests.
+  Distance detail and spray visibility improved; wake quality still fails.
+  The replacement remains experimental and is not deployed or packaged.
+- Reference-driven replacement investigation: see WAKE-REFERENCE.md. The
+  Wave Race field/spray implementation was inspected at a pinned revision.
+  Latest experiments remain unaccepted; native runs did not exercise visible
+  open-water wakes. Stronger medium-distance water detail and stable material
+  coverage are required, not just occasional close-up improvements.
+- Additional user-requested work: upscale UI text and yellow/red buoys; fix
+  artifacting around buoy edges. Verify menu/HUD text and both buoy colors in
+  native in-game captures, preserving 4:3 menus and widescreen gameplay.
+- Water/wake acceptance remains open; the above UI/buoy work is not yet done.
 
 - Surface wakes now use moving, overlapping foam coverage instead of repeating
   fan artwork. See WAKE-CONTINUITY.md for implementation, rejected iterations,

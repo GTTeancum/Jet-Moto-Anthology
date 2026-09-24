@@ -137,6 +137,29 @@ static class EffectPixels
         Check(Enumerable.Range(0,4096).All(i=>(lateFoam[i]&31)<=(halfFoam[i]&31) && (halfFoam[i]&31)<=(fullFoam[i]&31))
             && lateFoam.Sum(p=>p&31)<halfFoam.Sum(p=>p&31) && halfFoam.Sum(p=>p&31)<fullFoam.Sum(p=>p&31),
             "native particle lifetime gives a monotonic foam opacity fade");
+        if(Environment.GetEnvironmentVariable("JETMOTO_WORLD_WAKE")=="1") {
+            var world=new WorldScene("world-spray-pixels",new byte[16],2,new(-32,-32),new(64,64),
+                new(-16,80),System.Numerics.Vector3.UnitZ,flatWaterLevel:0,waterSprayMaterial:waterSpray);
+            ushort[] WorldSpray(float time,float x,bool atlasWindow=false) {
+                // Follow the moving emitter, as gameplay does. A fixed camera
+                // after a sudden stop lets momentum-carrying spray leave view.
+                var camera=new WorldCamera(world,new WorldBasis(1,0,0,0,-1,0,0,0,-1),new(-x,0,16),time);
+                var bounds=new RiderBounds();bounds.Include(new(x,0,4));camera.Riders[217]=bounds;
+                var flags=new PrimFlags {WorldSurface=new WorldSurface(camera,new(x,0,4),System.Numerics.Vector3.UnitZ,3,32,32,32,riderId:217)};
+                Clear();
+                if(atlasWindow)core.SetDrawEnv(new HleDrawEnv{ClipX1=63,ClipY1=63,TwMaskX=31,TwMaskY=31,TwOffX=16,TwOffY=16});
+                core.DrawTri(V(2,2),V(3,2),V(2,3),flags);return Finish();
+            }
+            var emptyWorld=WorldSpray(0,-6);WorldSpray(.1f,6);
+            var worldFan=WorldSpray(.3f,30);
+            int changed=Enumerable.Range(8,48).Sum(y=>Enumerable.Range(8,48).Count(x=>worldFan[y*64+x]!=emptyWorld[y*64+x]));
+            Check(changed>5,$"world-space rider spray produces actual coverage pixels without any native wake packet ({changed} pixels)");
+            var movingFan=WorldSpray(.35f,36);
+            Check(!worldFan.AsSpan().SequenceEqual(movingFan),"world-space spray pixel footprint moves as ballistic particles age");
+            Check(WorldSpray(2,36).AsSpan().SequenceEqual(emptyWorld),"expired world-space spray leaves no coverage pixels");
+            WorldSpray(0,-6,true);WorldSpray(.1f,6,true);
+            Check(WorldSpray(.3f,30,true).AsSpan().SequenceEqual(worldFan),"generated spray is independent of inherited native atlas window");
+        }
         NativeTextureBindings.OriginalAssetsOnly=false;
     }
 }

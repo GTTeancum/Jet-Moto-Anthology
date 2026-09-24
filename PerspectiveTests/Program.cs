@@ -153,6 +153,34 @@ Test("GPU packet address propagation and primitive safety",()=> {
     gpu.WriteGp0Packet(q,a);Check(recorder.Triangles[^1].Concat(recorder.Triangles[^2]).All(v=>!v.HasGteZ),"a quad with one missing corner falls back consistently across both triangles");
     Seed(t,a);gpu.WriteGp0Packet(t,a);Check(recorder.Triangles.Last()[0].X==8.25f&&recorder.Triangles.Last()[0].Y==8.375f,"precise subpixel XY reaches the rendering backend");
 });
+Test("verified world span clipping",()=> {
+    const uint address=0x80018000;
+    var gpu=new Gpu();
+    var scene=new RecompOne.Runtime.Assets.Native.WorldScene("coverage-test",new byte[16],2,
+        System.Numerics.Vector2.Zero,System.Numerics.Vector2.One,System.Numerics.Vector2.One,System.Numerics.Vector3.UnitZ);
+    var camera=new RecompOne.Runtime.Assets.Native.WorldCamera(scene,RecompOne.Runtime.Assets.Native.WorldBasis.Identity,
+        new System.Numerics.Vector3(0,0,10),0);
+    RecompOne.Runtime.Assets.Native.WorldSurfaceBindings.Enabled=true;
+    RecompOne.Runtime.Assets.Native.WorldSurfaceBindings.Init(2*1024*1024);
+    foreach(var corners in new[]{new[]{Pack(42,204),Pack(301,733),Pack(283,250)},new[]{Pack(-700,150),Pack(700,200),Pack(0,250)}})
+    {
+        uint[] packet=[0x24808080,corners[0],0,corners[1],0x011A0020,corners[2],0x2000];
+        foreach(int kind in new[]{0,1,2,3,4})
+        {
+            for(int i=0;i<packet.Length;i++)mem.WriteU32(address+(uint)i*4,packet[i]);
+            RecompOne.Runtime.Assets.Native.WorldSurfaceBindings.Init(2*1024*1024);
+            if(kind!=0)RecompOne.Runtime.Assets.Native.WorldSurfaceBindings.Bind(address,packet.Length,
+                new(camera,System.Numerics.Vector3.Zero,System.Numerics.Vector3.UnitZ,kind,160,120,160));
+            int before=recorder.Triangles.Count;
+            gpu.WriteGp0Packet(packet,address);
+            bool expected=kind is 1 or 2 or 4;
+            Check(recorder.Triangles.Count==before+(expected?1:0),$"oversized primitive kind {kind} retains its intended clipping policy");
+            if(expected)Check(recorder.Triangles[^1].Select(v=>(v.X,v.Y)).SequenceEqual(corners.Select(p=>((float)(short)p,(float)(short)(p>>16)))),
+                "world clipping preserves original projected geometry without displacement");
+        }
+    }
+    RecompOne.Runtime.Assets.Native.WorldSurfaceBindings.Init(2*1024*1024);
+});
 Test("reset safety",()=> {
     var v=Vertex(Pack(20,30));Put(0x80001000,in v);_ = new PSMemory();
     Check(!HasDepth(0x80001000,v.Value)&&PgxpGte.Sxy2.Flags==0,"new memory/game session clears precision shadow and GTE FIFO");

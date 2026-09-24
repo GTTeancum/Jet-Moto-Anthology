@@ -16,7 +16,8 @@ public static class WorldLighting
     public sealed record Instance(int Shift,WorldBasis Rotation,Vector3 Translation);
     public sealed record Polygon(int Kind,Vector3 Normal,Vector3 Point);
     public sealed class Mesh{public int Offset;public Instance[] Instances=[];public Dictionary<int,Polygon> Polygons=[];}
-    public sealed class Scene{public WorldScene Gpu=null!;public Dictionary<int,Mesh> Meshes=[];public Dictionary<int,Mesh?> PolygonOwners=[];}
+    public sealed class Scene{public WorldScene Gpu=null!;public Dictionary<int,Mesh> Meshes=[];public Dictionary<int,Mesh?> PolygonOwners=[];public HashSet<int> WaterLods=[];}
+    public static bool IsWaterLod(NativeTextures.Model model,int offset)=>Scenes.TryGetValue(model.Name,out var scene)&&scene.WaterLods.Contains(offset);
     private static readonly Dictionary<string,Scene> Scenes=[];
     private static readonly Dictionary<uint,WorldSurface> Deferred=[];
     private static WorldCamera? _camera;
@@ -25,6 +26,18 @@ public static class WorldLighting
     private static Instance? _lastInstance;private static Scene? _lastScene;
     private static long _attempts,_knownMesh,_knownPoly,_badRotation;private static int _dump;private static long _waterFaces;
     private static long _lastVblank;private static double _clock;
+    private static readonly long AuditStart=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_START"),out long auditStart)?auditStart:long.MaxValue;
+    private static readonly long AuditEnd=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_END"),out long auditEnd)?auditEnd:-1;
+    private static readonly Dictionary<string,int> WaterBindings=[];
+    private static long _waterAuditVblank;
+    private static void AuditWater(int kind,string result)
+    {
+        long frame=Interrupts.VBlankCount;
+        if(kind is not (2 or 4)||frame<AuditStart||frame>AuditEnd)return;
+        _waterAuditVblank=frame;
+        string key=$"kind{kind}:{result}";
+        WaterBindings[key]=WaterBindings.GetValueOrDefault(key)+1;
+    }
     public static string Summary=>$"lighting[epoch={_epoch},camera={_cameraSlot},calibrated={_calibrated},matched={_matched},mismatch={_rejected},faces={_faces},attempt={_attempts},mesh={_knownMesh},poly={_knownPoly},badR={_badRotation},water={_waterFaces}] {WorldSurfaceBindings.Summary}";
     private static Vector3 V(JsonElement a)=>new(a[0].GetSingle(),a[1].GetSingle(),a[2].GetSingle());
     private static WorldBasis R(JsonElement a,int i)=>new(a[i].GetSingle(),a[i+1].GetSingle(),a[i+2].GetSingle(),a[i+3].GetSingle(),a[i+4].GetSingle(),a[i+5].GetSingle(),a[i+6].GetSingle(),a[i+7].GetSingle(),a[i+8].GetSingle());
@@ -53,7 +66,9 @@ public static class WorldLighting
                 throw new InvalidDataException("Height dimensions/format");
             var height=ImageResult.FromMemory(pixels,ColorComponents.RedGreenBlueAlpha);if(height.Width!=size||height.Height!=size)throw new InvalidDataException("Decoded height dimensions");
             var origin=d.GetProperty("origin");var extent=d.GetProperty("size");var range=d.GetProperty("heightRange");
-            var scene=new Scene{Gpu=new WorldScene(name,height.Data,size,new(origin[0].GetSingle(),origin[1].GetSingle()),new(extent[0].GetSingle(),extent[1].GetSingle()),new(range[0].GetSingle(),range[1].GetSingle()),V(d.GetProperty("lightDirection")),WaterTint(name))};
+            var scene=new Scene();
+            HashSet<float> flatWaterLevels=[];
+            HashSet<float> backdropLevels=[];
             foreach(var e in d.GetProperty("meshes").EnumerateArray()){
                 var mesh=new Mesh{Offset=e.GetProperty("offset").GetInt32()};
                 if(mesh.Offset<0||mesh.Offset>=model.Original.Length-24)throw new InvalidDataException("Mesh address");
@@ -67,16 +82,43 @@ public static class WorldLighting
                     mesh.Polygons[off]=new Polygon(kind,new(q[2].GetSingle(),q[3].GetSingle(),q[4].GetSingle()),new(S(0),S(1),S(2)));
                 }
                 scene.Meshes[mesh.Offset]=mesh;
+                foreach(var polygon in mesh.Polygons.Values.Where(p=>p.Kind is 2 or 4))
+                foreach(var instance in mesh.Instances)
+                {
+                    var n=instance.Rotation.Apply(polygon.Normal);
+                    if(MathF.Abs(n.X)+MathF.Abs(n.Y)>0.00001f)continue;
+                    var point=instance.Rotation.Apply(polygon.Point/MathF.Pow(2,instance.Shift))+instance.Translation;
+                    if(float.IsFinite(point.Z))(polygon.Kind==2 ? flatWaterLevels : backdropLevels).Add(MathF.Round(point.Z,4));
+                }
                 foreach(int polygon in mesh.Polygons.Keys) {
                     if(scene.PolygonOwners.TryGetValue(polygon,out var previous)&&previous!=mesh)scene.PolygonOwners[polygon]=null;
                     else scene.PolygonOwners[polygon]=mesh;
                 }
             }
+            // Only a single, unambiguous level from native water receivers may
+            // anchor the ocean backdrop. Never guess a plane for multilevel water.
+            if(NativeTextures.ExtendedWaterLod){
+                var waterMeshes=scene.Meshes.Values.Where(m=>m.Polygons.Count>0 && m.Polygons.Values.All(p=>p.Kind==2)
+                    && m.Polygons.Count==System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(model.Original.AsSpan(m.Offset+16,4))).Select(m=>m.Offset).ToHashSet();
+                scene.WaterLods=WaterLodPolicy.FindSelectors(model.Original,waterMeshes);
+                Console.WriteLine($"[JetMoto:water-lod] {name}: {scene.WaterLods.Count} source-verified water-only distance selectors.");
+            }
+            float? waterLevel=flatWaterLevels.Count==1 ? flatWaterLevels.Single() : null;
+            float? backdropLevel=backdropLevels.Count==1 ? backdropLevels.Single() : null;
+            var spray=model.Images.FirstOrDefault(i=>i.Asset.WaterSpray);
+            // Generated particles use an explicit source asset, not a VRAM lookup.
+            var sprayMaterial=spray==null ? null : new NativeTextureMaterial(spray.Asset,0,0,spray.Width,spray.Height,0x100,0);
+            scene.Gpu=new WorldScene(name,height.Data,size,new(origin[0].GetSingle(),origin[1].GetSingle()),new(extent[0].GetSingle(),extent[1].GetSingle()),new(range[0].GetSingle(),range[1].GetSingle()),V(d.GetProperty("lightDirection")),WaterTint(name),waterLevel,backdropLevel,sprayMaterial);
+            Console.WriteLine($"[JetMoto:water-plane] {name}: native flat levels={string.Join(",",flatWaterLevels.Order())}; native backdrop levels={string.Join(",",backdropLevels.Order())}; sampling level={scene.Gpu.BackdropWaterLevel?.ToString() ?? "unresolved"}");
             Scenes[model.Name]=scene;Console.WriteLine($"[JetMoto:lighting] Original scene {name}: {scene.Meshes.Count} mesh receivers, 1024x1024 static geometry height field.");
         }catch(Exception e) when(e is not OutOfMemoryException){Console.WriteLine($"[JetMoto:lighting] Original-render fallback for {model.Name}: {e.Message}");}
     }
     public static void BeginCamera(uint slot)
     {
+        if(WaterBindings.Count>0){
+            Console.WriteLine("[JetMoto:water-bindings] "+JsonSerializer.Serialize(new{vblank=_waterAuditVblank,view=_cameraSlot,counts=WaterBindings}));
+            WaterBindings.Clear();
+        }
         _epoch++;_cameraSlot=(int)slot;_camera=null;_lastInstance=null;_lastScene=null;Deferred.Clear();
         long v=Interrupts.VBlankCount;if(Widescreen.Active&&slot==0&&_lastVblank>0)_clock+=Math.Clamp(v-_lastVblank,0,30)/60.0;_lastVblank=v;
     }
@@ -99,7 +141,7 @@ public static class WorldLighting
                 var ins=mesh.Instances[0];var vr=gr*ins.Rotation.Transpose();var vt=gr.Apply(relative)/MathF.Pow(2,ins.Shift)-vr.Apply(ins.Translation);
                 if(!vr.IsCameraTransform||!float.IsFinite(vt.X+vt.Y+vt.Z))continue;
                 // All material scroll rates complete whole texture repeats at 1000s.
-                _camera=new WorldCamera(scene.Gpu,vr,vt,(float)(_clock%1000));_calibrated++;
+                _camera=new WorldCamera(scene.Gpu,vr,vt,(float)(_clock%1000),_cameraSlot);_calibrated++;
                 if(_calibrated<8)Console.WriteLine($"[JetMoto:lighting:prepass] {scene.Gpu.Name} mesh={mo:X} slot={slot} eye={_camera.Eye}");
                 return;
             }
@@ -110,18 +152,18 @@ public static class WorldLighting
         scene.StartsWith("SWAMP",StringComparison.Ordinal)?new(20/255f,23/255f,5/255f):Vector3.Zero;
     private static WorldSurface? ResolveFillSurface(int x,int y,int w,int h,ushort color)
     {
-        if(_camera==null||!_camera.Scene.Name.StartsWith("ISLAND",StringComparison.Ordinal)||w<300||h<200||y!=0)return null;
+        if(_camera==null||!_camera.Scene.Name.StartsWith("ISLAND",StringComparison.Ordinal)||_camera.Scene.BackdropWaterLevel is not {} waterLevel||w<300||h<200||y!=0)return null;
         float cx=(int)Gte.ReadControl(24)/65536f,cy=(int)Gte.ReadControl(25)/65536f,proj=(ushort)Gte.ReadControl(26);
         if(!(proj>0)){cx=x+w*.5f;cy=y+h*.5f;proj=320;}
         _faces++;_waterFaces++;
-        return new WorldSurface(_camera,new Vector3(_camera.Eye.X,_camera.Eye.Y,-120f),Vector3.UnitZ,4,cx,cy,proj,screenFill:true);
+        return new WorldSurface(_camera,new Vector3(_camera.Eye.X,_camera.Eye.Y,waterLevel),Vector3.UnitZ,4,cx,cy,proj,screenFill:true);
     }
     private static WorldRectSurface? ResolveRectSurface(int x,int y,int w,int h)
     {
-        if(_camera==null||!_camera.Scene.Name.StartsWith("ISLAND",StringComparison.Ordinal)||w<300||h<200||y!=0)return null;
+        if(_camera==null||!_camera.Scene.Name.StartsWith("ISLAND",StringComparison.Ordinal)||_camera.Scene.BackdropWaterLevel is not {} waterLevel||w<300||h<200||y!=0)return null;
         float cx=(int)Gte.ReadControl(24)/65536f,cy=(int)Gte.ReadControl(25)/65536f,proj=(ushort)Gte.ReadControl(26);
         if(!(proj>0)){cx=x+w*.5f;cy=y+h*.5f;proj=320;}
-        float planeZ=-120f,delta=planeZ-_camera.Eye.Z;
+        float planeZ=waterLevel,delta=planeZ-_camera.Eye.Z;
         var inv=_camera.Rotation.Inverse;
         bool HitsWater(float sy)
         {
@@ -162,7 +204,7 @@ public static class WorldLighting
         if(mesh==null)return null;
         _knownMesh++;if(!mesh.Polygons.TryGetValue(offset,out var polygon))return null;_knownPoly++;
         var gr=GteRotation();Vector3 gt=new((int)Gte.ReadControl(5),(int)Gte.ReadControl(6),(int)Gte.ReadControl(7));
-        if(!gr.IsCameraTransform){_badRotation++;if(_dump++<5)Console.WriteLine($"[JetMoto:lighting:badR] mesh={mo:X} r={gr.A},{gr.B},{gr.C}/{gr.D},{gr.E},{gr.F}/{gr.G},{gr.H},{gr.I} T={gt}");return null;}
+        if(!gr.IsCameraTransform){AuditWater(polygon.Kind,"invalid-transform");_badRotation++;if(_dump++<5)Console.WriteLine($"[JetMoto:lighting:badR] mesh={mo:X} r={gr.A},{gr.B},{gr.C}/{gr.D},{gr.E},{gr.F}/{gr.G},{gr.H},{gr.I} T={gt}");return null;}
 
         Instance? instance=null;
         if(_lastMesh==(uint)mesh.Offset&&ReferenceEquals(_lastScene,scene)&&_lastR.Distance(gr)<.00001f&&_lastT==gt)instance=_lastInstance;
@@ -170,10 +212,10 @@ public static class WorldLighting
             if(_camera==null||!ReferenceEquals(_camera.Scene,scene.Gpu)){
                 // Only an unambiguous original static instance may establish the
                 // camera. Shared/animated source addresses cannot guess an origin.
-                if(mesh.Instances.Length!=1)return null;
+                if(mesh.Instances.Length!=1){AuditWater(polygon.Kind,"ambiguous-camera");return null;}
                 instance=mesh.Instances[0];var vr=gr*instance.Rotation.Transpose();var vt=gt/MathF.Pow(2,instance.Shift)-vr.Apply(instance.Translation);
-                if(!vr.IsCameraTransform||!float.IsFinite(vt.X)||!float.IsFinite(vt.Y)||!float.IsFinite(vt.Z))return null;
-                _camera=new WorldCamera(scene.Gpu,vr,vt,(float)(_clock%1000));_calibrated++;
+                if(!vr.IsCameraTransform||!float.IsFinite(vt.X)||!float.IsFinite(vt.Y)||!float.IsFinite(vt.Z)){AuditWater(polygon.Kind,"invalid-camera");return null;}
+                _camera=new WorldCamera(scene.Gpu,vr,vt,(float)(_clock%1000),_cameraSlot);_calibrated++;
                 if(_calibrated<8)Console.WriteLine($"[JetMoto:lighting:calibrate] {scene.Gpu.Name} mesh={mo:X} shift={instance.Shift} eye={_camera.Eye}");
             }else{
                 float best=float.MaxValue;
@@ -182,11 +224,20 @@ public static class WorldLighting
             }
             _lastMesh=(uint)mesh.Offset;_lastScene=scene;_lastR=gr;_lastT=gt;_lastInstance=instance;
         }
-        if(instance==null||_camera==null)return null;
+        if(instance==null||_camera==null){AuditWater(polygon.Kind,"unmatched-instance");return null;}
         var point=instance.Rotation.Apply(polygon.Point/MathF.Pow(2,instance.Shift))+instance.Translation;
-        var normal=instance.Rotation.Apply(polygon.Normal);if(!float.IsFinite(normal.X)||normal.LengthSquared()<.5f)return null;
+        var normal=instance.Rotation.Apply(polygon.Normal);if(!float.IsFinite(normal.X)||normal.LengthSquared()<.5f){AuditWater(polygon.Kind,"invalid-normal");return null;}
         if(Math.Abs(normal.Z)>.85f&&normal.Z<0)normal=-normal;
+        if(polygon.Kind is 2 or 4 && _camera.Scene.Name.StartsWith("ISLAND",StringComparison.Ordinal)
+            && _camera.Scene.FlatWaterLevel is {} oceanLevel)
+        {
+            // Ocean artwork includes seabed facets six units below the surface
+            // and raised crest strips. Keep their raster geometry/UVs, but sample
+            // surface ripples and wakes on the verified common water plane.
+            point=new Vector3(point.X,point.Y,oceanLevel);normal=Vector3.UnitZ;
+        }
         float x=(int)Gte.ReadControl(24)/65536f,y=(int)Gte.ReadControl(25)/65536f,h=(ushort)Gte.ReadControl(26);
+        AuditWater(polygon.Kind,"bound");
         _faces++;if(polygon.Kind is 2 or 4)_waterFaces++;return new WorldSurface(_camera,point,normal,polygon.Kind,x,y,h);
     }
     public static void Defer(uint header,WorldSurface? surface){if(surface!=null)Deferred[header&0x1fffffff]=surface;}

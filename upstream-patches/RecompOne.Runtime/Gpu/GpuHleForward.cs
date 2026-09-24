@@ -7,6 +7,9 @@ public sealed partial class Gpu
     private static bool HleOn => GpuHle.Active && GpuHle.Backend is { Ready: true };
     private static readonly bool AuditBackground = Environment.GetEnvironmentVariable("JETMOTO_AUDIT_UNLIT") == "1";
     private static readonly HashSet<string> BackgroundRecords = [];
+    private static readonly long SpanAuditStart=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_START"),out var spanStart)?spanStart:long.MaxValue;
+    private static readonly long SpanAuditEnd=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_END"),out var spanEnd)?spanEnd:-1;
+    private static int _spanAuditCount;
     private void AuditDraw(string description)
     {
         if (!AuditBackground || Interrupts.VBlankCount is <4700 or >4706) return;
@@ -64,13 +67,32 @@ public sealed partial class Gpu
     {
         var spanX = Math.Max(a.X, Math.Max(b.X, c.X)) - Math.Min(a.X, Math.Min(b.X, c.X));
         var spanY = Math.Max(a.Y, Math.Max(b.Y, c.Y)) - Math.Min(a.Y, Math.Min(b.Y, c.Y));
-        if (spanX > 1023 || spanY > 511) return;
+        var primitive=PrimOf(tex,semi,raw,clut,gouraud);
+        // The host rasterizer clips large, source-verified world triangles.
+        // Applying the PS1 span rejection here punches camera-dependent holes
+        // in nearby terrain/water. Keep guest limits for unverified primitives.
+        bool worldClip=primitive.WorldSurface is {Kind:1 or 2 or 4};
+        if ((spanX > 1023 || spanY > 511) && !worldClip)
+        {
+            if(Interrupts.VBlankCount>=SpanAuditStart&&Interrupts.VBlankCount<=SpanAuditEnd&&_spanAuditCount++<2000)
+            {
+                var flags=primitive;
+                Console.WriteLine("[JetMoto:span-reject] "+System.Text.Json.JsonSerializer.Serialize(new {
+                    vblank=Interrupts.VBlankCount,kind=flags.WorldSurface?.Kind,material=flags.NativeTexture?.Asset.Key,
+                    offset=new[]{_drawOffsetX,_drawOffsetY},span=new[]{spanX,spanY},invalidW,
+                    vertices=new[]{new[]{a.Precise?a.Px:a.X,a.Precise?a.Py:a.Y,a.Pw},
+                        new[]{b.Precise?b.Px:b.X,b.Precise?b.Py:b.Y,b.Pw},
+                        new[]{c.Precise?c.Px:c.X,c.Precise?c.Py:c.Y,c.Pw}}
+                }));
+            }
+            return;
+        }
         
         var be = GpuHle.Backend!;
         be.SetDrawEnv(CurEnv());
         if(AuditBackground && spanX*spanY>10000 && Assets.Native.WorldSurfaceBindings.Resolve(_fifoBase)==null)
             AuditDraw($"triangle tex={tex} semi={semi} points={a.X},{a.Y}/{b.X},{b.Y}/{c.X},{c.Y} rgb={a.R},{a.G},{a.B}");
-        be.DrawTri(HV(a, invalidW), HV(b, invalidW), HV(c, invalidW), PrimOf(tex, semi, raw, clut, gouraud));
+        be.DrawTri(HV(a, invalidW), HV(b, invalidW), HV(c, invalidW), primitive);
     }
 
     private void HleRect(int x, int y, int w, int h, int u, int v, int clut, int r, int g, int b, bool tex, bool semi,

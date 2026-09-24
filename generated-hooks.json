@@ -1,5 +1,11 @@
 [
   {
+    "name": "water-only-distance-selection",
+    "position": "after",
+    "anchor": "{ var _s = c.S2; var _t = c.S4; c.S2 = _s + _t; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Add(18, 18, 20, c.S2, _s, _t); }  /* 0x8010ECB0  addu        $s2, $s2, $s4 */",
+    "code": "c.S2 = global::JetMoto.NativeTextures.WaterLodDistance(c.T0,c.S2); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(18);"
+  },
+  {
     "name": "race-scope",
     "position": "after",
     "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8014CA18u);",

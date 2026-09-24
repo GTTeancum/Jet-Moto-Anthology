@@ -22,7 +22,7 @@ public readonly struct WorldBasis(float a,float b,float c,float d,float e,float 
 }
 
 /// <summary>Verified original-track height data, never the screen framebuffer.</summary>
-public sealed class WorldScene(string name,byte[] heightRgba,int size,Vector2 origin,Vector2 extent,Vector2 heightRange,Vector3 sunlight,Vector3? waterTint=null)
+public sealed class WorldScene(string name,byte[] heightRgba,int size,Vector2 origin,Vector2 extent,Vector2 heightRange,Vector3 sunlight,Vector3? waterTint=null,float? flatWaterLevel=null,float? nativeBackdropLevel=null,NativeTextureMaterial? waterSprayMaterial=null)
 {
     public string Name {get;}=name;
     public byte[] HeightRgba {get;}=heightRgba;
@@ -32,24 +32,66 @@ public sealed class WorldScene(string name,byte[] heightRgba,int size,Vector2 or
     public Vector2 HeightRange {get;}=heightRange;
     public Vector3 Sunlight {get;}=Vector3.Normalize(sunlight);
     public Vector3 WaterTint {get;}=waterTint ?? Vector3.Zero;
+    public float? FlatWaterLevel {get;}=flatWaterLevel;
+    public float? BackdropWaterLevel {get;}=flatWaterLevel ?? nativeBackdropLevel;
+    public NativeTextureMaterial? WaterSprayMaterial {get;}=waterSprayMaterial;
+
+    // A conservative dry-ground veto, not positive evidence of water contact.
+    // Check all four surrounding samples to avoid interpolating across holes.
+    public bool AllowsWaterEmission(Vector3 birth)
+    {
+        if (FlatWaterLevel is not {} level || !float.IsFinite(birth.X+birth.Y+birth.Z) ||
+            MapSize<2 || HeightRgba.Length!=(long)MapSize*MapSize*4 || Extent.X<=0 || Extent.Y<=0) return false;
+        Vector2 uv=(new Vector2(birth.X,birth.Y)-Origin)/Extent;
+        if(uv.X<0 || uv.Y<0 || uv.X>1 || uv.Y>1) return false;
+        Vector2 pixel=uv*(MapSize-1);
+        int x=(int)pixel.X,y=(int)pixel.Y;
+        float tolerance=MathF.Max(.05f,MathF.Abs(HeightRange.Y)*2/65535f);
+        for(int dy=0;dy<2;dy++) for(int dx=0;dx<2;dx++)
+        {
+            int i=(Math.Min(y+dy,MapSize-1)*MapSize+Math.Min(x+dx,MapSize-1))*4;
+            if(HeightRgba[i+2]==0) continue;
+            float ground=HeightRange.X+(HeightRgba[i]*256+HeightRgba[i+1])/65535f*HeightRange.Y;
+            if(ground>=level-tolerance) return false;
+        }
+        return true;
+    }
 }
 
 /// <summary>Immutable per-camera snapshot. Separate snapshots prevent split-screen contamination.</summary>
-public sealed class WorldCamera(WorldScene scene,WorldBasis rotation,Vector3 translation,float time)
+public sealed class WorldCamera(WorldScene scene,WorldBasis rotation,Vector3 translation,float time,int viewSlot=0)
 {
     public readonly List<ShadowTriangle> Casters = [];
+    public readonly Dictionary<int, RiderBounds> Riders = [];
     public WorldScene Scene {get;}=scene;
     public WorldBasis Rotation {get;}=rotation;
     public Vector3 Translation {get;}=translation;
     public Vector3 Eye {get;}=rotation.Inverse.Apply(-translation);
     public float Time {get;}=time;
+    public int ViewSlot {get;}=viewSlot;
+}
+
+/// <summary>Bounds of emitted, identity-verified rider geometry in this camera.
+/// These are not contact points or evidence that an effect was visible.</summary>
+public sealed class RiderBounds
+{
+    public Vector3 Min { get; private set; } = new(float.PositiveInfinity);
+    public Vector3 Max { get; private set; } = new(float.NegativeInfinity);
+    public int Samples { get; private set; }
+    public void Include(Vector3 point)
+    {
+        if (!float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(point.Z)) return;
+        Min = Vector3.Min(Min, point);
+        Max = Vector3.Max(Max, point);
+        Samples++;
+    }
 }
 
 public readonly record struct ShadowTriangle(Vector3 A, Vector3 B, Vector3 C);
 public readonly record struct WorldRectSurface(WorldSurface Surface,int Y,int H);
 
 /// <summary>Native source-primitive plane and camera, not a texture-color guess.</summary>
-public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal,int kind,float centerX,float centerY,float projection,bool screenFill=false)
+public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal,int kind,float centerX,float centerY,float projection,bool screenFill=false,int riderId=-1)
 {
     private static readonly bool Diagnose = Environment.GetEnvironmentVariable("JETMOTO_DIAG_SURFACES") == "1";
     private static int _fallbackReports;
@@ -61,6 +103,7 @@ public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal
     public float CenterY {get;}=centerY;
     public float Projection {get;}=projection;
     public bool ScreenFill {get;}=screenFill;
+    public int RiderId {get;}=riderId;
     // Interpolate the plane in homogeneous coordinates, including rays at or
     // above its horizon. Dividing at vertices requires a discontinuous fallback.
     public bool ProjectiveAtPixel(float x,float y,out Vector4 worldQ)

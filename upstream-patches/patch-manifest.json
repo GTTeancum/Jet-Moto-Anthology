@@ -22,9 +22,19 @@
       "afterSha256": "fafd57c21148bd1b4f6d49cc33793cd28d1e5982a1bc3feb07febd551af35a8a"
     },
     {
+      "path": "RecompOne.Runtime/Assets/Native/RiderMotionHistory.cs",
+      "beforeSha256": null,
+      "afterSha256": "1499e6b758074dc371c8334319b1e03fd9b28d82c02f4e44fc6fa9254e1dbcd2"
+    },
+    {
       "path": "RecompOne.Runtime/Assets/Native/RiderShadowMap.cs",
       "beforeSha256": null,
       "afterSha256": "45b4bbbf34ac52b29b98597b2c691635d7c438655029e28d2fa7f094d2072e9c"
+    },
+    {
+      "path": "RecompOne.Runtime/Assets/Native/RiderSpray.cs",
+      "beforeSha256": null,
+      "afterSha256": "ed508b4755b7d6293cad44c6a173dc93717146fd144d76471b1e62d4542597a2"
     },
     {
       "path": "RecompOne.Runtime/Assets/Native/WaterDetailData.cs",
@@ -32,9 +42,14 @@
       "afterSha256": "9356c3ba1ced661a6be2f45575abd0c3cebf30e10acb54d875a7a0f6b3b5266a"
     },
     {
+      "path": "RecompOne.Runtime/Assets/Native/WaterWakeField.cs",
+      "beforeSha256": null,
+      "afterSha256": "58b4b4f4cf761363e36ac86c36731bd5e2638ae6b89bb350387b7b23641b6d8e"
+    },
+    {
       "path": "RecompOne.Runtime/Assets/Native/WorldSurface.cs",
       "beforeSha256": null,
-      "afterSha256": "febe0b4064b4a8d6013b7401516624eac1e4fa3b7323fe8a51c54cdc9d0fa533"
+      "afterSha256": "4d01eaec0a811b4d435a420ba5460828da1c7a222ca13d547ccd8013741ba99f"
     },
     {
       "path": "RecompOne.Runtime/Diagnostics/ExecutionTrace.cs",
@@ -49,7 +64,7 @@
     {
       "path": "RecompOne.Runtime/Gpu/GpuHleForward.cs",
       "beforeSha256": "0c2434a9c44e62d424c9eafe04d8060c03684c5d8df2c83c77deba7df8eddd3e",
-      "afterSha256": "bbd1124fde302fae9c1aaadfe847e62914300386dfb8caa290639aabe4246614"
+      "afterSha256": "cc15b8149bff1e4ca8c23a5e3ddb1993f7a5f812ab84d3d6148e55d423760730"
     },
     {
       "path": "RecompOne.Runtime/Gpu/GpuRaster.cs",
@@ -59,12 +74,12 @@
     {
       "path": "RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs",
       "beforeSha256": "d0c60fcf492aeca8b0d41ab012cf59ad70477e9715a38f50c4ae3094a8a64f44",
-      "afterSha256": "b6fc6b1077a72842c0be2a1deaff60d69f534605fd0494a451a7e60a66ff7314"
+      "afterSha256": "0779274a8ad63a57539cfd81938c29eb2830c816cbdb27c8a7c7197c6e13daa8"
     },
     {
       "path": "RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs",
       "beforeSha256": "4c6b2c15a4506e40b2127e1a2404f5e7dba9e5012f9fcd9edbcbffb90601bf49",
-      "afterSha256": "e1c30728740cd4836a1102f4c9881897f40b446d3835e1605c8fbd9b37529a1a"
+      "afterSha256": "d13af0723137a70286833e17f64749b81925241fb650645a2b37bb2c37586a35"
     },
     {
       "path": "RecompOne.Runtime/Gpu/Hle/HleTypes.cs",

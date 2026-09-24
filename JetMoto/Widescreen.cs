@@ -12,6 +12,7 @@ namespace JetMoto;
 /// </summary>
 public static class Widescreen
 {
+    internal static Action? RaceEntered;
     public const float GameplayAspect = 16f / 9f;
     public const float MenuAspect = 4f / 3f;
     public const uint ProfileTable = 0x8016E834;
@@ -26,6 +27,7 @@ public static class Widescreen
 
     public static IDisposable EnterRace()
     {
+        RaceEntered?.Invoke();
         _raceDepth++;
         SetView();
         return new RaceScope();

@@ -27,14 +27,124 @@ public sealed class GlCore : IGpuBackend
     private long _frame;
     private readonly string? _captureDirectory = Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_DIR");
     private long _lastCapture = -1;
+    private readonly bool _captureRaceRelative=Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_RACE_RELATIVE")=="1";
+    private long _captureRaceStart=long.MinValue;
     private readonly int _effectCaptureFrames = int.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_EFFECT_FRAMES"), out int frames) ? Math.Clamp(frames, 0, 8) : 0;
     private long _effectDrawVblank = -1, _lastEffectCaptureFrame = -1;
     private int _effectFrameTriangles, _effectCaptures;
     private bool _effectCaptureStarted;
     private int _wakeDraws, _wakeVisibleDraws, _wakeMinLight=255, _wakeMaxLight;
+    private readonly long _auditStart=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_START"),out long auditStart) ? auditStart : long.MaxValue;
+    private readonly long _auditEnd=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_FRAME_END"),out long auditEnd) ? auditEnd : -1;
+    private readonly Dictionary<string,int[]> _auditWater=[],_auditEffects=[];
+    private Assets.Native.WorldCamera? _auditCamera;
+    private int _auditUnderlays;
+    private readonly float _auditPointX=float.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_POINT_X"),System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out float auditX) ? auditX : float.NaN;
+    private readonly float _auditPointY=float.TryParse(Environment.GetEnvironmentVariable("JETMOTO_AUDIT_POINT_Y"),System.Globalization.NumberStyles.Float,System.Globalization.CultureInfo.InvariantCulture,out float auditY) ? auditY : float.NaN;
+    private readonly List<object> _auditPointHits=[];
+    private readonly bool _traceGeometry=Environment.GetEnvironmentVariable("JETMOTO_TRACE_GEOMETRY")=="1";
+    private readonly long _traceStart=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_START"),out long traceStart) ? Math.Max(0,traceStart-60) : 0;
+    private readonly long _traceEnd=long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_END"),out long traceEnd) ? traceEnd : long.MaxValue;
+    private sealed class GeometryTrace(long frame)
+    {
+        public long Frame=frame;
+        public readonly List<object> Triangles=[];
+        public bool Truncated;
+    }
+    private readonly Dictionary<GlDisplayRt,GeometryTrace> _geometryTargets=[];
+    private readonly List<object> _geometryPending=[];
+    private bool _geometryPendingTruncated;
+    private long _geometryOrder;
+    private GlDisplayRt? _geometryLastTarget;
+    private void TraceFlush(GlDisplayRt? target)
+    {
+        if(!_traceGeometry)return;
+        foreach(var old in _geometryTargets.Keys.Where(t=>!_rts.Contains(t)).ToArray())_geometryTargets.Remove(old);
+        if(target!=null)
+        {
+            // A game image can span several host frame counters. The native
+            // double-buffer switch, not AdvanceFrame, starts its draw sequence.
+            if(!_geometryTargets.TryGetValue(target,out var trace)||!ReferenceEquals(target,_geometryLastTarget))
+                _geometryTargets[target]=trace=new GeometryTrace(_frame);
+            trace.Frame=_frame;
+            _geometryLastTarget=target;
+            int remaining=Math.Max(0,20000-trace.Triangles.Count);
+            trace.Triangles.AddRange(_geometryPending.Take(remaining));
+            trace.Truncated|=_geometryPendingTruncated||_geometryPending.Count>remaining;
+        }
+        _geometryPending.Clear();_geometryPendingTruncated=false;
+    }
+    private void TraceTriangle(in HleVertex a,in HleVertex b,in HleVertex c,in PrimFlags flags,string primitive="triangle")
+    {
+        if(!_traceGeometry)return;
+        if(_captureRaceRelative&&_captureRaceStart==long.MinValue)return;
+        long clock=Interrupts.VBlankCount-(_captureRaceRelative?_captureRaceStart:0);
+        if(clock<_traceStart||clock>_traceEnd)return;
+        if(_geometryPending.Count>=20000){_geometryPendingTruncated=true;return;}
+        static float[] Vertex(in HleVertex v)=>[v.X,v.Y,v.Z,v.HasGteZ?1:0,v.U,v.V];
+        var surface=flags.WorldSurface;
+        _geometryPending.Add(new {order=_geometryOrder++,primitive,kind=surface?.Kind,material=flags.NativeTexture?.Asset.Key,
+            semi=flags.SemiTrans,blend=flags.BlendMode,textured=flags.Textured,ot=flags.OtIndex,
+            offset=new[]{flags.DrawOffsetX,flags.DrawOffsetY},clip=new[]{_env.ClipX0,_env.ClipY0,_env.ClipX1,_env.ClipY1},
+            plane=surface is null ? null : new[]{surface.Point.X,surface.Point.Y,surface.Point.Z},
+            vertices=new[]{Vertex(a),Vertex(b),Vertex(c)}});
+    }
+    private bool AuditFrame=>Interrupts.VBlankCount>=_auditStart && Interrupts.VBlankCount<=_auditEnd;
+
+    private void AuditPoint(in HleVertex a,in HleVertex b,in HleVertex c,in PrimFlags flags)
+    {
+        if(!AuditFrame || !float.IsFinite(_auditPointX+_auditPointY) || _auditPointHits.Count>=128)return;
+        float x=_auditPointX+flags.DrawOffsetX,y=_auditPointY+flags.DrawOffsetY;
+        // Record geometric coverage before clipping: the render target expands
+        // the native horizontal scissor for Hor+ margins during Flush.
+        static float Edge(float ax,float ay,float bx,float by,float px,float py)=>(bx-ax)*(py-ay)-(by-ay)*(px-ax);
+        float area=Edge(a.X,a.Y,b.X,b.Y,c.X,c.Y);
+        if(!float.IsFinite(area)||MathF.Abs(area)<.0001f)return;
+        float u=Edge(b.X,b.Y,c.X,c.Y,x,y)/area,v=Edge(c.X,c.Y,a.X,a.Y,x,y)/area,w=1-u-v;
+        if(u<0||v<0||w<0)return;
+        float? inverseDepth=null;
+        if(flags.WorldSurface is {} surface && surface.ProjectiveAtPixel(_auditPointX,_auditPointY,out var q))inverseDepth=q.W;
+        _auditPointHits.Add(new{order=_auditPointHits.Count,kind=flags.WorldSurface?.Kind,
+            material=flags.NativeTexture?.Asset.Key,textured=flags.Textured,semi=flags.SemiTrans,blend=flags.BlendMode,
+            ot=flags.OtIndex,page=flags.TPage,inverseDepth,clip=new[]{_env.ClipX0,_env.ClipY0,_env.ClipX1,_env.ClipY1},
+            rgb=new[]{a.R*u+b.R*v+c.R*w,a.G*u+b.G*v+c.G*w,a.B*u+b.B*v+c.B*w}});
+    }
+
+    private void AuditPrimitive(in PrimFlags flags,float minX,float minY,float maxX,float maxY)
+    {
+        if(!AuditFrame || _emittingAirborne)return;
+        bool effect=flags.NativeTexture?.Asset.AllowsEffectCoverage==true;
+        bool water=flags.WorldSurface is {Kind:2 or 4} && !effect;
+        if(!effect && !water)return;
+        var records=effect ? _auditEffects : _auditWater;
+        string key=flags.NativeTexture?.Asset.Key ?? "untextured-water";
+        if(!records.TryGetValue(key,out var counts))records[key]=counts=new int[2];
+        counts[0]++;
+        if(maxX>=_env.ClipX0 && minX<=_env.ClipX1 && maxY>=_env.ClipY0 && minY<=_env.ClipY1)counts[1]++;
+        if(water){_auditCamera=flags.WorldSurface!.Camera;if(flags.WorldSurface.ScreenFill)_auditUnderlays++;}
+    }
     
     public void AdvanceFrame()
     {
+        if(AuditFrame || _auditWater.Count>0 || _auditEffects.Count>0)
+        {
+            var eye=_auditCamera?.Eye;
+            Console.WriteLine("[JetMoto:frame-audit] "+System.Text.Json.JsonSerializer.Serialize(new {
+                vblank=Interrupts.VBlankCount,renderFrame=_frame,water=_auditWater,effects=_auditEffects,
+                pointHits=_auditPointHits,
+                underlays=_auditUnderlays,eye=eye is {} p ? new[]{p.X,p.Y,p.Z}:null,time=_auditCamera?.Time,
+                riders=_auditCamera?.Riders.OrderBy(r=>r.Key).Select(r=>new {
+                    id=r.Key,min=new[]{r.Value.Min.X,r.Value.Min.Y,r.Value.Min.Z},
+                    max=new[]{r.Value.Max.X,r.Value.Max.Y,r.Value.Max.Z},samples=r.Value.Samples}),
+                motionTime=_motionCamera?.Time,motionView=_motionCamera?.ViewSlot,
+                pathSegments=_motionSegments.GroupBy(s=>s.RiderId).ToDictionary(g=>g.Key,g=>g.Count()),
+                worldWakeEnabled=_worldWakeEnabled,wakeRasterSegments=_wakeRasterSegments,
+                wakeProbe=_worldWakeEnabled && _auditCamera!=null ? DescribeWakeProbe() : null,
+                sprayProbe=_worldWakeEnabled && _auditCamera!=null ? DescribeSprayProbe() : null,
+                note="counts are submitted and viewport-overlapping primitives, not visible pixels or racer attribution"}));
+            _auditWater.Clear();_auditEffects.Clear();_auditUnderlays=0;_auditCamera=null;
+            _auditPointHits.Clear();
+        }
         _frame++;
         if (_diagnoseSurfaces && _frame % 120 == 0)
         {
@@ -79,8 +189,22 @@ public sealed class GlCore : IGpuBackend
     private int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
     private int _uRepRect, _uRepClutCount, _uRepCoverage;
     private Assets.Native.WorldCamera? _worldCamera;
+    private readonly Dictionary<int, Assets.Native.RiderMotionHistory> _riderMotion = [];
+    private Assets.Native.WorldCamera? _motionCamera;
+    private IReadOnlyList<Assets.Native.RiderPathSegment> _motionSegments = [];
+    private IReadOnlyList<Assets.Native.SprayParticle> _sprayParticles = [];
+    private readonly HashSet<int> _sprayActors = [];
+    private readonly Dictionary<int,int> _spraySubmitted = [];
+    private Assets.Native.WorldSurface? _sprayProjection;
+    private bool _emittingWorldSpray, _pendingWorldSpray, _kWorldSpray;
     private readonly Dictionary<Assets.Native.WorldScene,uint> _worldMaps=[];
     private uint _waterDetail;
+    private readonly bool _worldWakeEnabled = Environment.GetEnvironmentVariable("JETMOTO_WORLD_WAKE") == "1";
+    private uint _waterWake;
+    private Assets.Native.WorldCamera? _wakeCamera;
+    private Assets.Native.WorldSurface? _wakeSurface;
+    private byte[]? _wakePixels;
+    private int _uWakeBounds, _uWakeEnabled, _wakeRasterSegments;
     private uint _riderShadow;
     private Assets.Native.WorldCamera? _shadowCamera;
     private int _uWorldBounds,_uWorldHeightRange,_uWorldLight,_uWorldEye,_uWorldTime,_uEffectTime,_uWaterTint;
@@ -141,10 +265,13 @@ public sealed class GlCore : IGpuBackend
         _uWorldTime=_gl.GetUniformLocation(_progPrim,"uWorldTime");
         _uEffectTime=_gl.GetUniformLocation(_progPrim,"uEffectTime");
         _uWaterTint=_gl.GetUniformLocation(_progPrim,"uWaterTint");
+        _uWakeBounds=_gl.GetUniformLocation(_progPrim,"uWakeBounds");
+        _uWakeEnabled=_gl.GetUniformLocation(_progPrim,"uWakeEnabled");
         _gl.UseProgram(_progPrim);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim,"uWorldHeight"),5);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim,"uWaterDetail"),6);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim,"uRiderShadow"),7);
+        _gl.Uniform1(_gl.GetUniformLocation(_progPrim,"uWaterWake"),8);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uVram"), 0);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uDest"), 1);
         _gl.Uniform1(_gl.GetUniformLocation(_progPrim, "uExtTex"), 2);
@@ -409,7 +536,7 @@ public sealed class GlCore : IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kAirborne == _pendingAirborne && _kWaterWake == _pendingWaterWake
+        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kAirborne == _pendingAirborne && _kWaterWake == _pendingWaterWake && _kWorldSpray == _pendingWorldSpray
                                           && (_pendingRepTex == 0 || (_kRepX == _pendingRepX && _kRepY == _pendingRepY
                                               && _kRepW == _pendingRepW && _kRepH == _pendingRepH))
                                           && _kTransparent == transparent && _kBlend == blend && _kImage == image
@@ -473,6 +600,7 @@ public sealed class GlCore : IGpuBackend
         _kRepTex = _pendingRepTex;
         _kRepCoverage = _pendingRepCoverage;
         _kAirborne = _pendingAirborne;
+        _kWorldSpray = _pendingWorldSpray;
         _kWaterWake = _pendingWaterWake;
         _kRepClut = _pendingRepClut;
         _kRepClutCount = _pendingRepClutCount;
@@ -533,6 +661,7 @@ public sealed class GlCore : IGpuBackend
         _pendingRepClut = 0;
         _pendingRepCoverage = false;
         _pendingAirborne = false;
+        _pendingWorldSpray = false;
         _pendingWaterWake = false;
 
         if (!f.Textured || f.UseImage) return;
@@ -547,7 +676,8 @@ public sealed class GlCore : IGpuBackend
             _pendingRepTex = EnsureRepTexture(replacement);
             _pendingRepCoverage = replacement.Coverage;
             _pendingAirborne = replacement.Coverage && _emittingAirborne;
-            _pendingWaterWake = replacement.Coverage && native.Asset.WaterSpray && !_emittingAirborne;
+            _pendingWorldSpray = replacement.Coverage && _emittingWorldSpray;
+            _pendingWaterWake = replacement.Coverage && native.Asset.WaterSpray && !_emittingAirborne && !_emittingWorldSpray;
             _pendingRepX = native.U0; _pendingRepY = native.V0;
             _pendingRepW = native.Width; _pendingRepH = native.Height;
             // Native effects reveal successive atlas slices as their geometry grows.
@@ -635,11 +765,26 @@ public sealed class GlCore : IGpuBackend
         _gl.TexImage2D<byte>(TextureTarget.Texture2D,0,InternalFormat.Rgba8,(uint)scene.MapSize,(uint)scene.MapSize,0,PixelFormat.Rgba,PixelType.UnsignedByte,scene.HeightRgba);
         _worldMaps.Add(scene,texture);_gl.ActiveTexture(TextureUnit.Texture0);return texture;
     }
+    private void UpdateRiderMotion(Assets.Native.WorldCamera camera)
+    {
+        if (!ReferenceEquals(camera, _motionCamera))
+        {
+            if (!_riderMotion.TryGetValue(camera.ViewSlot, out var motion))
+                _riderMotion[camera.ViewSlot] = motion = new Assets.Native.RiderMotionHistory();
+            _motionSegments = motion.Observe(camera);
+            _sprayParticles = _worldWakeEnabled ? Assets.Native.RiderSpray.Evaluate(camera,_motionSegments) : [];
+            _sprayActors.Clear();
+            _spraySubmitted.Clear();
+            _motionCamera = camera;
+        }
+    }
     private void SetWorldUniforms()
     {
         if(_worldCamera is not {} camera)return;
+        UpdateRiderMotion(camera);
         BindWaterDetail();
         BindRiderShadow(camera);
+        BindWaterWake(camera);
         var scene=camera.Scene;uint texture=WorldMap(scene);
         _gl.ActiveTexture(TextureUnit.Texture5);_gl.BindTexture(TextureTarget.Texture2D,texture);
         _gl.Uniform4(_uWorldBounds,scene.Origin.X,scene.Origin.Y,scene.Extent.X,scene.Extent.Y);
@@ -667,8 +812,88 @@ public sealed class GlCore : IGpuBackend
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.Repeat);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.Repeat);
             _gl.GenerateMipmap(TextureTarget.Texture2D);
+            // Oblique water footprints are long and narrow. Isotropic mipmaps
+            // erase resolvable cross-ripple detail along with the distant axis.
+            bool anisotropic;
+            if (_legacy)
+            {
+                var extensions=(_gl.GetStringS(StringName.Extensions) ?? "").Split(' ',StringSplitOptions.RemoveEmptyEntries);
+                anisotropic=extensions.Contains("GL_EXT_texture_filter_anisotropic") || extensions.Contains("GL_ARB_texture_filter_anisotropic");
+            }
+            else
+            {
+                anisotropic=false;
+                int count=_gl.GetInteger(GLEnum.NumExtensions);
+                for(uint i=0;i<count;i++)
+                    if(_gl.GetStringS(StringName.Extensions,i) is "GL_EXT_texture_filter_anisotropic" or "GL_ARB_texture_filter_anisotropic")
+                    {anisotropic=true;break;}
+            }
+            float samples=1;
+            if(anisotropic)
+            {
+                samples=Math.Clamp(_gl.GetFloat((GLEnum)0x84FF),1,16);
+                _gl.TexParameter(TextureTarget.Texture2D,(TextureParameterName)0x84FE,samples);
+            }
+            Console.WriteLine($"[JetMoto:water-detail] mipmapped anisotropy={samples}");
         }
         else _gl.BindTexture(TextureTarget.Texture2D, _waterDetail);
+    }
+
+    private void BindWaterWake(Assets.Native.WorldCamera camera)
+    {
+        bool enabled = _worldWakeEnabled && camera.Scene.FlatWaterLevel.HasValue;
+        _gl.Uniform1(_uWakeEnabled, enabled ? 1f : 0f);
+        if (!enabled) return;
+        _gl.ActiveTexture(TextureUnit.Texture8);
+        if (_waterWake == 0)
+        {
+            _waterWake = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, _waterWake);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        }
+        else _gl.BindTexture(TextureTarget.Texture2D, _waterWake);
+        if (!ReferenceEquals(camera, _wakeCamera))
+        {
+            _wakePixels ??= new byte[Assets.Native.WaterWakeField.Size * Assets.Native.WaterWakeField.Size * 4];
+            _wakeRasterSegments = Assets.Native.WaterWakeField.Rasterize(camera, _motionSegments, _wakePixels);
+            _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+                Assets.Native.WaterWakeField.Size, Assets.Native.WaterWakeField.Size, 0,
+                PixelFormat.Rgba, PixelType.UnsignedByte, _wakePixels);
+            _wakeCamera = camera;
+        }
+        var origin = Assets.Native.WaterWakeField.Origin(camera);
+        _gl.Uniform4(_uWakeBounds, origin.X, origin.Y, Assets.Native.WaterWakeField.Extent, camera.Scene.FlatWaterLevel!.Value);
+    }
+
+    private object? DescribeWakeProbe()
+    {
+        if (_wakeCamera is not {} camera || _wakeSurface is not {} surface || _wakePixels==null
+            || !ReferenceEquals(camera,surface.Camera) || camera.Scene.FlatWaterLevel is not {} level) return null;
+        var origin=Assets.Native.WaterWakeField.Origin(camera);
+        var probes=new List<object>();
+        foreach(var rider in camera.Riders.OrderBy(p=>System.Numerics.Vector3.DistanceSquared((p.Value.Min+p.Value.Max)*.5f,camera.Eye)).Take(2))
+        {
+            var path=_motionSegments.Where(s=>s.RiderId==rider.Key).OrderByDescending(s=>s.BornB).FirstOrDefault();
+            var delta=path.B-path.A;delta.Z=0;
+            if(delta.LengthSquared()<.0001f)continue;
+            var heading=System.Numerics.Vector3.Normalize(delta);
+            var side=new System.Numerics.Vector3(-heading.Y,heading.X,0);
+            foreach(float lateral in new[]{-1.5f,0f,1.5f})
+            {
+                var point=path.B-heading*6+side*lateral;point.Z=level;
+                var view=camera.Rotation.Apply(point)+camera.Translation;
+                int x=(int)((point.X-origin.X)*Assets.Native.WaterWakeField.Size/Assets.Native.WaterWakeField.Extent);
+                int y=(int)((point.Y-origin.Y)*Assets.Native.WaterWakeField.Size/Assets.Native.WaterWakeField.Extent);
+                int[]? coverage=x>=0&&y>=0&&x<Assets.Native.WaterWakeField.Size&&y<Assets.Native.WaterWakeField.Size
+                    ? [_wakePixels[(y*Assets.Native.WaterWakeField.Size+x)*4],_wakePixels[(y*Assets.Native.WaterWakeField.Size+x)*4+1]] : null;
+                probes.Add(new{id=rider.Key,lateral,world=new[]{point.X,point.Y,point.Z},coverage,
+                    pixel=view.Z>0 ? new[]{surface.CenterX+view.X/view.Z*surface.Projection,surface.CenterY+view.Y/view.Z*surface.Projection} : null});
+            }
+        }
+        return new{time=camera.Time,projection=surface.Projection,center=new[]{surface.CenterX,surface.CenterY},samples=probes};
     }
 
     private unsafe void BindRiderShadow(Assets.Native.WorldCamera camera)
@@ -728,10 +953,12 @@ public sealed class GlCore : IGpuBackend
         var surface=f.NativeTexture?.Asset.AllowsEffectCoverage==true ? null : f.WorldSurface;
         if(surface is { Kind: 2 or 4 } fill && fill.ProjectiveAtPixel(v.X-f.DrawOffsetX,v.Y-f.DrawOffsetY,out var worldQ))
         {
+            if(_worldWakeEnabled && AuditFrame)_wakeSurface=fill;
             output.WX=worldQ.X;output.WY=worldQ.Y;output.WZ=worldQ.Z;output.WQ=worldQ.W;
             output.NX=fill.Normal.X;output.NY=fill.Normal.Y;output.NZ=fill.Normal.Z;
-            // The fractional subtype identifies the added water underlay only.
-            output.SurfaceKind=fill.ScreenFill ? 4.25f : fill.Kind;
+            // Original additive crests carry radiance, not another base-water layer.
+            output.SurfaceKind=fill.ScreenFill ? 4.25f :
+                fill.Kind==2 && f.SemiTrans && f.BlendMode==1 ? 2.25f : fill.Kind;
         }
         else if(surface is {} world && world.AtPixel(v.X-f.DrawOffsetX,v.Y-f.DrawOffsetY,out var position,out float inverseDepth))
         {
@@ -741,12 +968,96 @@ public sealed class GlCore : IGpuBackend
         return output;
     }
 
+    private object? DescribeSprayProbe()
+    {
+        if(_motionCamera is not {} camera || _sprayProjection is not {} surface)return null;
+        return _sprayParticles.GroupBy(p=>p.RiderId).Select(group=>
+        {
+            int projected=0,inViewport=0;float minY=float.PositiveInfinity,maxY=float.NegativeInfinity,maxRadius=0,maxOpacity=0;
+            foreach(var particle in group)
+            {
+                var view=camera.Rotation.Apply(particle.Position)+camera.Translation;
+                if(view.Z<=.1f)continue;
+                float x=surface.CenterX+view.X/view.Z*surface.Projection;
+                float y=surface.CenterY+view.Y/view.Z*surface.Projection;
+                float radius=particle.Radius*surface.Projection/view.Z;
+                if(!float.IsFinite(x+y+radius))continue;
+                projected++;minY=MathF.Min(minY,y);maxY=MathF.Max(maxY,y);
+                maxRadius=MathF.Max(maxRadius,radius);maxOpacity=MathF.Max(maxOpacity,particle.Opacity);
+                if(x+radius*2>=0 && x-radius*2<=320 && y+radius*2>=0 && y-radius*2<=240)inViewport++;
+            }
+            return new {id=group.Key,particles=group.Count(),projected,inNativeViewport=inViewport,
+                submitted=_spraySubmitted.GetValueOrDefault(group.Key),
+                minY=projected>0 ? (float?)minY:null,maxY=projected>0 ? (float?)maxY:null,maxRadius,maxOpacity};
+        }).ToArray();
+    }
+
+    private void EmitRiderSpray(Assets.Native.WorldSurface rider,int offsetX,int offsetY)
+    {
+        var camera=rider.Camera;
+        if(camera.Scene.WaterSprayMaterial is not {} material || !camera.Scene.FlatWaterLevel.HasValue)return;
+        if(ReferenceEquals(camera,_motionCamera) && _sprayActors.Contains(rider.RiderId))return;
+        Flush();
+        UpdateRiderMotion(camera);
+        if(!_sprayActors.Add(rider.RiderId))return;
+        _sprayProjection=rider;
+        var flags=new PrimFlags{Textured=true,SemiTrans=true,TPage=material.TPage,Clut=material.Clut,NativeTexture=material};
+        // Generated full-sprite UVs do not belong to the native atlas window.
+        var savedEnvironment=_env;
+        _env.TwMaskX=_env.TwMaskY=_env.TwOffX=_env.TwOffY=0;
+        _emittingWorldSpray=true;
+        try
+        {
+            foreach(var particle in _sprayParticles.Where(p=>p.RiderId==rider.RiderId)
+                .OrderByDescending(p=>(camera.Rotation.Apply(p.Position)+camera.Translation).Z))
+            {
+                var view=camera.Rotation.Apply(particle.Position)+camera.Translation;
+                if(view.Z<.1f)continue;
+                var center=new System.Numerics.Vector2(rider.CenterX+view.X/view.Z*rider.Projection+offsetX,
+                    rider.CenterY+view.Y/view.Z*rider.Projection+offsetY);
+                float radius=particle.Radius*rider.Projection/view.Z;
+                if(!float.IsFinite(radius)||radius<=0)continue;
+                // Fade at the near plane instead of allowing expanding opaque streaks.
+                float sizeFade=Math.Clamp((10-radius)/6,0,1);
+                if(sizeFade<=0)continue;
+                var next=camera.Rotation.Apply(particle.Position+particle.Velocity*.015f)+camera.Translation;
+                if(next.Z<.1f)continue;
+                var along=new System.Numerics.Vector2(next.X/next.Z-view.X/view.Z,next.Y/next.Z-view.Y/view.Z);
+                along=along.LengthSquared()>.000001f ? System.Numerics.Vector2.Normalize(along) : new(0,-1);
+                var across=new System.Numerics.Vector2(-along.Y,along.X)*radius;
+                along*=radius*1.8f;
+                if(center.X+radius*2<_env.ClipX0||center.X-radius*2>_env.ClipX1||center.Y+radius*2<_env.ClipY0||center.Y-radius*2>_env.ClipY1)continue;
+                byte fade=(byte)Math.Clamp(particle.Opacity*sizeFade*128,1,128);
+                HleVertex Vertex(System.Numerics.Vector2 p,float u,float v)=>new(){X=p.X,Y=p.Y,Z=view.Z,HasGteZ=true,U=u,V=v,R=fade,G=fade,B=fade};
+                var a=Vertex(center-across-along,0,0);var b=Vertex(center+across-along,63,0);
+                var c=Vertex(center-across+along,0,63);var d=Vertex(center+across+along,63,63);
+                DrawTri(a,b,c,flags);DrawTri(b,d,c,flags);
+                _spraySubmitted[rider.RiderId]=_spraySubmitted.GetValueOrDefault(rider.RiderId)+1;
+            }
+        }
+        finally
+        {
+            try { Flush(); }
+            finally { _env=savedEnvironment;_emittingWorldSpray=false; }
+        }
+    }
+
     public void DrawTri(in HleVertex a, in HleVertex b, in HleVertex c, in PrimFlags f)
     {
+        if(_worldWakeEnabled && !_emittingWorldSpray)
+        {
+            if(f.WorldSurface is {Kind:3,RiderId:>=200 and <220} rider)EmitRiderSpray(rider,f.DrawOffsetX,f.DrawOffsetY);
+            if(f.NativeTexture?.Asset.WaterSpray==true && _motionCamera?.Scene is {FlatWaterLevel:not null,WaterSprayMaterial:{} material}
+                && ReferenceEquals(f.NativeTexture.Asset,material.Asset))return;
+        }
+        AuditPrimitive(f,Math.Min(a.X,Math.Min(b.X,c.X)),Math.Min(a.Y,Math.Min(b.Y,c.Y)),
+            Math.Max(a.X,Math.Max(b.X,c.X)),Math.Max(a.Y,Math.Max(b.Y,c.Y)));
+        AuditPoint(a,b,c,f);
         ResolveReplacement(f,
             (int)Math.Min(a.U, Math.Min(b.U, c.U)), (int)Math.Min(a.V, Math.Min(b.V, c.V)),
             (int)Math.Max(a.U, Math.Max(b.U, c.U)), (int)Math.Max(a.V, Math.Max(b.V, c.V)));
         Begin(f, 3);
+        TraceTriangle(a,b,c,f);
         int start = _count;
         var wakeA=a;var wakeB=b;var wakeC=c;
         if (_pendingWaterWake)
@@ -818,7 +1129,7 @@ public sealed class GlCore : IGpuBackend
         else if(_verts[start].SurfaceKind>2.5f)Assets.Native.WorldSurfaceBindings.RiderTriangles++;
         else if(_verts[start].SurfaceKind>1.5f)Assets.Native.WorldSurfaceBindings.WaterTriangles++;
         else Assets.Native.WorldSurfaceBindings.LitTriangles++;
-        if (!_emittingAirborne && _pendingRepCoverage && f.NativeTexture?.Asset.WaterSpray == true)
+        if (!_emittingAirborne && !_emittingWorldSpray && _pendingRepCoverage && f.NativeTexture?.Asset.WaterSpray == true)
         {
             float vMin = Math.Min(a.V, Math.Min(b.V,c.V)), vMax = Math.Max(a.V, Math.Max(b.V,c.V));
             float uSpan = Math.Max(a.U,Math.Max(b.U,c.U))-Math.Min(a.U,Math.Min(b.U,c.U));
@@ -842,6 +1153,7 @@ public sealed class GlCore : IGpuBackend
 
     public void DrawRect(in HleRect r, in PrimFlags f)
     {
+        AuditPrimitive(f,r.X,r.Y,r.X+r.W,r.Y+r.H);
         ResolveReplacement(f, r.U, r.V, r.U + Math.Max(0, r.W - 1), r.V + Math.Max(0, r.H - 1));
         Begin(f, 6);
         float x0 = r.X, x1 = r.X + r.W;
@@ -869,6 +1181,7 @@ public sealed class GlCore : IGpuBackend
         var c = new HleVertex { X = x0, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = r.U, V = (short)(r.V + r.H) };
         var d = new HleVertex
             { X = x1, Y = r.Y + r.H, R = r.R, G = r.G, B = r.B, U = (short)(r.U + r.W), V = (short)(r.V + r.H) };
+        TraceTriangle(a,b,c,f,"rectangle");TraceTriangle(b,d,c,f,"rectangle");
         _verts[_count++] = V(a, f);
         _verts[_count++] = V(b, f);
         _verts[_count++] = V(c, f);
@@ -883,6 +1196,7 @@ public sealed class GlCore : IGpuBackend
         _pendingRepClut = 0;
         _pendingRepCoverage = false;
         _pendingAirborne = false;
+        _pendingWorldSpray = false;
         Begin(f, 6);
         float x1 = a.X, y1 = a.Y;
         float x2 = b.X, y2 = b.Y;
@@ -941,6 +1255,7 @@ public sealed class GlCore : IGpuBackend
             if (rt.Covers(x, y, x + w - 1, y + h - 1))
             {
                 FillRtFull(rt, color15);
+                if(_traceGeometry)_geometryTargets[rt]=new GeometryTrace(_frame);
                 rt.Dirty = false;
                 rt.LastDrawFrame = _frame;
             }
@@ -1112,7 +1427,7 @@ public sealed class GlCore : IGpuBackend
         _gl.UseProgram(_progPrim);
         SetWorldUniforms();
         if(_uEffectTime>=0)_gl.Uniform1(_uEffectTime,_frame/60f);
-        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? (_kAirborne ? 2f : _kWaterWake ? 3f : 1f) : 0f);
+        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? (_kWorldSpray ? 4f : _kAirborne ? 2f : _kWaterWake ? 3f : 1f) : 0f);
         _gl.BindVertexArray(_vao);
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
@@ -1259,6 +1574,7 @@ public sealed class GlCore : IGpuBackend
             }
         }
 
+        TraceFlush(rt);
         _count = 0;
         _kSamplesVram = false;
     }
@@ -1381,18 +1697,25 @@ public sealed class GlCore : IGpuBackend
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
 
         var outTex = ApplyPostFx(_presentTex, fbW, fbH);
-        CaptureFrame(fbW, fbH, aspect);
+        CaptureFrame(fbW, fbH, aspect,src);
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return (outTex, fbW, fbH, aspect);
     }
 
-    private unsafe void CaptureFrame(int width, int height, float aspect)
+    private unsafe void CaptureFrame(int width, int height, float aspect,GlDisplayRt? source)
     {
         if (string.IsNullOrWhiteSpace(_captureDirectory)) return;
         long frame = Interrupts.VBlankCount;
-        if (long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_START"), out long start) && frame < start) return;
-        if (long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_END"), out long end) && frame > end) return;
+        long raceFrame=frame;
+        if(_captureRaceRelative)
+        {
+            if(!long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_REPLAY_RACE_START_VBLANK"),out long raceStart)||frame<raceStart)return;
+            if(_captureRaceStart!=raceStart){_captureRaceStart=raceStart;_lastCapture=-1;_effectCaptures=0;_effectCaptureStarted=false;}
+            raceFrame=frame-raceStart;
+        }
+        if (long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_START"), out long start) && raceFrame < start) return;
+        if (long.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_END"), out long end) && raceFrame > end) return;
         bool recentEffectDraw = _effectDrawVblank >= 0 && frame - _effectDrawVblank <= 10;
         if (_effectCaptureFrames > 0)
         {
@@ -1404,17 +1727,45 @@ public sealed class GlCore : IGpuBackend
         }
         int interval = int.TryParse(Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_EVERY"), out int n)
             ? Math.Clamp(n, 1, 3600) : 120;
-        if (frame <= 0 || (_effectCaptureFrames == 0 && frame / interval <= _lastCapture / interval)) return;
-        _lastCapture = frame;
+        if (raceFrame <= 0 || (_effectCaptureFrames == 0 && raceFrame / interval <= _lastCapture / interval)) return;
+        _lastCapture = raceFrame;
         byte[] pixels = new byte[checked(width * height * 4)];
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _presentFbo);
         fixed (byte* p = pixels)
             _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, p);
-        string path = Path.Combine(_captureDirectory, $"frame-{frame:000000}.png");
+        string name=_captureRaceRelative ? $"race-{raceFrame:000000}" : $"frame-{frame:000000}";
+        string path = Path.Combine(_captureDirectory, name+".png");
         Assets.PngWriter.WriteRgba(path, pixels, width, height);
+        if(_traceGeometry)
+        {
+            long sourceFrame=source?.LastDrawFrame??_frame;
+            GeometryTrace? geometry=null;
+            if(source!=null&&_geometryTargets.TryGetValue(source,out var recorded)&&recorded.Frame==sourceFrame)
+                geometry=recorded;
+            File.WriteAllText(Path.ChangeExtension(path,".geometry.json"),System.Text.Json.JsonSerializer.Serialize(new {
+                sourceFrame,captureFrame=_frame,available=geometry?.Triangles.Count>0,
+                truncated=geometry?.Truncated??false,width,height,aspect,
+                framebuffer=source is null ? null : new[]{source.X,source.Y,source.W,source.H,source.Margin},
+                vertexFields=new[]{"x","y","z","hasGteZ","u","v"},
+                triangles=geometry?.Triangles,
+                note="Drawn batches for the captured target since its last buffer switch/full clear, not final pixel ownership; texture masks and shader discards are not evaluated."
+            },new System.Text.Json.JsonSerializerOptions{NumberHandling=System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals}));
+        }
         File.WriteAllText(Path.ChangeExtension(path, ".json"), System.Text.Json.JsonSerializer.Serialize(new
-        { vblank = frame, renderFrame = _frame, lastEffectDrawVblank = _effectDrawVblank,
-          lastEffectDrawTriangles = _effectFrameTriangles, width, height, aspect, lighting = Assets.Native.WorldSurfaceBindings.Summary }));
+        { vblank = frame, raceFrame=_captureRaceRelative ? raceFrame : (long?)null, renderFrame = _frame, lastEffectDrawVblank = _effectDrawVblank,
+          lastEffectDrawTriangles = _effectFrameTriangles, width, height, aspect, lighting = Assets.Native.WorldSurfaceBindings.Summary,
+          emission = _worldWakeEnabled && _motionCamera is {} motion ? new {
+              scene=motion.Scene.Name,time=motion.Time,waterLevel=motion.Scene.FlatWaterLevel,
+              wakeRasterSegments=_wakeRasterSegments,sprayProjection=DescribeSprayProbe(),
+              riders=motion.Riders.OrderBy(r=>r.Key).Select(r=> {
+                  var birth=(r.Value.Min+r.Value.Max)*.5f;
+                  return new { id=r.Key,position=new[]{birth.X,birth.Y,birth.Z},
+                      groundVetoPassed=motion.Scene.AllowsWaterEmission(birth),
+                      segments=_motionSegments.Count(s=>s.RiderId==r.Key),
+                      particles=_sprayParticles.Count(p=>p.RiderId==r.Key),
+                      injectionVisited=_sprayActors.Contains(r.Key) };
+              }),note="Emission state only; neither positive water contact nor visible-pixel proof."
+          } : null }));
     }
 
     //support for post-fx shaders to be loaded, so you can have cool shaders (this was too anonying to implement)
@@ -1533,6 +1884,7 @@ public sealed class GlCore : IGpuBackend
 
     public void Dispose()
     {
+        if (_waterWake != 0) { _gl.DeleteTexture(_waterWake); _waterWake = 0; }
         foreach(uint texture in _worldMaps.Values)_gl.DeleteTexture(texture);_worldMaps.Clear();
         if (_waterDetail != 0) { _gl.DeleteTexture(_waterDetail); _waterDetail = 0; }
         if (_riderShadow != 0) { _gl.DeleteTexture(_riderShadow); _riderShadow = 0; _shadowCamera = null; }

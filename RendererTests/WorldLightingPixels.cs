@@ -22,10 +22,10 @@ static class WorldLightingPixels
   WorldSurface Surface(WorldScene s,int kind=1,float time=0)=>new(Camera(s,time),Vector3.Zero,Vector3.UnitZ,kind,32,32,32);
   const ushort Back=0x0842;var f=new PrimFlags{Gouraud=true};
   HleVertex V(float x,float y,byte r,byte g,byte b)=>new(){X=x,Y=y,R=r,G=g,B=b,U=0,V=0};
-  ushort[] Draw(WorldSurface? world,bool masked=false,bool semi=false,int drawX=0,int drawY=0,byte r=152,byte g=144,byte b=128)
+  ushort[] Draw(WorldSurface? world,bool masked=false,bool semi=false,int drawX=0,int drawY=0,byte r=152,byte g=144,byte b=128,int blend=0)
   {
    core.FillRect(0,0,64,64,Back);core.SetDrawEnv(new HleDrawEnv{ClipX1=63,ClipY1=63,SetMask=masked});
-   var flags=f;flags.WorldSurface=world;flags.DrawOffsetX=drawX;flags.DrawOffsetY=drawY;flags.SemiTrans=semi;
+   var flags=f;flags.WorldSurface=world;flags.DrawOffsetX=drawX;flags.DrawOffsetY=drawY;flags.SemiTrans=semi;flags.TPage=(ushort)(blend<<5);
    core.DrawTri(V(4,4,r,g,b),V(60,4,r,g,b),V(4,60,r,g,b),flags);core.DrawTri(V(60,4,r,g,b),V(60,60,r,g,b),V(4,60,r,g,b),flags);
    core.Flush();var p=new ushort[4096];core.ReadVram(0,0,64,64,p);return p;
   }
@@ -56,6 +56,24 @@ static class WorldLightingPixels
   Check(water0.Zip(waterCycle).Average(pair=>MathF.Abs(Bright(pair.First)-Bright(pair.Second)))<.1,
       "water clock wrap matches whole texture periods without a discontinuous reset");
   Check(Enumerable.Range(0,4096).All(i=>(water0[i]==Back)==(water1[i]==Back)),"animated water never displaces geometry or polygon boundaries");
+  if(Environment.GetEnvironmentVariable("JETMOTO_WORLD_WAKE")=="1") {
+   // Open water must not use the solid-ground-at-water-height shadow fixture.
+   var wakeScene=new WorldScene("wake-test",new byte[clear.HeightRgba.Length],clear.MapSize,clear.Origin,clear.Extent,clear.HeightRange,clear.Sunlight,flatWaterLevel:0);
+   WorldSurface WakeSurface(WorldCamera c)=>new(c,Vector3.Zero,Vector3.UnitZ,2,32,32,32);
+   var noTrail=Draw(WakeSurface(Camera(wakeScene,.1f)),r:32,g:16,b:112);
+   var noTrailCrest=Draw(WakeSurface(Camera(wakeScene,.1f)),semi:true,r:32,g:16,b:112,blend:1);
+   var first=Camera(wakeScene,0);var firstBounds=new RiderBounds();firstBounds.Include(new(-20,0,4));first.Riders[200]=firstBounds;
+   Draw(WakeSurface(first),r:32,g:16,b:112);
+   var next=Camera(wakeScene,.1f);var nextBounds=new RiderBounds();nextBounds.Include(new(20,0,4));next.Riders[200]=nextBounds;
+   var trail=Draw(WakeSurface(next),r:32,g:16,b:112);
+   Check(Enumerable.Range(0,4096).Count(i=>Bright(trail[i])>Bright(noTrail[i])+2)>8,"persistent rider path produces visible foam without a native spray polygon");
+   Check(trail[8*64+8]==noTrail[8*64+8]&&trail[48*64+48]==noTrail[48*64+48],"world-space wake does not brighten remote water pixels");
+   Check(Draw(WakeSurface(next),r:32,g:16,b:112).AsSpan().SequenceEqual(trail),"repeated draws of one camera do not advance wake motion");
+   var trailCrest=Draw(WakeSurface(next),semi:true,r:32,g:16,b:112,blend:1);
+   Check(trailCrest.AsSpan().SequenceEqual(noTrailCrest),"additive native crests do not duplicate the base layer's wake foam");
+   Check(AvgBright(trailCrest)<AvgBright(Draw(null,semi:true,r:32,g:16,b:112,blend:1)),"additive water breakup does not amplify native crest radiance");
+   Check(Draw(new WorldSurface(next,Vector3.Zero,Vector3.UnitZ,1,32,32,32)).AsSpan().SequenceEqual(lit),"water wake field cannot paint onto solid scenery");
+  }
   var warmSource=Draw(null,r:96,g:48,b:24);
   var warmWater=Draw(Surface(clear,2,1),r:96,g:48,b:24);
   Check(AvgChannel(warmWater,0)>AvgChannel(warmWater,5)&&AvgChannel(warmWater,5)>AvgChannel(warmWater,10),"water modulation preserves original source hue order instead of forcing cyan");
@@ -69,7 +87,7 @@ static class WorldLightingPixels
   var flatMasked=Draw(Surface(clear),true);Check((flatMasked[32*64+32]&0x8000)!=0,"world lighting retains original GPU mask bit");
   Check((Draw(Surface(clear),false)[32*64+32]&0x8000)==0,"unmasked lighting does not create mask bits");
   var invalid=new WorldSurface(Camera(clear),new(0,0,100),Vector3.UnitZ,2,32,32,32);
-  Check(Draw(invalid).AsSpan().SequenceEqual(original),"behind-camera plane falls back without stretching, missing polygons, or borrowed coordinates");
+  Check(Draw(invalid).All(p=>p==Back),"source-identified water behind the camera cannot paint its source color over the sky");
   // Equal world positions through a shifted camera/projection center must reproduce water.
   var cam=Camera(clear,3,new Vector3(-10,0,64));var stable=new WorldSurface(cam,Vector3.Zero,Vector3.UnitZ,2,37,32,32);
   var reference=Surface(clear,2,3);bool sameWorld=true;
@@ -86,13 +104,33 @@ static class WorldLightingPixels
   Check(continuous&&Vector4.Distance((above+below)*.5f,horizon)<.00001f&&MathF.Abs(horizon.W)<.00001f,
       "water coordinates remain affine across horizon without fixed-depth substitution");
   var horizonWater=Draw(new WorldSurface(horizonCamera,Vector3.Zero,Vector3.UnitZ,2,32,32,32));
+  float RowContrast(ushort[] pixels,int y) {
+   var row=Enumerable.Range(8,48).Select(x=>Bright(pixels[y*64+x])).ToArray();
+   float mean=row.Average();return MathF.Sqrt(row.Select(v=>(v-mean)*(v-mean)).Average());
+  }
+  float grazingContrast=Enumerable.Range(35,5).Select(y=>RowContrast(horizonWater,y)).Average();
+  Console.WriteLine($"MEASURE: {label} grazing-angle water row contrast={grazingContrast:F4}");
+  Check(grazingContrast>1.2f,"medium-distance water retains resolved ripple contrast at a grazing angle");
+  var previousWater=horizonWater;
+  float largestStep=0;
+  for(int frame=1;frame<=12;frame++) {
+   var animatedCamera=new WorldCamera(clear,horizonCamera.Rotation,horizonCamera.Translation,frame/60f);
+   var nextWater=Draw(new WorldSurface(animatedCamera,Vector3.Zero,Vector3.UnitZ,2,32,32,32));
+   float step=Enumerable.Range(35,5).SelectMany(y=>Enumerable.Range(8,48).Select(x=>y*64+x))
+       .Average(i=>MathF.Abs(Bright(nextWater[i])-Bright(previousWater[i])));
+   largestStep=MathF.Max(largestStep,step);previousWater=nextWater;
+  }
+  Console.WriteLine($"MEASURE: {label} grazing-angle temporal mean step={largestStep:F4}");
+  Check(largestStep<2,"grazing-angle ripple animation has no large frame-to-frame brightness jump in a fixed camera");
+  Check(Draw(new WorldSurface(horizonCamera,Vector3.Zero,Vector3.UnitZ,4,32,32,32)).AsSpan().SequenceEqual(horizonWater),
+      "native near-water and backdrop kinds agree for identical source color and physical plane");
   Check(Enumerable.Range(36,20).Sum(y=>Enumerable.Range(8,16).Count(x=>horizonWater[y*64+x]!=original[y*64+x]))>20,
       "water triangle crossing the horizon keeps shading on its visible half");
-  Check(horizonWater[12*64+12]==original[12*64+12],
-      "water rays behind the plane retain source shading without borrowed coordinates");
+  Check(horizonWater[12*64+12]==Back,
+      "near-water rays behind the plane leave the existing sky untouched");
   var horizonBackdrop=Draw(new WorldSurface(horizonCamera,Vector3.Zero,Vector3.UnitZ,4,32,32,32));
-  Check(horizonBackdrop[12*64+12]==original[12*64+12],
-      "source backdrop above water horizon is never replaced with ocean tint");
+  Check(horizonBackdrop[12*64+12]==Back,
+      "source backdrop above water horizon cannot leave an unlit purple polygon");
   var horizonUnderlay=Draw(horizonSurface);
   Check(horizonUnderlay[12*64+12]==Back&&horizonUnderlay[44*64+12]!=Back,
       "added underlay covers only rays intersecting water ahead of camera");

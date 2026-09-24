@@ -7,7 +7,7 @@ namespace JetMoto;
 
 internal static class RiderGeometry
 {
-    private sealed record Face(int Shift, Vector3[] Vertices);
+    private sealed record Face(int Shift, int RiderId, Vector3[] Vertices);
     private static readonly Dictionary<string, Dictionary<int, Face>> Models = [];
     public static long Faces;
 
@@ -18,23 +18,22 @@ internal static class RiderGeometry
         int S(int o) => BinaryPrimitives.ReadInt16LittleEndian(b.AsSpan(o, 2));
         int P(int o) => checked((int)(U(o) - U(12)));
         Dictionary<int, Face> faces = [];
-        HashSet<(int, int, bool)> visited = [];
-        void Walk(int o, int shift, bool rider)
+        HashSet<(int, int, int)> visited = [];
+        void Walk(int o, int shift, int riderId)
         {
             if (o < 0 || o + 24 > b.Length || shift < 0 || shift > 12)
                 throw new InvalidDataException("Rider geometry node outside original model");
-            if (!visited.Add((o, shift, rider))) return;
+            if (!visited.Add((o, shift, riderId))) return;
             if (visited.Count > 50000) throw new InvalidDataException("Rider hierarchy too large");
             int type = b[o], count = 0, start = 0;
             if (type == 9 && S(o + 2) is >= 200 and < 220 && S(o + 4) == 1000)
             {
-                rider = true;
-                Walk(P(o + 16), shift, true);
+                Walk(P(o + 16), shift, S(o + 2));
                 return;
             }
             if (type == 0)
             {
-                if (!rider) return;
+                if (riderId < 200) return;
                 int vertices = P(o + 4), polygon = P(o + 12);
                 for (uint i = 0; i < U(o + 16); i++)
                 {
@@ -47,7 +46,11 @@ internal static class RiderGeometry
                             int v = checked(vertices + S(polygon + 4 + j * 2) * 8);
                             points[j] = new(S(v), S(v + 2), S(v + 4));
                         }
-                        faces[polygon] = new(shift, points);
+                        // Shared geometry cannot establish an actor identity by
+                        // address alone. Keep its shadows but exclude it from emitters.
+                        int owner = faces.TryGetValue(polygon, out var previous) && previous.RiderId != riderId
+                            ? -1 : riderId;
+                        faces[polygon] = new(shift, owner, points);
                     }
                     int size = b[polygon + 2] * 4;
                     if (size < 16) throw new InvalidDataException("Rider polygon size");
@@ -71,14 +74,16 @@ internal static class RiderGeometry
             {
                 int child = P(o + start + i * 4);
                 if (type == 2) child = P(child + 8);
-                Walk(child, shift, rider);
+                Walk(child, shift, riderId);
             }
         }
         try
         {
-            for (uint i = 0; i < U(24); i++) Walk(P(28 + (int)i * 4), (int)U(16), false);
+            for (uint i = 0; i < U(24); i++) Walk(P(28 + (int)i * 4), (int)U(16), -1);
             Models[model.Name] = faces;
             if (faces.Count > 0) Console.WriteLine($"[JetMoto:rider-geometry] {model.Name}: {faces.Count} original highest-detail faces.");
+            if (faces.Count > 0) Console.WriteLine($"[JetMoto:rider-ownership] {model.Name}: " +
+                string.Join(",", faces.Values.GroupBy(f => f.RiderId).OrderBy(g => g.Key).Select(g => $"{g.Key}:{g.Count()}")));
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
@@ -99,8 +104,14 @@ internal static class RiderGeometry
         if (!float.IsFinite(normal.LengthSquared()) || normal.LengthSquared() < 1e-10f) return null;
         camera.Casters.Add(new(points[0], points[1], points[2]));
         if (face.Vertices.Length == 4) camera.Casters.Add(new(points[1], points[3], points[2]));
+        if (face.RiderId is >= 200 and < 220)
+        {
+            if (!camera.Riders.TryGetValue(face.RiderId, out var rider))
+                camera.Riders[face.RiderId] = rider = new RiderBounds();
+            for (int i = 0; i < face.Vertices.Length; i++) rider.Include(points[i]);
+        }
         Faces++;
         return new(camera, points[0], normal, 3, (int)Gte.ReadControl(24) / 65536f,
-            (int)Gte.ReadControl(25) / 65536f, (ushort)Gte.ReadControl(26));
+            (int)Gte.ReadControl(25) / 65536f, (ushort)Gte.ReadControl(26),riderId:face.RiderId);
     }
 }

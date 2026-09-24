@@ -262,6 +262,19 @@ public static class NativeTextures
         return false;
     }
 
+    internal static readonly bool ExtendedWaterLod=Environment.GetEnvironmentVariable("JETMOTO_EXTEND_WATER_LOD")=="1";
+    public static uint WaterLodDistance(uint address,uint squaredDistance)
+    {
+        if(!ExtendedWaterLod||!Widescreen.Active)return squaredDistance;
+        uint p=address&0x1fffffffu;
+        foreach(var model in Active){
+            long offset=(long)p-(model.Destination&0x1fffffffu);
+            if(offset>=0&&offset<model.Original.Length&&WorldLighting.IsWaterLod(model,(int)offset))
+                return WaterLodPolicy.ExtendDistance(squaredDistance);
+        }
+        return squaredDistance;
+    }
+
     public static bool IsOriginalRiderNode(uint address, byte type)
     {
         uint p=address&0x1fffffffu;

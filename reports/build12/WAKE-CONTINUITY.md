@@ -1,5 +1,10 @@
 # Wake Continuity Work
 
+Status: REJECTED BY USER AFTER LIVE PLAY. Historical implementation notes below
+do not establish visual acceptance. The surface layer still reads as a speckled
+strip, and this implementation does not provide independent all-racer emitters
+or validated sand/dirt/mud effects. See EMITTER-AND-WATER-AUDIT.md.
+
 Scope: verified EF77 water effects only. The approved ocean material, water
 geometry, rider/scenery lighting and airborne droplet trajectories are unchanged.
 

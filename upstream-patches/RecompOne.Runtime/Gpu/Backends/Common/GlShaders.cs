@@ -153,6 +153,9 @@ flat in vec4 vSurface;
 uniform sampler2D uWorldHeight;
 uniform sampler2D uWaterDetail;
 uniform sampler2D uRiderShadow;
+uniform sampler2D uWaterWake;
+uniform vec4 uWakeBounds;
+uniform float uWakeEnabled;
 uniform vec4 uWorldBounds;
 uniform vec2 uWorldHeightRange;
 uniform vec3 uWorldLight;
@@ -188,12 +191,28 @@ vec3 texturedWater(vec3 source,vec3 p,vec3 L,float sun,float ao) {
     float grazing=pow(1.0-clamp(dot(N,V),0.0,1.0),4.0);
     float glint=pow(max(dot(N,normalize(L+V)),0.0),24.0)*sun;
     float illumination=(.80+.20*max(dot(N,L),0.0)*sun)*(1.0-.05*ao);
+    // Additive native crests must not add a second body or duplicate wake foam.
+    if(vSurface.w>2.1 && vSurface.w<2.5)
+        return source*illumination*(.55+.45*broken);
     // Reflection contrast follows the ripple crests; color stays in the source hue.
     float reflection=broken*(.10+.16*grazing+.16*glint);
-    return clamp(source*(body*illumination+reflection),0.0,1.0);
+    vec3 water=clamp(source*(body*illumination+reflection),0.0,1.0);
+    vec2 wakeUv=(p.xy-uWakeBounds.xy)/uWakeBounds.z;
+    if(uWakeEnabled>.5 && abs(p.z-uWakeBounds.w)<8.0 &&
+        wakeUv.x>0.0 && wakeUv.y>0.0 && wakeUv.x<1.0 && wakeUv.y<1.0) {
+        vec2 wake=texture(uWaterWake,wakeUv).rg;
+        vec2 flowUv=(p.xy-vec2(.7,-.4)*uWorldTime)*.16;
+        vec4 patch=texture(uWaterDetail,turn*flowUv);
+        float cells=texture(uWaterDetail,flowUv*2.37+(patch.rg-.5)*.35).b;
+        float footprint=max(length(dFdx(flowUv)),length(dFdy(flowUv)));
+        float breakup=mix(smoothstep(.27,.68,patch.b*.65+cells*.35),.56,smoothstep(.3,1.0,footprint));
+        float coverage=clamp((wake.r*1.3+wake.g*.18)*breakup,0.0,.8);
+        water=mix(water,vec3(.64,.70,.67)*(.65+.35*sun),coverage);
+    }
+    return water;
 }
 vec3 lightOriginalSurface(vec3 color) {
-    if(vSurface.w>4.1 && vSurface.w<4.5 && vWorldQ.w<=0.0)discard;
+    if(((vSurface.w>1.5 && vSurface.w<2.5) || (vSurface.w>3.5 && vSurface.w<4.5)) && vWorldQ.w<=0.0)discard;
     if(vWorldQ.w<=0.0)return color;
     if(vSurface.w>3.5 && vSurface.w<4.5 && vWorldQ.w<0.00001)
         return (dot(uWaterTint,uWaterTint)>0.0001 ? uWaterTint : color)*0.65;
@@ -269,6 +288,12 @@ float surfaceFoam(vec2 t) {
 }
 vec4 sampleCoverageEffect(vec2 t) {
     vec4 base=texture(uRepTex,t);
+    if(uRepCoverage>3.5) {
+        vec2 q=(t-.5)*2.0;
+        float alpha=(1.0-smoothstep(.15,1.0,dot(q,q)))*(.35+.65*exp(-q.x*q.x*8.0));
+        return waterCoverage(texture(uRepTex,vec2(.5,.72)).rgb,alpha*.7);
+    }
+    if(uRepCoverage>2.5 && uWakeEnabled>.5)return vec4(0.0);
     if(uRepCoverage>2.5)
         return waterCoverage(texture(uRepTex,vec2(.5,.72)).rgb,surfaceFoam(t));
     if(uRepCoverage>1.5) {
@@ -593,6 +618,9 @@ varying vec4 vSurface;
 uniform sampler2D uWorldHeight;
 uniform sampler2D uWaterDetail;
 uniform sampler2D uRiderShadow;
+uniform sampler2D uWaterWake;
+uniform vec4 uWakeBounds;
+uniform float uWakeEnabled;
 uniform vec4 uWorldBounds;
 uniform vec2 uWorldHeightRange;
 uniform vec3 uWorldLight;
@@ -628,12 +656,28 @@ vec3 texturedWater(vec3 source,vec3 p,vec3 L,float sun,float ao) {
     float grazing=pow(1.0-clamp(dot(N,V),0.0,1.0),4.0);
     float glint=pow(max(dot(N,normalize(L+V)),0.0),24.0)*sun;
     float illumination=(.80+.20*max(dot(N,L),0.0)*sun)*(1.0-.05*ao);
+    // Additive native crests must not add a second body or duplicate wake foam.
+    if(vSurface.w>2.1 && vSurface.w<2.5)
+        return source*illumination*(.55+.45*broken);
     // Reflection contrast follows the ripple crests; color stays in the source hue.
     float reflection=broken*(.10+.16*grazing+.16*glint);
-    return clamp(source*(body*illumination+reflection),0.0,1.0);
+    vec3 water=clamp(source*(body*illumination+reflection),0.0,1.0);
+    vec2 wakeUv=(p.xy-uWakeBounds.xy)/uWakeBounds.z;
+    if(uWakeEnabled>.5 && abs(p.z-uWakeBounds.w)<8.0 &&
+        wakeUv.x>0.0 && wakeUv.y>0.0 && wakeUv.x<1.0 && wakeUv.y<1.0) {
+        vec2 wake=texture2D(uWaterWake,wakeUv).rg;
+        vec2 flowUv=(p.xy-vec2(.7,-.4)*uWorldTime)*.16;
+        vec4 patch=texture2D(uWaterDetail,turn*flowUv);
+        float cells=texture2D(uWaterDetail,flowUv*2.37+(patch.rg-.5)*.35).b;
+        float footprint=max(length(dFdx(flowUv)),length(dFdy(flowUv)));
+        float breakup=mix(smoothstep(.27,.68,patch.b*.65+cells*.35),.56,smoothstep(.3,1.0,footprint));
+        float coverage=clamp((wake.r*1.3+wake.g*.18)*breakup,0.0,.8);
+        water=mix(water,vec3(.64,.70,.67)*(.65+.35*sun),coverage);
+    }
+    return water;
 }
 vec3 lightOriginalSurface(vec3 color) {
-    if(vSurface.w>4.1 && vSurface.w<4.5 && vWorldQ.w<=0.0)discard;
+    if(((vSurface.w>1.5 && vSurface.w<2.5) || (vSurface.w>3.5 && vSurface.w<4.5)) && vWorldQ.w<=0.0)discard;
     if(vWorldQ.w<=0.0)return color;
     if(vSurface.w>3.5 && vSurface.w<4.5 && vWorldQ.w<0.00001)
         return (dot(uWaterTint,uWaterTint)>0.0001 ? uWaterTint : color)*0.65;
@@ -709,6 +753,12 @@ float surfaceFoam(vec2 t) {
 }
 vec4 sampleCoverageEffect(vec2 t) {
     vec4 base=texture2D(uRepTex,t);
+    if(uRepCoverage>3.5) {
+        vec2 q=(t-.5)*2.0;
+        float alpha=(1.0-smoothstep(.15,1.0,dot(q,q)))*(.35+.65*exp(-q.x*q.x*8.0));
+        return waterCoverage(texture2D(uRepTex,vec2(.5,.72)).rgb,alpha*.7);
+    }
+    if(uRepCoverage>2.5 && uWakeEnabled>.5)return vec4(0.0);
     if(uRepCoverage>2.5)
         return waterCoverage(texture2D(uRepTex,vec2(.5,.72)).rgb,surfaceFoam(t));
     if(uRepCoverage>1.5) {
