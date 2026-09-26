@@ -26,7 +26,7 @@ Deployment copies an explicit artifact list and preserves existing disc images, 
 
 The scripts retain this workstation's SDK and disc defaults; pass supported path parameters or adjust local defaults on another machine. Release validation requires an isolated published candidate with release-artwork.json. It uses process-local replay input and framebuffer capture. Inspect resulting images and behavior: reaching a frame count alone does not prove correctness. The bounded replay exits with code 3 at its intended deadline.
 
-Run-Validation.ps1 supports development captures; Play-VisualQA.cmd launches the staged testing game for manual play with all tracks available. Reusable replay inputs live in Validation/Replays. Generated evidence remains under ignored reports/build12 for compatibility with existing authoring tools.
+Run-Validation.ps1 supports development captures; Play-VisualQA.cmd launches the deployed user-facing game for manual play with all tracks available. Reusable replay inputs live in Validation/Replays. Generated evidence remains under ignored reports/build12 for compatibility with existing authoring tools.
 
 ## Packaging
 
@@ -48,3 +48,8 @@ The gate report must have passed set to true and identify the exact application 
 | .build, reports, logs | Ignored local builds, captures, and diagnostics |
 
 Old numbered build reports and cloud handoffs were retired from the source tree. Their history remains in Git, with local originals archived under .build/archive/repository-cleanup-20260926. Existing generated reports remain available locally. The staged game, saves, original disc, previous build, and verified distribution were preserved during cleanup.
+## Required user-facing delivery
+
+The current playable installation is D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto, beside the original CUE and BIN tracks. Publishing into .build is only staging. Delivery requires deploying the self-contained runtime, dependencies, and accepted HD artwork into that user-facing folder, then validating the executable there with adjacent-disc discovery and fresh settings/save state. Back up and restore existing user data for this test.
+
+Run-JetMoto.cmd launches the recorded deployment. Play-VisualQA.cmd and the installed run.bat launch the same user-facing game with all tracks available. Normal JetMoto.exe launch enables the HD visuals without extra environment flags.

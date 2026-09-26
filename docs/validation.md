@@ -44,3 +44,10 @@ The gallery uses unchanged native capture PNGs:
 | Blackwater Falls | release-slot-3-v1/race-000900.png |
 | Snow Blind | release-slot-8-v1/race-000450.png |
 | Nightmare | release-slot-5-v1/race-000450.png |
+## User-facing installation check — 2026-09-26
+
+The verified package was deployed to D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto beside the original CUE/BIN files. All 1,860 installed files (including the archive's checksum manifest) matched the expanded package. Dependencies and HD artwork are bundled in that folder; no SDK is required.
+
+The actual installed executable completed a 100-second first-launch replay with no existing settings or memory cards, no explicit disc path, and no visual-feature environment overrides. All five native captures were inspected individually: title at frame 901, race-type menu at 1800, Joyride starting grid at 2700, shoreline gameplay at 3600, and later water gameplay at 4500. Menus, upgraded HUD, riders, scenery, water, and advancing race time were visible. The straight-input replay eventually crossed the track boundary; previously documented thin effect streaks remained visible.
+
+The process exited with the expected bounded-test code 3. Original settings and memory cards were restored byte-for-byte afterward. Raw evidence is local at reports/build12/user-first-launch-20260926. This headless test does not verify audible sound, physical controller input, or full races.
