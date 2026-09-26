@@ -53,15 +53,20 @@ function Publish-Game {
     $script:Output = Join-Path $Root ('.build\publish-' + [Guid]::NewGuid().ToString('N'))
     $script:PublishStages += $script:Output
     Invoke-Dotnet -Arguments @('restore', $script:Project, '-r', 'win-x64', '--configfile', $script:NuGetConfig,
-        '-p:SelfContained=true', '-p:NuGetAudit=false')
+        '-p:SelfContained=true', '-p:PublishSingleFile=true', '-p:EnableSingleFileAnalyzer=false', '-p:NuGetAudit=false')
     Invoke-Dotnet -Arguments @('publish', $script:Project, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
-        '--no-restore', '-o', $script:Output, '-p:UseSharedCompilation=false', '-m:1')
+        '--no-restore', '-o', $script:Output, '-p:UseSharedCompilation=false', '-m:1',
+        '-p:PublishSingleFile=true', '-p:EnableSingleFileAnalyzer=false',
+        '-p:IncludeAllContentForSelfExtract=true', '-p:DebugType=embedded')
     if ($VisualAssetRoot) {
         & (Join-Path $Root 'Stage-ReleaseAssets.ps1') -CandidateRoot $VisualAssetRoot -PublishRoot $script:Output
     }
     $prefix = $script:Output.TrimEnd('\') + '\'
     $script:PublishedFiles = @(Get-ChildItem -LiteralPath $script:Output -File -Recurse |
         ForEach-Object { $_.FullName.Substring($prefix.Length) })
+    if (@($script:PublishedFiles | Where-Object { $_ -match '\.(dll|pdb)$' }).Count) {
+        throw 'Single-file publish left loose dependencies or debug symbols.'
+    }
 }
 
 function Verify-GeneratedHooks {
@@ -251,7 +256,7 @@ try {
     Write-Step ('Build complete in {0:n0} seconds. Executable: {1}' -f ((Get-Date)-$Started).TotalSeconds, $gameExe)
     Write-Host 'Build 12 directional lighting, cast shadows, moving wakes and layered native water rendering are active in normal JetMoto.exe launches. No preview launcher or setting is required.'
     Write-Host 'Double-click JetMoto.exe in the deployment folder. It reads the CUE beside it; no command-line arguments are required.'
-    Write-Host 'Keep the accompanying libraries there. Gameplay is 16:9, menus are 4:3, perspective textures are enabled, renderer dithering is disabled, and the complete native 4x pack with new spray artwork is installed.'
+    Write-Host 'Runtime and dependencies are bundled in JetMoto.exe. Keep Textures and Lighting beside it. Gameplay is 16:9 and menus are 4:3.'
     exit 0
 } catch {
     $message = $_ | Out-String

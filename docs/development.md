@@ -35,7 +35,7 @@ Run-Validation.ps1 supports development captures; Play-VisualQA.cmd launches the
 ./Verify-Release.ps1 -Archive .build/distributions/JetMoto-Windows.zip
 ```
 
-The gate report must have passed set to true and identify the exact application and runtime SHA-256 hashes. Packaging uses .build/deployment.json, refuses existing output paths, and includes the self-contained runtime, artwork, instructions, licenses, and verification manifests. It excludes disc images and user data.
+The gate report must have passed set to true and set singleFile to true and identify the exact bundled executable through exeSha256. Packaging uses .build/deployment.json, refuses existing output paths, and includes the self-contained runtime, artwork, instructions, licenses, and verification manifests. It excludes disc images and user data.
 
 ## Repository layout
 
@@ -53,3 +53,9 @@ Old numbered build reports and cloud handoffs were retired from the source tree.
 The current playable installation is D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto, beside the original CUE and BIN tracks. Publishing into .build is only staging. Delivery requires deploying the self-contained runtime, dependencies, and accepted HD artwork into that user-facing folder, then validating the executable there with adjacent-disc discovery and fresh settings/save state. Back up and restore existing user data for this test.
 
 Run-JetMoto.cmd launches the recorded deployment. Play-VisualQA.cmd and the installed run.bat launch the same user-facing game with all tracks available. Normal JetMoto.exe launch enables the HD visuals without extra environment flags.
+
+## Single-executable publishing
+
+Build-Windows.ps1 publishes one self-contained JetMoto.exe with managed assemblies, the .NET runtime, native libraries, and debug symbols bundled inside. No dependency DLLs belong beside the executable. Textures, Lighting, and the user's original disc remain external.
+
+The bundle extracts its dependencies into the runtime's per-user cache on first launch. Full extraction preserves assembly locations needed by runtime integration and mod compilation. The game explicitly anchors disc discovery, artwork, saves, and logs to the actual process executable directory, rather than the extraction cache. A first-launch check must use a fresh cache and no loose DLLs, and inspect native menu and gameplay captures.

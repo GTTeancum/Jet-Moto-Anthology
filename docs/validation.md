@@ -51,3 +51,17 @@ The verified package was deployed to D:\Programming\GitHub\Jet-Moto-Recomp\Jet M
 The actual installed executable completed a 100-second first-launch replay with no existing settings or memory cards, no explicit disc path, and no visual-feature environment overrides. All five native captures were inspected individually: title at frame 901, race-type menu at 1800, Joyride starting grid at 2700, shoreline gameplay at 3600, and later water gameplay at 4500. Menus, upgraded HUD, riders, scenery, water, and advancing race time were visible. The straight-input replay eventually crossed the track boundary; previously documented thin effect streaks remained visible.
 
 The process exited with the expected bounded-test code 3. Original settings and memory cards were restored byte-for-byte afterward. Raw evidence is local at reports/build12/user-first-launch-20260926. This headless test does not verify audible sound, physical controller input, or full races.
+
+## Single-executable delivery — 2026-09-26
+
+The current installed JetMoto.exe bundles the .NET runtime and all managed/native dependencies (126,354,205 bytes). There are no loose DLLs in the user-facing game folder. The former runtime files were archived locally under .build/archive/pre-single-exe-20260926. Textures, Lighting, and original disc images remain external.
+
+Full dependency extraction initially exposed a startup bug: AppContext.BaseDirectory referred to the extraction cache. The launcher now resolves the actual process executable directory for disc discovery, artwork, logs, and saved data. A corrected publish was deployed to the user's Jet Moto folder; all 1,623 published files matched their staging hashes.
+
+The installed executable passed a 100-second first-launch replay with a fresh extraction cache, no settings/cards, automatic adjacent-disc discovery, and default HD feature settings. Every saved frame was individually inspected: title 900, race-type menu 1800, Joyride grid 2701, moving water gameplay 3600, and later track-boundary/collision state 4500. The timer advanced, native menus and HD HUD rendered, and water/buoy artwork loaded. The straight-input replay ran out of bounds; this is a smoke test, not a completed race. Exit was the expected timeout code 3, with empty stderr. Original settings and memory cards were restored byte-for-byte.
+
+Fourteen launcher cases and seven deployment cases also passed. The publisher rejects loose DLL/PDB outputs, and packaging requires the tested EXE's hash. The build still emits MonoMod's general single-file warning; full extraction preserves its assembly locations, and the tested normal startup/menu/gameplay flow succeeded. Mod compilation, audio listening, and physical controller input were not tested.
+
+Current local distribution: .build/distributions/JetMoto-Windows-SingleExe.zip. The earlier JetMoto-Build12-Windows.zip described above is retained as a historical multi-file package. Evidence: reports/build12/single-exe-fixed-first-launch and reports/build12/single-exe-delivery-gate.json.
+
+Single-executable archive SHA-256: 512E5ED261916063C71C79499326C8C311097308FC16F6F6E680B304A71FF1C2. Archive verification passed for all 1,630 manifest entries plus the manifest itself.

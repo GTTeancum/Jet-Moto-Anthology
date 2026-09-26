@@ -2,7 +2,7 @@
   "project": "Jet Moto / RecompOne",
   "build": "12",
   "version": "0.12.0",
-  "status": "Build 12 cumulative regression and sampled visual gates passed; package archive verified",
+  "status": "Single-executable delivery passed fresh first-launch smoke; prior cumulative regression recorded in docs/validation.md",
   "upstreamCommit": "d81dec8c9622fdcd0865d73588a3baa8d3c3a605",
   "sdk": "10.0.401",
   "originalBootSha256": "f1ad5aa4a092c9fc2a7f2d6795951a60a4419d02a0a3d0ea2a200fabc7a0ce48",
@@ -26,5 +26,6 @@
     "Audio not listened to in muted validation.",
     "Previously accepted visual artifacts remain; no defect-free claim."
   ],
-  "packageSha256": "C31221695F06F90FF17CD94E64BA257F72A7255911803425506AB2487F704621"
+  "singleFile": true,
+  "exeSha256": "4164B786ED64740DCB9B866659AA83C4155291E6D411065BFB194F01389C7495"
 }

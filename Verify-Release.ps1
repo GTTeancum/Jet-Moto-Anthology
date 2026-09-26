@@ -39,8 +39,19 @@ try {
         $checked++
     }
     if($checked -ne $expected.Count){throw 'Missing manifest entries.'}
-    foreach($required in @('JetMoto.exe','JetMoto.dll','coreclr.dll','run.bat','READ-ME.txt','release-verification.json')){
+    foreach($required in @('JetMoto.exe','run.bat','READ-ME.txt','release-verification.json')){
         if(!$expected.ContainsKey($required)){throw "Missing required file: $required"}
+    }
+    $gateEntry=$zip.Entries | Where-Object { $_.FullName.Replace('\','/') -eq ($prefix+'release-verification.json') }
+    $reader=[IO.StreamReader]::new($gateEntry.Open())
+    try {$gate=$reader.ReadToEnd() | ConvertFrom-Json}finally{$reader.Dispose()}
+    if($gate.singleFile){
+        if($expected['JetMoto.exe'].sha256 -ne $gate.exeSha256){throw 'Single-file gate hash mismatch.'}
+        if(@($expected.Keys | Where-Object {$_ -match '\.(dll|pdb)$'}).Count){throw 'Loose dependencies in single-file package.'}
+    } else {
+        foreach($required in @('JetMoto.dll','coreclr.dll')){
+            if(!$expected.ContainsKey($required)){throw "Missing legacy runtime file: $required"}
+        }
     }
     Write-Host "PASS: $checked archive files verified by SHA256; no disc images, saves, settings, logs or user overrides."
 }finally{$zip.Dispose()}

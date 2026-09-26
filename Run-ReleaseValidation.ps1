@@ -22,7 +22,7 @@ $env:JETMOTO_CAPTURE_END=[string]$CaptureEnd
 $env:JETMOTO_CAPTURE_EVERY=[string]$CaptureEvery
 $env:JETMOTO_CAPTURE_EFFECT_FRAMES='0'
 $exe=Join-Path $appRoot 'JetMoto.exe'
-$before=@('JetMoto.exe','JetMoto.dll','RecompOne.Runtime.dll','release-artwork.json') | ForEach-Object {
+$before=@('JetMoto.exe','release-artwork.json') | ForEach-Object {
     Get-FileHash -LiteralPath (Join-Path $appRoot $_)
 }
 $options=@('--headless','--mute','--no-trace','--no-dialogs','--smoke-seconds',"$Seconds")

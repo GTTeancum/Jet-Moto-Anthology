@@ -28,7 +28,7 @@ Screenshots captured directly from the game. Current work covers the first Jet M
 
 ## Playing
 
-Use a self-contained Windows x64 package and your own original **Jet Moto (USA)** disc image. Keep its CUE and all 14 referenced BIN tracks together beside `JetMoto.exe`, then launch the executable. Keep the accompanying libraries, `Textures`, and `Lighting` folders intact. A packaged build needs no separate .NET installation.
+Use a self-contained Windows x64 package and your own original **Jet Moto (USA)** disc image. Keep its CUE and all 14 referenced BIN tracks together beside `JetMoto.exe`, then launch the executable. Runtime and native dependencies are bundled inside the EXE. Keep the `Textures` and `Lighting` folders intact. A packaged build needs no separate .NET installation.
 
 If your disc is elsewhere:
 

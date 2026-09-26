@@ -16,6 +16,13 @@ internal static class Program
 {
     private const string Build = "Jet Moto build 12 / RecompOne d81dec8c9622fdcd0865d73588a3baa8d3c3a605";
     private const string BootHash = "f1ad5aa4a092c9fc2a7f2d6795951a60a4419d02a0a3d0ea2a200fabc7a0ce48";
+    // Full bundle extraction changes AppContext.BaseDirectory to the cache.
+    // User data and artwork belong beside the executable, never in that cache.
+    private static string GameDirectory =>
+        Environment.ProcessPath is string processPath &&
+        Path.GetFileNameWithoutExtension(processPath).Equals("JetMoto", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetDirectoryName(processPath)!
+            : AppContext.BaseDirectory;
     private static int _stopReason;
     private static int _snapshotBusy;
 
@@ -36,8 +43,8 @@ internal static class Program
         if (showDialogs && (result is 1 or 2) && OperatingSystem.IsWindows())
         {
             string message = (_lastError ?? "The game could not start. See the log for details.") +
-                "\n\nGame folder:\n" + AppContext.BaseDirectory +
-                "\n\nDiagnostic log, when available:\n" + Path.Combine(AppContext.BaseDirectory, "logs", "last-run.log");
+                "\n\nGame folder:\n" + GameDirectory +
+                "\n\nDiagnostic log, when available:\n" + Path.Combine(GameDirectory, "logs", "last-run.log");
             try { MessageBoxW(IntPtr.Zero, message, "Jet Moto", 0x00000010U); } catch { }
         }
         return result;
@@ -104,7 +111,7 @@ internal static class Program
         catch (Exception e) { ReportError(e.Message); return 2; }
 
         // Resolve supplied relative paths before changing the working directory. Keep saves/settings next to this build.
-        Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+        Directory.SetCurrentDirectory(GameDirectory);
         Directory.CreateDirectory("logs");
         using var log = new StreamWriter("logs/last-run.log", false, new UTF8Encoding(false)) { AutoFlush = true };
         TextWriter oldOut = Console.Out, oldError = Console.Error;
@@ -126,7 +133,7 @@ internal static class Program
             // This also works when Explorer/shortcuts launch us from another working directory.
             if (disc == null)
             {
-                try { disc = DiscLocator.FindLocalDisc(AppContext.BaseDirectory, ValidateDisc); }
+                try { disc = DiscLocator.FindLocalDisc(GameDirectory, ValidateDisc); }
                 catch (Exception e) { ReportError(e.Message); return 2; }
             }
             if (disc != null)
@@ -149,7 +156,7 @@ internal static class Program
             foreach (string feature in new[] { "JETMOTO_WORLD_WAKE", "JETMOTO_MENU_BACKGROUNDS" })
                 if (Environment.GetEnvironmentVariable(feature) == null)
                     Environment.SetEnvironmentVariable(feature, "1");
-            NativeTextures.Configure(disc!, AppContext.BaseDirectory);
+            NativeTextures.Configure(disc!, GameDirectory);
             TrackAccess.Configure(unlockAll);
             ValidationReplay.Configure();
             Console.WriteLine("[JetMoto] Spray/roost: original-ID 4x replacement art; smooth moving coverage in the replacement shader.");
@@ -188,7 +195,7 @@ internal static class Program
                         Console.WriteLine(result == 3 ? "[JetMoto] Smoke deadline reached; not a playability verdict." : "[JetMoto] Stop requested.");
                     }
                     catch (Exception e) { result = 1; ReportError("Runtime failure: " + e); }
-                    finally { Snapshot(watch); try { NativeTextures.SaveUsage(AppContext.BaseDirectory); } catch (Exception e) { Console.WriteLine("[JetMoto:native-textures] Usage report: " + e.Message); } }
+                    finally { Snapshot(watch); try { NativeTextures.SaveUsage(GameDirectory); } catch (Exception e) { Console.WriteLine("[JetMoto:native-textures] Usage report: " + e.Message); } }
                 });
             }
             finally

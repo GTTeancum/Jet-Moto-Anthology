@@ -7,10 +7,12 @@ $ErrorActionPreference='Stop'
 $gate=Get-Content -LiteralPath $GateReport -Raw | ConvertFrom-Json
 $deployment=Get-Content -LiteralPath $DeploymentRecord -Raw | ConvertFrom-Json
 $source=(Resolve-Path -LiteralPath $deployment.deployDirectory).Path
-if(!$gate.passed -or
-   (Get-FileHash -LiteralPath (Join-Path $source 'JetMoto.dll')).Hash -ne $gate.appSha256 -or
-   (Get-FileHash -LiteralPath (Join-Path $source 'RecompOne.Runtime.dll')).Hash -ne $gate.runtimeSha256) {
-    throw 'Completed gates must identify these exact application/runtime binaries.'
+if(!$gate.passed -or !$gate.singleFile -or
+   (Get-FileHash -LiteralPath (Join-Path $source 'JetMoto.exe')).Hash -ne $gate.exeSha256) {
+    throw 'Completed gates must identify the exact tested single-file executable.'
+}
+if (@($deployment.files | Where-Object { $_ -match '\.(dll|pdb)$' }).Count) {
+    throw 'Dependencies and debug symbols must be bundled in JetMoto.exe.'
 }
 $output=[IO.Path]::GetFullPath($OutputRoot)
 $archive=$output+'.zip'
@@ -27,7 +29,7 @@ Jet Moto - Build 12 (Windows x64)
 
 Extract this entire folder. Add your original Jet Moto (USA).cue and all 14
 referenced BIN tracks beside JetMoto.exe, then double-click JetMoto.exe.
-Keep the accompanying libraries, Textures and Lighting folders together.
+Runtime and dependencies are bundled in JetMoto.exe. Keep Textures and Lighting beside it.
 No SDK or separate .NET installation is needed.
 
 For visual testing with all ten tracks available, double-click run.bat.

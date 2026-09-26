@@ -19,8 +19,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(RecompOneRoot)/RecompOne.Runtime/RecompOne.Runtime.csproj" />
-    <Content Include="../Textures/Native4x-Test/**/*" Link="Textures/Native4x-Test/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="../Textures/Native4x-Test/**/*" Link="Textures/Native4x-Test/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
   <ItemGroup><EmbeddedResource Include="config/native-banks.json" LogicalName="JetMoto.NativeBanks.json" /></ItemGroup>
-  <ItemGroup><Content Include="../Lighting/**/*" Link="Lighting/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><Content Include="../Lighting/**/*" Link="Lighting/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" /></ItemGroup>
 </Project>
