@@ -8,7 +8,7 @@
     <Title>Jet Moto</Title>
     <Product>Jet Moto</Product>
     <Description>Jet Moto PC recompilation</Description>
-    <Version>0.11.0</Version>
+    <Version>0.12.0</Version>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

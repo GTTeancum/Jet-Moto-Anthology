@@ -13,7 +13,7 @@ try {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
     $stage = Join-Path $PSScriptRoot ".build\logs-$stamp"
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    foreach ($rel in @('logs\build.log', '.build\deployment.json', 'BUILD11-REPORT.md', 'provenance.json', 'generated-hooks.json')) {
+    foreach ($rel in @('logs\build.log', '.build\deployment.json', 'docs\validation.md', 'provenance.json', 'generated-hooks.json')) {
         $source = Join-Path $PSScriptRoot $rel
         if (Test-Path -LiteralPath $source -PathType Leaf) {
             Copy-Item -LiteralPath $source -Destination (Join-Path $stage ([IO.Path]::GetFileName($source)))

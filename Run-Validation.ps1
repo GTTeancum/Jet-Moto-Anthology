@@ -1,5 +1,5 @@
 param([string]$Name = 'baseline', [int]$Seconds = 110,
-      [string]$Replay = 'reports\build12\baseline-replay.json',
+      [string]$Replay = 'Validation\Replays\baseline-replay.json',
       [ValidateRange(1,3600)][int]$CaptureEvery = 120,
       [long]$CaptureStart = 0, [long]$CaptureEnd = [long]::MaxValue,
       [long]$CaptureRaceStart = -1, [long]$CaptureRaceEnd = -1,

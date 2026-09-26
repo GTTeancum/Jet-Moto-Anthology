@@ -1,0 +1,48 @@
+[
+  {
+    "Buttons": 8,
+    "Start": 600,
+    "End": 620
+  },
+  {
+    "Buttons": 8,
+    "Start": 900,
+    "End": 920
+  },
+  {
+    "Buttons": 16384,
+    "Start": 1200,
+    "End": 1220
+  },
+  {
+    "Buttons": 16384,
+    "Start": 1500,
+    "End": 1520
+  },
+  {
+    "Buttons": 16384,
+    "Start": 1800,
+    "End": 1820
+  },
+  {
+    "Buttons": 32,
+    "Start": 1980,
+    "End": 1995
+  },
+  {
+    "Buttons": 16384,
+    "Start": 2340,
+    "End": 2360
+  },
+  {
+    "Buttons": 16384,
+    "Start": 2640,
+    "End": 2660
+  },
+  {
+    "Buttons": 16384,
+    "Clock": "race",
+    "Start": 0,
+    "End": 2200
+  }
+]

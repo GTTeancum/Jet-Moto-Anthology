@@ -3,6 +3,7 @@ param(
     [string]$KitRoot = 'C:\Programming\JetMoto-RecompOne-Input',
     [string]$DeployDir = 'D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto',
     [string]$Disc,
+    [string]$VisualAssetRoot,
     [switch]$Recompile,
     [switch]$RunTests
 )
@@ -55,6 +56,9 @@ function Publish-Game {
         '-p:SelfContained=true', '-p:NuGetAudit=false')
     Invoke-Dotnet -Arguments @('publish', $script:Project, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true',
         '--no-restore', '-o', $script:Output, '-p:UseSharedCompilation=false', '-m:1')
+    if ($VisualAssetRoot) {
+        & (Join-Path $Root 'Stage-ReleaseAssets.ps1') -CandidateRoot $VisualAssetRoot -PublishRoot $script:Output
+    }
     $prefix = $script:Output.TrimEnd('\') + '\'
     $script:PublishedFiles = @(Get-ChildItem -LiteralPath $script:Output -File -Recurse |
         ForEach-Object { $_.FullName.Substring($prefix.Length) })

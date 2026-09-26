@@ -51,10 +51,6 @@ JetMoto-Logs-*.zip
 /packs/
 *.zip
 *.log
-/reports/**/*
-!/reports/**/
-!/reports/**/*.md
-!/reports/**/*replay.json
-!/reports/build12/approved-baseline-regression/summary.json
-!/reports/build12/fine-airborne-spray-verified-runtime/frame-003554.png
-!/reports/build12/fine-airborne-spray-verified-runtime/validation-run.json
+# Generated validation evidence stays local; reusable inputs live in Validation/Replays.
+/reports/
+/exports/

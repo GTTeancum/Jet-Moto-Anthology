@@ -62,8 +62,23 @@ try {
             count++;Console.WriteLine($"PASS {count:D4}: original ID, SHA256, runtime 4x PNG decode/cache"+(effect?", authored coverage":args.Length==2?", exact original alpha":"")+" "+relative);
         }
     }
-    if(count!=1406 || effects!=15 || Directory.EnumerateFiles(root,"*.png",SearchOption.AllDirectories).Count()!=1406)
+    int regionCount=0;
+    if(doc.TryGetProperty("packagedRegions",out var regions)) foreach(var region in regions.EnumerateArray()) {
+        string relative=region.GetProperty("png").GetString()!;
+        if(!System.Text.RegularExpressions.Regex.IsMatch(relative,
+            @"^MISC/OPTIONS/Regions/(0001-0000867C|0002-00008679)/\d{3}-\d{3}-\d{3}-\d{3}\.png$") || !names.Add(relative))
+            throw new InvalidDataException("Invalid/duplicate region identity: "+relative);
+        string file=Path.Combine(root,relative);
+        if(!Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(region.GetProperty("png_sha256").GetString(),StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Region checksum: "+relative);
+        int w=region.GetProperty("width").GetInt32(),h=region.GetProperty("height").GetInt32();
+        var asset=new NativeTextureAsset(relative,file,w,h,smoothCutout:true);
+        var texture=asset.GetTexture() ?? throw new InvalidDataException("Runtime rejected region: "+relative);
+        if(texture.Width!=w*4 || texture.Height!=h*4)throw new InvalidDataException("Region dimensions: "+relative);
+        regionCount++;
+    }
+    if(count!=1406 || effects!=15 || Directory.EnumerateFiles(root,"*.png",SearchOption.AllDirectories).Count()!=1406+regionCount)
         throw new InvalidDataException("Wrong complete PNG count.");
-    Console.WriteLine($"PASS: all {count} PNGs accepted by the actual NativeTextureAsset loader; {checkedAlpha} unchanged categorical alpha pixels and {checkedCoverage} authored coverage pixels checked; {effects} effect materials.");
+    Console.WriteLine($"PASS: all {count} PNGs and {regionCount} packaged regions accepted by the actual NativeTextureAsset loader; {checkedAlpha} unchanged categorical alpha pixels and {checkedCoverage} authored coverage pixels checked; {effects} effect materials.");
     return 0;
 } catch(Exception e) { Console.Error.WriteLine("FAIL: "+e);return 1; }

@@ -144,6 +144,11 @@ internal static class Program
                 if (disc == null) { ReportError("No Jet Moto CUE was found beside the executable."); return 2; }
                 return 0;
             }
+            // Accepted Build 12 presentation is also the normal-launch default.
+            // Explicit diagnostic overrides remain available to test harnesses.
+            foreach (string feature in new[] { "JETMOTO_WORLD_WAKE", "JETMOTO_MENU_BACKGROUNDS" })
+                if (Environment.GetEnvironmentVariable(feature) == null)
+                    Environment.SetEnvironmentVariable(feature, "1");
             NativeTextures.Configure(disc!, AppContext.BaseDirectory);
             TrackAccess.Configure(unlockAll);
             ValidationReplay.Configure();
