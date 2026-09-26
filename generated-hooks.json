@@ -1,5 +1,17 @@
 [
   {
+    "name": "session-unlockall-track-artwork",
+    "position": "after",
+    "anchor": "Jet_Moto_main.func_8014026C(c, m);                      /* 0x8013EF64  jal         func_8014026C */",
+    "code": "c.V0 = global::JetMoto.TrackAccess.MenuArtworkVariant(c.V0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);"
+  },
+  {
+    "name": "session-unlockall-track-availability",
+    "position": "after",
+    "anchor": "c.V0 = mem.ReadU8(c.V0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Invalidate(2);  /* 0x8014048C  lbu         $v0, 0x0($v0) */",
+    "code": "c.V0 = global::JetMoto.TrackAccess.Availability(c.A1,c.V0);"
+  },
+  {
     "name": "menu-rider-source-request",
     "position": "after",
     "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8013D320u);",

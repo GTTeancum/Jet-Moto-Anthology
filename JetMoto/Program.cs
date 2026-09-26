@@ -56,7 +56,7 @@ internal static class Program
     {
         string? disc = null;
         int smokeSeconds = 0;
-        bool validateOnly = false, trace = true;
+        bool validateOnly = false, trace = true, unlockAll = false;
         bool verbose = Environment.GetEnvironmentVariable("JETMOTO_VERBOSE") == "1";
         try
         {
@@ -74,6 +74,7 @@ internal static class Program
                             "  --no-dialogs      Suppress Windows error dialogs for automated tools.\n" +
                             "  --headless        Render offscreen with no desktop input; implies --mute.\n" +
                             "  --mute            Disable audio output for this process only.\n" +
+                            "  --unlockall       Make all 10 tracks selectable for this session; preserves saved unlock progress.\n" +
                             "Exit: 0=normal return, 1=error, 2=invalid arguments/disc, 3=smoke timeout, 130=Ctrl+C.");
                         return 0;
                     case "--disc":
@@ -81,6 +82,7 @@ internal static class Program
                         if (disc != null) throw new ArgumentException("Specify only one disc.");
                         disc = Path.GetFullPath(args[i]); break;
                     case "--verbose": verbose = true; break;
+                    case "--unlockall": unlockAll = true; break;
                     case "--no-dialogs": break;
                     case "--headless":
                         Environment.SetEnvironmentVariable("JETMOTO_HEADLESS", "1");
@@ -143,6 +145,7 @@ internal static class Program
                 return 0;
             }
             NativeTextures.Configure(disc!, AppContext.BaseDirectory);
+            TrackAccess.Configure(unlockAll);
             ValidationReplay.Configure();
             Console.WriteLine("[JetMoto] Spray/roost: original-ID 4x replacement art; smooth moving coverage in the replacement shader.");
             Console.WriteLine("[JetMoto] Rider/moto LOD: highest original level permanently selected; original track LOD unchanged.");

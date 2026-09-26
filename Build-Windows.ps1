@@ -181,6 +181,10 @@ try {
         Publish-Game
     }
     if ($RunTests) {
+        Write-Step 'Checking session-only track access and normal progression defaults.'
+        $trackTests = Join-Path $Root 'TrackAccessTests\TrackAccessTests.csproj'
+        Invoke-Dotnet -Arguments @('restore', $trackTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')
+        Invoke-Dotnet -Arguments @('run', '--project', $trackTests, '-c', 'Release', '--no-restore', '-p:UseSharedCompilation=false')
         Write-Step 'Checking world-camera transforms, geometry-surface provenance and safe renderer buffers.'
         $worldTests = Join-Path $Root 'WorldLightingTests\WorldLightingTests.csproj'
         Invoke-Dotnet -Arguments @('restore', $worldTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')

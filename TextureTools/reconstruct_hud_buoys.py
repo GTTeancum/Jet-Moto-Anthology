@@ -95,8 +95,15 @@ def vector_digits(result):
     for index, paths in enumerate(DIGITS.values()):
         for path in paths:
             xy = [((x+index*10+.5)*scale, (y+.5)*scale) for x,y in path]
-            ImageDraw.Draw(border).line(xy, fill=255, width=int(3.4*scale), joint='curve')
-            ImageDraw.Draw(ink).line(xy, fill=255, width=int(1.65*scale), joint='curve')
+            for mask, width in ((border, 3.4), (ink, 1.65)):
+                draw = ImageDraw.Draw(mask)
+                draw.line(xy, fill=255, width=int(width*scale), joint='curve')
+                # Pillow's line joints do not join a closed path's first/last
+                # vertex, and butt caps expose the ink at open stroke ends.
+                # Explicit round joins/caps keep the silver outline continuous.
+                radius = width*scale/2
+                for x, y in xy:
+                    draw.ellipse((x-radius,y-radius,x+radius,y+radius),fill=255)
     b = np.array(border.resize((512,52),Image.Resampling.LANCZOS))/255
     k = np.array(ink.resize((512,52),Image.Resampling.LANCZOS))/255
     color = np.empty((52,512,4),dtype=np.uint8)

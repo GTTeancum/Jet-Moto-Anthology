@@ -1,5 +1,24 @@
 # Build 12 Validation
 
+2026-09-26 checkpoint: the user requested commit/push of the minimap, boost,
+HUD numeral repair and all-track testing follow-ups, and confirmed that only
+release gates remain. Manual testing continues; release acceptance and packaging
+are still pending. TODO already contains only those release gates.
+
+2026-09-26 follow-up: [HUD numeral outline repair](HUD-DIGIT-JOINS-CHECKPOINT.md).
+Repairs the closed-path seams and exposed stroke ends reported on Nightmare.
+
+2026-09-26 follow-up: [session-only all-track access](UNLOCKALL-CHECKPOINT.md).
+`--unlockall` exposes all ten tracks; selector sweep and Nightmare launch verified.
+
+2026-09-26 follow-up: [boost indicator restoration](BOOST-LIGHTS-CHECKPOINT.md).
+The original 8x8 boost lamps now use clean round green lenses at 4x resolution.
+
+2026-09-26 follow-up: [crisp minimap artwork](MINIMAP-CHECKPOINT.md).
+Ten cubic contour traces staged, all inspected offline; three native ISLAND1
+captures inspected for edge quality and marker alignment. Accepted HUD/buoy
+checkpoint is committed and pushed as `82a4c15`.
+
 Latest HUD work: [speedometer checkpoint](HUD-SPEEDOMETER-CHECKPOINT.md).
 Approved V4 digits/buoys retained; restored speedometer staged in the isolated
 candidate and individually inspected in three native ISLAND1 captures.

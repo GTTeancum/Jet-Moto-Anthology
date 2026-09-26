@@ -9,6 +9,7 @@ param([string]$Name = 'baseline', [int]$Seconds = 110,
       [switch]$ExtendedWaterLod,
       [switch]$MenuBackgrounds,
       [switch]$DisposableCards,
+      [switch]$UnlockAll,
       [switch]$Capture)
 $ErrorActionPreference = 'Stop'
 $reportDirectory = Join-Path $PSScriptRoot "reports\build12\$Name"
@@ -49,6 +50,7 @@ if ($runtimeHash -ne (Get-FileHash -LiteralPath $builtRuntime -Algorithm SHA256)
     extendedWaterLod = [bool]$ExtendedWaterLod
     menuBackgrounds = [bool]$MenuBackgrounds
     disposableCards = [bool]$DisposableCards
+    unlockAll = [bool]$UnlockAll
     seconds = $Seconds
     capture = [bool]$Capture
     captureStart = $CaptureStart
@@ -74,9 +76,11 @@ try {
         $settingsBytes=$original
         [IO.File]::WriteAllText($settingsPath,($settings | ConvertTo-Json -Depth 100))
     }
+    [string[]]$sessionOptions = @()
+    if($UnlockAll){$sessionOptions += '--unlockall'}
     & 'C:\Programming\JetMoto-RecompOne-Input\cache\dotnet-win-10.0.401\dotnet.exe' $app `
         'D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto\Jet Moto (USA).cue' `
-        --smoke-seconds $Seconds --no-dialogs --no-trace --headless --mute
+        --smoke-seconds $Seconds --no-dialogs --no-trace --headless --mute @sessionOptions
     $code = $LASTEXITCODE
 }
 finally {

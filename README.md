@@ -49,6 +49,17 @@ Unknown, non-static, mismatched or invalid receiver geometry falls back to the o
 
 ## Validation and logs
 
+For track-by-track visual testing, launch `JetMoto.exe --unlockall` (plus
+`--disc "path\to\Jet Moto (USA).cue"` when the disc is elsewhere). This makes
+all ten tracks selectable at the current difficulty for that session. It
+overrides the track availability query without editing saved unlock progress.
+Omit the switch for normal progression. Ordinary saving still works normally.
+
+In this development checkout, `Play-VisualQA.cmd` launches the current isolated
+`.build/ui-buoy-bin` candidate with `--unlockall`, the adjacent original disc,
+the current menu artwork and world wake enabled. It starts a normal interactive
+game for manual testing, without the validation replay or capture settings.
+
 `reports/build12/VALIDATION.md` distinguishes unit/pixel tests, actual gameplay captures, source/data reproduction and Windows-targeted compilation. Build 12 was validated from process-local native framebuffer captures, not desktop screenshots.
 
 After your local run, `Collect-Logs.cmd` collects the runtime log, world receiver/water counters, existing native texture diagnostics and installed lighting catalog. It does not collect disc images, texture images, lighting maps or saves. Logs may contain local paths.
