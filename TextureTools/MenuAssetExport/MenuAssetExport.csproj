@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CandidateRoot>$(MSBuildThisFileDirectory)../../.build/ui-buoy-bin/Release/net10.0/win-x64</CandidateRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="JetMoto"><HintPath>$(CandidateRoot)/JetMoto.dll</HintPath></Reference>
+    <Reference Include="RecompOne.Runtime"><HintPath>$(CandidateRoot)/RecompOne.Runtime.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

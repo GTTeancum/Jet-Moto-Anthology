@@ -1,0 +1,12 @@
+[
+  {"Start":600,"End":620,"Buttons":8},
+  {"Start":900,"End":920,"Buttons":8},
+  {"Start":1020,"End":1035,"Buttons":32},
+  {"Start":1080,"End":1095,"Buttons":32},
+  {"Start":1140,"End":1155,"Buttons":32},
+  {"Start":1260,"End":1280,"Buttons":16384},
+  {"Start":1380,"End":1395,"Buttons":16},
+  {"Start":1500,"End":1515,"Buttons":16},
+  {"Start":1620,"End":1635,"Buttons":16384},
+  {"Start":1920,"End":1935,"Buttons":4096}
+]

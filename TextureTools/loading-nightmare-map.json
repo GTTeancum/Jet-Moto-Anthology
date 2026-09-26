@@ -1,0 +1,25 @@
+{
+  "name": "Nightmare",
+  "source": "DARK/OVERV9",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [31, 40, 288, 207],
+  "protected": {
+    "paragraph": [163, 49, 297, 86],
+    "north west checkpoint": [35, 49, 68, 76],
+    "north grapple": [66, 51, 85, 72],
+    "north east checkpoint": [85, 40, 115, 75],
+    "west middle checkpoint": [98, 89, 125, 106],
+    "west lower red marker": [100, 114, 121, 134],
+    "west bottom checkpoint": [98, 132, 126, 151],
+    "west cluster": [31, 102, 80, 149],
+    "central north checkpoint": [144, 86, 168, 117],
+    "central straight checkpoint": [121, 111, 141, 139],
+    "central south checkpoint": [127, 132, 158, 154],
+    "central east checkpoint": [166, 139, 193, 163],
+    "east checkpoint": [176, 110, 201, 138],
+    "south west checkpoint": [172, 172, 204, 199],
+    "south east checkpoint": [259, 173, 289, 203],
+    "start finish arrow": [220, 173, 259, 209]
+  }
+}

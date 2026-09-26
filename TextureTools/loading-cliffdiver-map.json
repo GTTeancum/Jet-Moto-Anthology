@@ -1,0 +1,22 @@
+{
+  "name": "Cliffdiver",
+  "source": "ISLAND2/OVERV4",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [40, 30, 275, 170],
+  "protected": {
+    "switchbacks label": [96, 76, 194, 90],
+    "freeway label": [221, 65, 276, 82],
+    "dirt trail label": [189, 91, 253, 107],
+    "lookout label": [51, 102, 113, 116],
+    "cliff label": [13, 120, 57, 134],
+    "rocks label": [45, 160, 85, 173],
+    "north checkpoint": [79, 27, 108, 48],
+    "switchback grapple checkpoint cluster": [130, 39, 193, 82],
+    "bridge checkpoint": [190, 54, 215, 84],
+    "east checkpoint": [248, 80, 276, 108],
+    "lookout checkpoint": [35, 88, 65, 110],
+    "start finish arrow": [149, 139, 187, 172],
+    "south east checkpoint": [231, 148, 251, 175]
+  }
+}

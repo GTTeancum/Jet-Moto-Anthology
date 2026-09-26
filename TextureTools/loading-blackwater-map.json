@@ -1,0 +1,24 @@
+{
+  "name": "Blackwater Falls",
+  "source": "SWAMP2/OVERV1",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [31, 37, 203, 207],
+  "protected": {
+    "marsh lands label": [122, 47, 203, 62],
+    "plantation house label": [69, 87, 137, 111],
+    "drop off label": [16, 90, 50, 111],
+    "falls label": [31, 117, 76, 132],
+    "dam label": [99, 146, 132, 160],
+    "north grapple": [101, 43, 117, 60],
+    "west grapple": [51, 71, 68, 89],
+    "west checkpoint": [74, 64, 96, 88],
+    "east checkpoint": [142, 72, 164, 96],
+    "falls checkpoint grapples": [44, 97, 87, 132],
+    "southwest checkpoint": [35, 129, 60, 155],
+    "southwest grapple": [51, 157, 72, 178],
+    "dam checkpoint": [85, 121, 110, 145],
+    "southeast checkpoint": [139, 131, 165, 157],
+    "start finish arrow": [132, 175, 158, 207]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "Willpower",
+  "source": "ALPINE1/OVERV6",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [23, 42, 281, 168],
+  "protected": {
+    "north jump label": [198, 65, 233, 81],
+    "east jump label": [247, 61, 282, 77],
+    "center jump label": [188, 106, 223, 123],
+    "west jump label": [77, 119, 114, 133],
+    "east lower jump label": [221, 103, 256, 119],
+    "north west red jump": [97, 53, 108, 70],
+    "west red jump": [102, 87, 119, 118],
+    "south west red jump": [85, 142, 100, 165],
+    "south central red jump": [113, 138, 126, 151],
+    "center red jump": [180, 103, 195, 117],
+    "east red jump cluster": [231, 73, 252, 102],
+    "north checkpoint": [187, 39, 210, 68],
+    "north east checkpoint": [229, 59, 255, 90],
+    "east checkpoint": [216, 79, 246, 106],
+    "central checkpoint": [160, 101, 184, 128],
+    "west checkpoint cluster": [95, 75, 134, 106],
+    "south central checkpoint": [101, 131, 127, 160],
+    "south grapple and checkpoints": [39, 138, 98, 167],
+    "start finish arrow": [53, 94, 91, 134]
+  }
+}

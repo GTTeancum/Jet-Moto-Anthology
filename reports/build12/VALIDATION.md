@@ -1,12 +1,52 @@
 # Build 12 Validation
 
+Latest HUD work: [speedometer checkpoint](HUD-SPEEDOMETER-CHECKPOINT.md).
+Approved V4 digits/buoys retained; restored speedometer staged in the isolated
+candidate and individually inspected in three native ISLAND1 captures.
+
+2026-09-25 menu continuation: [credits/scoring evidence](MENU-CREDITS-SCORING-CONTINUATION.md).
+Eight credits pages and three scoring selections tested with individually
+inspected native captures. Tiny credits trademark defects repaired using source
+samples and native inspected; loading contour experiment rejected. DEVELOP
+also rejected after native inspection and withdrawn. Isolated catalog 41. Full menu
+quality and release gates remain open; these are partial, sampled checks.
+
 Status: USER-APPROVED PLAYABLE CHECKPOINT; FINAL RELEASE GATES STILL OPEN. NOT PACKAGED.
 On 2026-09-24, after testing the current isolated Build 12 with the world-span
 clipping repair, the user said "I think this is great" and requested a commit
 and push. Preserve this playable baseline. Earlier rejection notes below are
-historical context, not the user's latest assessment. Swamp detail and broader
-validation remain unfinished; spray is explicitly deferred.
+historical context, not the user's latest assessment.
+The user subsequently said "Close effects/water. That's sufficient". Water and
+effects are closed at the current quality level, including swamp, reflections,
+spray and wakes. Do not resume their earlier to-dos without a new request.
+This acceptance does not claim that every previously documented defect was
+technically eliminated.
+On 2026-09-25, the user said "Lighting task can be closed". Lighting is closed
+by user direction; its pending verification and dedicated release-gate entries
+have been removed. This records acceptance, not new test evidence or a claim
+that every historical lighting issue was eliminated. Preserve the current
+lighting implementation and do not resume lighting work without a new request.
+The user subsequently directed: "Close menu-based tasks, removing them".
+Menu work is closed by that direction and removed from TODO; older open-menu
+notes in this log are historical, not the current scope.
+On 2026-09-26 the user approved the speedometer and cumulative HUD/buoy updates,
+requested commit/push, and directed removal of the Remaining HUD And Buoys
+section from TODO. HUD/buoy work is closed at this accepted quality level;
+this is acceptance, not a claim that every historical artifact was eliminated.
+The user's subsequent minimap smoothing request is a separate follow-up.
+Release gates remain open.
 Current remaining work: [To-do](TODO.md).
+
+Approved pre-menu test build (historical baseline, moved out of the TODO):
+`.build/audit-bin/Release/net10.0/win-x64/JetMoto.dll`.
+Manual launch used `JETMOTO_WORLD_WAKE=1`, without replay, capture, headless,
+mute or extended-water-LOD override.
+Application SHA256: `D2C09E1AF287900921AD27FEDE9281FB1CFF724C0044783D577F0D4DD66F3333`.
+Runtime SHA256: `6C452BF113BBFB34196E706DC0AA625EEF63A45A178152D631DF16B767A082AE`.
+The binary and user-supplied game assets remain local, not part of the source commit.
+
+Track-dial correction, native rotation captures, and still-open UI/buoy work:
+[UI upscale checkpoint](UI-UPSCALE-CHECKPOINT.md).
 Latest clipping repair, matched native coverage evidence, and regression results:
 [Geometry coverage checkpoint](GEOMETRY-COVERAGE-CHECKPOINT.md).
 Latest wider ocean and swamp checks:
@@ -15,10 +55,9 @@ Latest source-geometry diagnostic and dry-sand streak evidence:
 [Shoreline order checkpoint](SHORELINE-ORDER-CHECKPOINT.md).
 Latest water-only correction and remaining native flicker:
 [Water horizon checkpoint](WATER-HORIZON-CHECKPOINT.md).
-User priority update: spray work is deferred. Do not spend further iterations
-on spray quality until resumed; current focus is water stability/appearance,
-original hues, and lighting. Existing spray limitations remain documented,
-not silently classified as complete.
+Historical reports below retain their original findings and status language;
+the user-directed water/effects and lighting closures above supersede their
+open-work lists for those areas.
 Spray projection evidence and native atlas-state isolation:
 [Spray projection checkpoint](SPRAY-PROJECTION-CHECKPOINT.md).
 Complementary open-water failure and emission diagnostics:
@@ -215,3 +254,19 @@ Archive inspection after packaging confirmed that `vendor`, `.nuget`, `.build`,
 `bin` and `obj` directories were excluded, while this validation report and the
 three accepted visual-capture frames were included. The final archive checksum
 is recorded in the sidecar because the ZIP cannot contain its own stable hash.
+# Menu Candidate Checkpoint, 2026-09-25
+
+Continuation: all 20 authored track overviews were reassessed individually and
+withdrawn after lettering/linework failures. Two new offline experiments also
+failed visual inspection and were not staged. Eleven new native captures verify
+Joyride original Loading/Continue fallback; this is not an upscale acceptance.
+See `MENU-OVERVIEW-REASSESSMENT.md` for exact artifacts and remaining scope.
+Approved application hash remains unchanged. No new release or runtime build.
+
+Options dark row fragments were traced to preceding-label shadow pixels included
+in the original atlas rectangles. Source-owned isolated label crops remove them.
+Native captures with Intermediate, Professional and Turbo Off states were
+individually checked; normal, highlighted and disabled labels remain readable.
+See `UI-UPSCALE-CHECKPOINT.md` for exact captures, provenance and remaining scope.
+Removed the resolved row-fragment item from TODO; options submenus and all-menu
+quality validation remain open. No new release or approved-build replacement.

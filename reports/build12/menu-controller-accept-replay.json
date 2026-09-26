@@ -1,0 +1,152 @@
+[
+  {
+    "Start": 600,
+    "End": 615,
+    "Buttons": 8
+  },
+  {
+    "Start": 900,
+    "End": 915,
+    "Buttons": 8
+  },
+  {
+    "Start": 1020,
+    "End": 1035,
+    "Buttons": 32
+  },
+  {
+    "Start": 1080,
+    "End": 1095,
+    "Buttons": 32
+  },
+  {
+    "Start": 1140,
+    "End": 1155,
+    "Buttons": 32
+  },
+  {
+    "Start": 1260,
+    "End": 1275,
+    "Buttons": 16384
+  },
+  {
+    "Start": 1500,
+    "End": 1515,
+    "Buttons": 64
+  },
+  {
+    "Start": 1560,
+    "End": 1575,
+    "Buttons": 64
+  },
+  {
+    "Start": 1620,
+    "End": 1635,
+    "Buttons": 64
+  },
+  {
+    "Start": 1680,
+    "End": 1695,
+    "Buttons": 64
+  },
+  {
+    "Start": 1740,
+    "End": 1755,
+    "Buttons": 64
+  },
+  {
+    "Start": 1800,
+    "End": 1815,
+    "Buttons": 64
+  },
+  {
+    "Start": 1860,
+    "End": 1875,
+    "Buttons": 64
+  },
+  {
+    "Start": 1980,
+    "End": 1995,
+    "Buttons": 16384
+  },
+  {
+    "Start": 2220,
+    "End": 2235,
+    "Buttons": 128
+  },
+  {
+    "Start": 2460,
+    "End": 2475,
+    "Buttons": 128
+  },
+  {
+    "Start": 2700,
+    "End": 2715,
+    "Buttons": 16384
+  },
+  {
+    "Start": 2940,
+    "End": 2955,
+    "Buttons": 16384
+  },
+  {
+    "Start": 3180,
+    "End": 3195,
+    "Buttons": 4096
+  },
+  {
+    "Start": 3420,
+    "End": 3435,
+    "Buttons": 64
+  },
+  {
+    "Start": 3480,
+    "End": 3495,
+    "Buttons": 16384
+  },
+  {
+    "Start": 3660,
+    "End": 3675,
+    "Buttons": 128
+  },
+  {
+    "Start": 3900,
+    "End": 3915,
+    "Buttons": 32
+  },
+  {
+    "Start": 4140,
+    "End": 4155,
+    "Buttons": 32
+  },
+  {
+    "Start": 4380,
+    "End": 4395,
+    "Buttons": 16384
+  },
+  {
+    "Start": 4620,
+    "End": 4635,
+    "Buttons": 16384
+  },
+  {
+    "Start": 4860,
+    "End": 4875,
+    "Buttons": 4096
+  },
+  {
+    "Start": 5100,
+    "End": 5115,
+    "Buttons": 16
+  },
+  {
+    "Start": 5160,
+    "End": 5175,
+    "Buttons": 16384
+  },
+  {
+    "Start": 5340,
+    "End": 5355,
+    "Buttons": 4096
+  }
+]

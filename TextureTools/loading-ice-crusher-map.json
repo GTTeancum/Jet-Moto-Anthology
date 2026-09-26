@@ -1,0 +1,26 @@
+{
+  "name": "Ice Crusher",
+  "source": "ALPINE2/OVERV7",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [45, 35, 285, 211],
+  "protected": {
+    "chasm label": [44, 38, 94, 53],
+    "west track switch label": [16, 64, 62, 89],
+    "north track switch label": [155, 40, 199, 67],
+    "track splits label": [72, 131, 116, 158],
+    "jump label": [151, 176, 185, 192],
+    "tunnel label": [191, 150, 240, 165],
+    "paragraph": [205, 35, 310, 123],
+    "north checkpoint": [107, 34, 129, 67],
+    "north east checkpoint": [128, 57, 160, 82],
+    "west checkpoint": [48, 80, 79, 107],
+    "inner checkpoint": [126, 122, 154, 143],
+    "east north checkpoint": [249, 129, 276, 161],
+    "east south checkpoint": [250, 169, 282, 194],
+    "south checkpoint": [126, 184, 149, 213],
+    "south west checkpoint": [56, 151, 86, 183],
+    "jump red markers": [196, 126, 221, 159],
+    "start finish arrow": [179, 173, 218, 209]
+  }
+}

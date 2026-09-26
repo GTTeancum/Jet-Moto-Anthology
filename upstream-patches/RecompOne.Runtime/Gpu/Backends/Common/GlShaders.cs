@@ -330,6 +330,30 @@ vec4 sampleCoverageEffect(vec2 t) {
     return mix(base,vec4(rgb,alpha*edge),motion);
 }
 
+uniform vec2 uCutoutBlend;
+vec4 compositeCutout(vec2 t,vec3 destination) {
+    vec2 size=uRepRect.zw*4.0;
+    vec2 pixel=t*size-.5, origin=floor(pixel), fraction=fract(pixel);
+    vec3 result=vec3(0.0);
+    float mask=uSetMask,occupied=0.0;
+    // Filter occupancy and STP composition separately; STP is not half opacity.
+    for(int y=0;y<2;y++)for(int x=0;x<2;x++) {
+        vec2 cell=clamp(origin+vec2(x,y),vec2(0.0),size-1.0);
+        vec4 s=texture(uRepTex,(cell+.5)/size);
+        float weight=(x==0?1.0-fraction.x:fraction.x)*(y==0?1.0-fraction.y:fraction.y);
+        vec3 color=destination;
+        if(s.a>.001) {
+            occupied+=weight;
+            ivec3 e8=(ivec3(s.rgb*255.0+.5)*ivec3(vColor.rgb*255.0+.5))>>7;
+            color=lightOriginalSurface(quant5(e8));
+            if(s.a<.95)color=clamp(color*uCutoutBlend.x+destination*uCutoutBlend.y,0.0,1.0);
+            if(weight>=.5)mask=max(mask,s.a<.95?1.0:0.0);
+        }
+        result+=color*weight;
+    }
+    if(occupied<=0.0)discard;
+    return vec4(result,mask);
+}
 void main() {
                                      vec2 vUV = vUVQ.xy / vUVQ.z;
                                      if (uCheckMask != 0 && texelFetch(uDest, ivec2(gl_FragCoord.xy), 0).a >= 0.5) discard;
@@ -361,6 +385,11 @@ void main() {
                                          ivec2 mapped = ((ivec2(whole) & uTexWindow.xy) | uTexWindow.zw) & ivec2(255);
                                          vec2 fuv = vec2(mapped) + fract(vUV);
                                          vec2 t = (fuv - uRepRect.xy) / uRepRect.zw;
+                                         if(uRepCoverage < -.5) {
+                                             FragColor=compositeCutout(t,texelFetch(uDest,ivec2(gl_FragCoord.xy),0).rgb);
+                                             BlendColor=vec4(1.0,1.0,1.0,0.0);
+                                             return;
+                                         }
                                          if (uRepCoverage > 0.5) {
                                              vec4 img = sampleCoverageEffect(t);
                                              if (img.a <= 0.0) discard;
@@ -795,6 +824,29 @@ vec4 sampleCoverageEffect(vec2 t) {
     return mix(base,vec4(rgb,alpha*edge),motion);
 }
 
+uniform vec2 uCutoutBlend;
+vec4 compositeCutout(vec2 t,vec3 destination) {
+    vec2 size=uRepRect.zw*4.0;
+    vec2 pixel=t*size-.5, origin=floor(pixel), fraction=fract(pixel);
+    vec3 result=vec3(0.0);
+    float mask=uSetMask,occupied=0.0;
+    for(int y=0;y<2;y++)for(int x=0;x<2;x++) {
+        vec2 cell=clamp(origin+vec2(float(x),float(y)),vec2(0.0),size-1.0);
+        vec4 s=texture2D(uRepTex,(cell+.5)/size);
+        float weight=(x==0?1.0-fraction.x:fraction.x)*(y==0?1.0-fraction.y:fraction.y);
+        vec3 color=destination;
+        if(s.a>.001) {
+            occupied+=weight;
+            vec3 e8=floor(floor(s.rgb*255.0+.5)*floor(vColor.rgb*255.0+.5)/128.0);
+            color=lightOriginalSurface(quant5(e8));
+            if(s.a<.95)color=clamp(color*uCutoutBlend.x+destination*uCutoutBlend.y,0.0,1.0);
+            if(weight>=.5)mask=max(mask,s.a<.95?1.0:0.0);
+        }
+        result+=color*weight;
+    }
+    if(occupied<=0.0)discard;
+    return vec4(result,mask);
+}
 void main() {
                                         vec2 vUV = vUVQ.xy / vUVQ.z;
                                         vec2 destUv = gl_FragCoord.xy / uDestSize;
@@ -827,6 +879,10 @@ void main() {
 
                                             if (vTexMode > 5.5) {
                                                 vec2 t = (fuv - uRepRect.xy) / uRepRect.zw;
+                                                if(uRepCoverage < -.5) {
+                                                    gl_FragColor=compositeCutout(t,dstTexel.rgb);
+                                                    return;
+                                                }
                                                 vec4 img = uRepCoverage > 0.5 ? sampleCoverageEffect(t) : texture2D(uRepTex, t);
                                                 if (uRepCoverage > 0.5) {
                                                     if (img.a <= 0.0) discard;

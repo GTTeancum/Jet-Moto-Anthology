@@ -1,0 +1,18 @@
+{
+  "name": "Cypress Run",
+  "source": "SWAMP1/OVERV0",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [33, 38, 285, 170],
+  "protected": {
+    "title": [108, 16, 212, 34],
+    "covered bridge label": [210, 43, 308, 58],
+    "serpentine cut label": [96, 153, 199, 170],
+    "start arrow and west checkpoint": [84, 70, 119, 91],
+    "north checkpoint": [144, 35, 163, 60],
+    "northwest checkpoint": [44, 79, 68, 102],
+    "south checkpoint and grapple cluster": [64, 126, 112, 160],
+    "east checkpoint": [139, 101, 169, 129],
+    "covered bridge": [196, 54, 219, 73]
+  }
+}

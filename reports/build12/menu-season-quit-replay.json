@@ -1,0 +1,13 @@
+[
+  {"Start":600,"End":620,"Buttons":8},
+  {"Start":900,"End":920,"Buttons":8},
+  {"Start":1200,"End":1220,"Buttons":16384},
+  {"Start":1500,"End":1520,"Buttons":16384},
+  {"Start":1620,"End":1635,"Buttons":32},
+  {"Start":1680,"End":1695,"Buttons":32},
+  {"Start":1800,"End":1820,"Buttons":16384},
+  {"Start":2100,"End":2120,"Buttons":16384},
+  {"Start":2700,"End":2715,"Buttons":8},
+  {"Start":2940,"End":2955,"Buttons":64},
+  {"Start":3060,"End":3075,"Buttons":16384}
+]

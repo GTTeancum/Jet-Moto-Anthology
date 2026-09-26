@@ -1,0 +1,17 @@
+{
+  "name": "Hammerhead",
+  "source": "ISLAND3/OVERV5",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [31, 35, 283, 147],
+  "protected": {
+    "west freeway label": [70, 70, 126, 85],
+    "north sand bars label": [157, 62, 218, 78],
+    "bridge label": [130, 87, 179, 101],
+    "south freeway label": [205, 119, 259, 136],
+    "south sand bars label": [80, 132, 146, 149],
+    "west grapple and checkpoint": [33, 58, 66, 89],
+    "east grapple and checkpoint": [243, 55, 277, 83],
+    "start finish arrow": [163, 89, 202, 128]
+  }
+}

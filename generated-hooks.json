@@ -1,5 +1,107 @@
 [
   {
+    "name": "menu-rider-source-request",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8013D320u);",
+    "code": "global::JetMoto.MenuBackgrounds.RequestRider(c);"
+  },
+  {
+    "name": "menu-source-upload-800e0970",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800E0970  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800e0d24",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800E0D24  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800eac44",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EAC44  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800eacbc",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EACBC  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800ee1ac",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EE1AC  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800ee208",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EE208  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800ee9f8",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EE9F8  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-800eea38",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x800EEA38  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-8013f5b4",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x8013F5B4  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-8014d360",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x8014D360  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-upload-8014d484",
+    "position": "before",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x8014D484  jal         func_800E7B54 */",
+    "code": "global::JetMoto.MenuSourceTrace.Upload(c,mem);"
+  },
+  {
+    "name": "menu-source-vlc-trace",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x800E2694u);",
+    "code": "global::JetMoto.MenuSourceTrace.Decode(c,mem);"
+  },
+  {
+    "name": "menu-track-image-upload",
+    "position": "after",
+    "anchor": "Jet_Moto_main.LoadImage(c, m);                          /* 0x8014D360  jal         func_800E7B54 */",
+    "code": "using var _jmTrackImage = global::JetMoto.MenuBackgrounds.BeginTrackUpload(c,mem);"
+  },
+  {
+    "name": "menu-rider-image-upload",
+    "position": "after",
+    "anchor": "using var _jmTrackImage = global::JetMoto.MenuBackgrounds.BeginTrackUpload(c,mem);",
+    "code": "using var _jmRiderImage = global::JetMoto.MenuBackgrounds.BeginRiderUpload(c,mem);"
+  },
+  {
+    "name": "menu-source-background-trace",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x8013F51Cu);",
+    "code": "global::JetMoto.MenuSourceTrace.Background(c,mem);"
+  },
+  {
+    "name": "menu-background-source-draw",
+    "position": "after",
+    "anchor": "global::JetMoto.MenuSourceTrace.Background(c,mem);",
+    "code": "using var _jmBackground = global::JetMoto.MenuBackgrounds.Begin(c,mem);"
+  },
+  {
     "name": "water-only-distance-selection",
     "position": "after",
     "anchor": "{ var _s = c.S2; var _t = c.S4; c.S2 = _s + _t; if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Add(18, 18, 20, c.S2, _s, _t); }  /* 0x8010ECB0  addu        $s2, $s2, $s4 */",
@@ -196,5 +298,17 @@
     "position": "after",
     "anchor": "global::JetMoto.Widescreen.PrepareCamera(mem, c.A0);",
     "code": "global::JetMoto.WorldLighting.BeginCamera(c.A0);"
+  },
+  {
+    "name": "hud-original-descriptor",
+    "position": "after",
+    "anchor": "mem.WriteU16((c.S0 + 0x8u), (ushort)c.V0); if (RecompOne.Runtime.Pgxp.Pgxp.CpuTracking) RecompOne.Runtime.Pgxp.PgxpCpu.Sh(2, (c.S0 + 0x8u), c.V0);  /* 0x801138C0  sh          $v0, 0x8($s0) */",
+    "code": "global::JetMoto.NativeTextures.RememberHudSource(mem,c.S1,c.S0);"
+  },
+  {
+    "name": "hud-native-emission",
+    "position": "after",
+    "anchor": "RecompOne.Runtime.Diagnostics.ExecutionTrace.Enter(0x801149B0u);",
+    "code": "using var _jmHud = global::JetMoto.NativeTextures.BeginHud(mem,c.A0,c.A1);"
   }
 ]

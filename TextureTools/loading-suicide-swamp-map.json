@@ -1,0 +1,19 @@
+{
+  "name": "Suicide Swamp",
+  "source": "SWAMP3/OVERV2",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [49, 43, 286, 209],
+  "protected": {
+    "marsh lands label": [78, 53, 158, 69],
+    "covered bridge label": [224, 66, 280, 89],
+    "mud trail label": [28, 127, 86, 146],
+    "east suicide turn label": [224, 127, 300, 145],
+    "south suicide turn label": [76, 196, 151, 215],
+    "description": [150, 144, 310, 200],
+    "start finish arrow and checkpoint": [115, 98, 152, 127],
+    "north grapple": [181, 47, 204, 67],
+    "east grapple and checkpoints": [241, 94, 276, 122],
+    "south grapple and checkpoints": [51, 179, 83, 206]
+  }
+}

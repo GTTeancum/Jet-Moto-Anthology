@@ -27,7 +27,82 @@ public static class NativeTextures
     }
     private static readonly Dictionary<string,Model> Models=new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<Model> Active=[];
+    private sealed record HudSource(Model Owner, NativeTextureMaterial Material, byte[] Descriptor);
+    private static readonly Dictionary<uint,HudSource> HudSources=[];
+    private static readonly Dictionary<NativeTextureAsset,NativeTextureAsset> HudAssets=[];
+    private static readonly HashSet<string> HudDiagnostics=[];
+    public static void RememberHudSource(PSMemory memory,uint source,uint descriptor)
+    {
+        uint p=source&0x1fffffff, d=descriptor&0x1fffffff;
+        HudSources.Remove(d);
+        foreach(var model in Active)
+        {
+            long offset=(long)p-(model.Destination&0x1fffffff);
+            if(offset<0 || offset>=model.Original.Length)continue;
+            var material=ResolveSource(model,(int)offset);
+            if(material==null)return;
+            if(!HudAssets.TryGetValue(material.Asset,out var image))
+            {
+                var original=material.Asset;
+                image=new NativeTextureAsset(original.Key+"/hud",original.FilePath,original.SourceWidth,original.SourceHeight,smoothCutout:true);
+                HudAssets.Add(original,image);
+            }
+            HudSources[d]=new(model,material with {Asset=image},memory.Ram.Slice((int)d,12).ToArray());
+            if(Environment.GetEnvironmentVariable("JETMOTO_TRACE_HUD")=="1")
+                Console.WriteLine($"[JetMoto:hud-source] descriptor={d:X8} source={model.Name}@{offset:X} asset={material.Asset.Key}");
+            return;
+        }
+    }
+    public sealed class HudScope : IDisposable
+    {
+        private readonly PSMemory _memory;
+        private readonly uint _owner,_head,_previous;
+        public HudScope(PSMemory memory,uint owner,uint list)
+        {
+            _memory=memory;_owner=owner&0x1fffffff;
+            _head=memory.ReadU32(list);_previous=memory.ReadU32(_head)&0xffffff;
+        }
+        public void Dispose()
+        {
+            if(Environment.GetEnvironmentVariable("JETMOTO_HUD_UPSCALE")=="0")return;
+            var materials=HudSources.Where(p=>p.Key>=_owner && p.Key<_owner+0x1C94 && Active.Contains(p.Value.Owner)
+                    && _memory.Ram.Slice((int)p.Key,12).SequenceEqual(p.Value.Descriptor))
+                .Select(p=>p.Value.Material).Distinct().ToArray();
+            uint node=_memory.ReadU32(_head)&0xffffff;
+            ushort page=0;bool hasPage=false;
+            for(int count=0;node!=_previous && node!=0xffffff && count<256;count++)
+            {
+                if(!_memory.IsWorkMemoryRange(node,4))return;
+                uint header=_memory.ReadU32(node);int words=(int)(header>>24);
+                uint command=node+4,end=command+(uint)words*4;
+                if(!_memory.IsWorkMemoryRange(command,words*4L))return;
+                while(command<end)
+                {
+                    byte op=_memory.ReadU8(command+3);int length=CommandLength(op);
+                    if(length<1 || command+length*4>end)return;
+                    if(op==0xe1){page=(ushort)_memory.ReadU32(command);hasPage=true;}
+                    if((op&0xfc)==0x64 && hasPage)
+                    {
+                        uint uv=_memory.ReadU32(command+8),size=_memory.ReadU32(command+12);
+                        int u=(byte)uv,v=(byte)(uv>>8),w=(ushort)size,h=(ushort)(size>>16);
+                        ushort clut=(ushort)(uv>>16);
+                        var matches=materials.Where(m=>w>0 && h>0 && m.Accepts(page,clut,u,v,u+w-1,v+h-1,255,255,0,0)).ToArray();
+                        if(matches.Length==1)NativeTextureBindings.Bind(command,length,matches[0]);
+                        else if(Environment.GetEnvironmentVariable("JETMOTO_TRACE_HUD")=="1")
+                        {
+                            string diagnostic=$"owner={_owner:X} page={page:X} clut={clut:X} uv={u},{v},{w},{h} sources={materials.Length} matches={matches.Length}";
+                            if(HudDiagnostics.Add(diagnostic))Console.WriteLine("[JetMoto:hud-unmapped] "+diagnostic);
+                        }
+                    }
+                    command+=(uint)length*4;
+                }
+                node=header&0xffffff;
+            }
+        }
+    }
+    public static HudScope BeginHud(PSMemory memory,uint owner,uint list)=>new(memory,owner,list);
     private static readonly Dictionary<string,uint> FileSizes=new(StringComparer.OrdinalIgnoreCase);
+    private static readonly bool FilterMenuArtwork=Environment.GetEnvironmentVariable("JETMOTO_MENU_FILTER")!="0";
     private static long _primitives,_linked,_unknown,_packets,_badPackets,_deferred,_subdivided;
     public static string Summary => $"{NativeTextureBindings.Summary} material[seen={_primitives},linked={_linked},unmapped={_unknown},packets={_packets},bad={_badPackets},deferred={_deferred},subdivided={_subdivided}]";
     private static uint U32(byte[] b,int o) => BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(o,4));
@@ -45,8 +120,10 @@ public static class NativeTextures
         if(fingerprintStream==null) throw new InvalidDataException("Missing original-bank fingerprint catalog.");
         var fingerprints=System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,string>>(fingerprintStream)!;
         // The old VRAM matcher/dumper remains unavailable even if a saved generic setting enables it.
-        Models.Clear(); Active.Clear(); FileSizes.Clear();
+        Models.Clear(); Active.Clear(); FileSizes.Clear(); HudSources.Clear(); HudAssets.Clear(); HudDiagnostics.Clear();
+        MenuSourceTrace.Reset();
         using var fs=DiscFs.Open(cue);
+        MenuBackgrounds.Configure(fs,root);
         foreach(var entry in fs.Enumerate().Where(e=>!e.IsDir)) FileSizes[Normalize(entry.Path)]=entry.Size;
         var paths=FileSizes.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         int count=0;
@@ -88,6 +165,17 @@ public static class NativeTextures
         _ => false
     };
 
+    // Dedicated menu banks only. PICKRIDE and PRIZE also contain model artwork
+    // and need per-material review before enabling menu-specific sampling.
+    public static bool IsMenuArtworkBank(string bank) => Normalize(bank) is
+        "STARTUP/TITLE.TMS" or "NAVIGATE/RACETYPE.TMS" or "NAVIGATE/SCORING.TMS" or
+        "MISC/OPTIONS.TMS" or "MISC/SOUND.TMS" or "MISC/LOADGAME.TMS" or "MISC/SAVEGAME.TMS" or
+        "PICKTRAC/TRACKS0.TMS" or "PICKTRAC/TRACKS1.TMS" or "PICKTRAC/TRACKS2.TMS" or "PICKTRAC/TRACKS3.TMS" or
+        "STANDING/OVERALL.TMS" or "STANDING/ALPINE1/STANDING.TMS" or "STANDING/ALPINE2/STANDING.TMS" or
+        "STANDING/ALPINE3/STANDING.TMS" or "STANDING/DARK/STANDING.TMS" or
+        "STANDING/ISLAND1/STANDING.TMS" or "STANDING/ISLAND2/STANDING.TMS" or "STANDING/ISLAND3/STANDING.TMS" or
+        "STANDING/SWAMP1/STANDING.TMS" or "STANDING/SWAMP2/STANDING.TMS" or "STANDING/SWAMP3/STANDING.TMS";
+
     public static ImageRecord[] ParseBank(string bank, byte[] data, string root)
     {
         bank=Normalize(bank);
@@ -124,7 +212,17 @@ public static class NativeTextures
                 string shipped=Path.Combine(root,"Textures","Native4x-Test",rel);
                 // Filename/ID is the lookup. Original pixel hashes are never used as identifiers.
                 bool effect = IsEffectTexture(bank,i,id);
-                var asset=new NativeTextureAsset(Normalize(bank)+$"#{i}:{id:X8}",File.Exists(user)?user:shipped,w,h,effect,effect && id==0xEF77);
+                bool buoy=(bank,i,id) is ("ISLAND1/ISLAND1.TMS",45,0xC935) or ("ISLAND1/ISLAND1.TMS",46,0xC94F)
+                    or ("ISLAND2/ISLAND2.TMS",52,0xC935) or ("ISLAND2/ISLAND2.TMS",53,0xC94F)
+                    or ("ISLAND3/ISLAND3.TMS",37,0xC935) or ("ISLAND3/ISLAND3.TMS",38,0xC94F)
+                    or ("SWAMP1/SWAMP1.TMS",36,0xAD7A) or ("SWAMP1/SWAMP1.TMS",37,0xAD7B)
+                    or ("SWAMP2/SWAMP2.TMS",40,0xAD7B) or ("SWAMP2/SWAMP2.TMS",41,0xAD7A)
+                    or ("SWAMP3/SWAMP3.TMS",50,0xAD7A) or ("SWAMP3/SWAMP3.TMS",51,0xAD7B);
+                bool dial=bank=="PICKTRAC/TRACKS0.TMS" && (i,id) is
+                    (2,0x1DA8) or (3,0x1D9F) or (4,0x1D8F) or (5,0x1D8E) or
+                    (6,0x1D89) or (7,0x1D86) or (8,0x1D83) or (9,0x1D7A) or
+                    (10,0x1D72) or (11,0x1D7D);
+                var asset=new NativeTextureAsset(Normalize(bank)+$"#{i}:{id:X8}",File.Exists(user)?user:shipped,w,h,effect,effect && id==0xEF77,smoothCutout:buoy || dial || (FilterMenuArtwork && IsMenuArtworkBank(bank)),uiTileSize:dial ? 32 : 0);
                 images.Add(new ImageRecord(i,id,depth,x,y,w,h,cx,cy,cw,ch,asset));
             }
             offset=end;
@@ -139,9 +237,11 @@ public static class NativeTextures
         private readonly PSMemory _memory;
         private readonly uint _destination;
         private readonly string _name;
+        private readonly uint _caller;
         public LoadScope(CpuContext cpu,PSMemory memory,uint destination,uint nameAddress)
         {
             _cpu=cpu; _memory=memory; _destination=destination;
+            _caller=cpu.RA;
             var chars=new List<char>();
             try { for (int i=0;i<255;i++) { byte c=memory.ReadU8(nameAddress+(uint)i); if(c==0)break; chars.Add((char)c); } }
             catch { chars.Clear(); }
@@ -149,10 +249,17 @@ public static class NativeTextures
             // A failed/reused file load must not retain a previous bank identity.
             uint p=destination&0x1fffffff;
             uint size=FileSizes.TryGetValue(_name,out uint known)?known:(uint)Math.Max(0,memory.Ram.Length-(long)p);
+            MenuSourceTrace.Invalidate(destination,size);
+            MenuBackgrounds.Invalidate(destination,size);
             Active.RemoveAll(m=>p<(m.Destination&0x1fffffff)+m.Original.Length && p+(long)size>(m.Destination&0x1fffffff));
         }
         public void Dispose()
         {
+            MenuBackgrounds.Loaded(_memory,_name,_destination,_cpu.V0);
+            if (FileSizes.TryGetValue(_name,out uint sourceSize))
+                MenuSourceTrace.Loaded(_memory,_name,_destination,sourceSize,_cpu.V0,_caller);
+            if(Environment.GetEnvironmentVariable("JETMOTO_DIAG_UI")=="1"&&_name.EndsWith("JMFONT.TIM",StringComparison.Ordinal))
+                Console.WriteLine($"[JetMoto:ui-font] source={_name} destination={_destination:X8} read={_cpu.V0} caller={_caller:X8}");
             if (!Models.TryGetValue(_name,out var model)) return;
             try
             {
@@ -183,6 +290,7 @@ public static class NativeTextures
         Directory.CreateDirectory(Path.Combine(root,"logs"));
         File.WriteAllText(Path.Combine(root,"logs","native-textures.json"),System.Text.Json.JsonSerializer.Serialize(
             new { schema=2, summary=Summary, worldLighting=WorldLighting.Summary,
+                hud=HudAssets.Values.Select(a=>new {key=a.Key,png=a.FilePath,bound=a.BoundCommands,resolved=a.ResolvedCommands}).ToArray(),
                 effects=Models.Values.SelectMany(m=>m.Images).Where(i=>i.Asset.AllowsEffectCoverage)
                     .Select(i=>new {key=i.Asset.Key,png=i.Asset.FilePath,coverageLoaded=i.Asset.CoverageLoaded,
                         bound=i.Asset.BoundCommands,resolved=i.Asset.ResolvedCommands}).ToArray(),
@@ -331,6 +439,20 @@ public static class NativeTextures
                         int u0=(image.X-pageX)*scale,v0=image.Y-pageY;
                         var material=new NativeTextureMaterial(image.Asset,u0,v0,image.Width,image.Height,page,clut);
                         if (!material.Accepts(page,clut,minU,minV,maxU,maxV,ax,ay,ox,oy)) continue;
+                        if (model.Name=="MISC/OPTIONS.DMD" && image.Depth==0 &&
+                            ((image.Ordinal==1 && image.Id==0x867C) || (image.Ordinal==2 && image.Id==0x8679)) &&
+                            ax==255 && ay==255 && ox==0 && oy==0)
+                        {
+                            int width=maxU-minU+1,height=maxV-minV+1;
+                            string region=Path.Combine(Path.GetDirectoryName(image.Asset.FilePath)!,"Regions",
+                                Path.GetFileNameWithoutExtension(image.Asset.FilePath),$"{minU:D3}-{minV:D3}-{width:D3}-{height:D3}.png");
+                            if (File.Exists(region))
+                            {
+                                var isolated=new NativeTextureAsset($"{image.Asset.Key}@{minU},{minV},{width},{height}",
+                                    region,width,height,smoothCutout:true);
+                                material=new NativeTextureMaterial(isolated,minU,minV,width,height,page,clut);
+                            }
+                        }
                         if(result!=null) { result=null; break; } // Ambiguous original material: do not guess.
                         result=material;
                     }

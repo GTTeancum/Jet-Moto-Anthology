@@ -6,7 +6,7 @@ using StbImageSharp;
 namespace RecompOne.Runtime.Assets.Native;
 
 /// <summary>A replacement identified by an original source asset, never by VRAM contents.</summary>
-public sealed class NativeTextureAsset(string key, string file, int sourceWidth, int sourceHeight, bool allowEffectCoverage = false, bool waterSpray = false)
+public sealed class NativeTextureAsset(string key, string file, int sourceWidth, int sourceHeight, bool allowEffectCoverage = false, bool waterSpray = false, bool smoothCutout = false, int uiTileSize = 0)
 {
     public string Key { get; } = key;
     public string FilePath { get; } = file;
@@ -14,6 +14,8 @@ public sealed class NativeTextureAsset(string key, string file, int sourceWidth,
     public int SourceHeight { get; } = sourceHeight;
     public bool AllowsEffectCoverage { get; } = allowEffectCoverage;
     public bool WaterSpray { get; } = allowEffectCoverage && waterSpray;
+    public bool SmoothCutout { get; } = smoothCutout && !allowEffectCoverage;
+    public int UiTileSize { get; } = !allowEffectCoverage && uiTileSize is > 1 and <= 256 ? uiTileSize : 0;
     public bool CoverageLoaded => _texture?.Coverage == true;
     public long BoundCommands, ResolvedCommands;
     private bool _attempted;

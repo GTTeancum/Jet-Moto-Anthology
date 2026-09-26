@@ -1,0 +1,26 @@
+{
+  "name": "Snow Blind",
+  "source": "ALPINE3/OVERV8",
+  "insetOutputPixels": 0.6,
+  "strength": 0.7,
+  "bounds": [9, 50, 222, 204],
+  "protected": {
+    "west suicide turn label": [20, 37, 96, 52],
+    "east suicide turn label": [110, 72, 182, 86],
+    "west ramp label": [44, 78, 79, 96],
+    "east ramp label": [154, 91, 188, 107],
+    "west jump label": [20, 107, 57, 124],
+    "south west jump label": [55, 166, 90, 182],
+    "center jump label": [150, 125, 184, 141],
+    "tunnel label": [134, 141, 180, 156],
+    "south jump label": [138, 168, 176, 183],
+    "paragraph": [207, 89, 312, 157],
+    "west grapple and checkpoints": [42, 47, 72, 82],
+    "east grapple and checkpoints": [181, 72, 214, 104],
+    "south west checkpoint": [26, 148, 53, 178],
+    "south east checkpoint": [169, 176, 201, 200],
+    "east bend checkpoint": [191, 150, 215, 178],
+    "start finish arrow": [103, 144, 142, 179],
+    "jump and tunnel red markers": [170, 109, 204, 178]
+  }
+}

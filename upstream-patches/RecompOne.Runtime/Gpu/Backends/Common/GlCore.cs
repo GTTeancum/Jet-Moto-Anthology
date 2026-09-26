@@ -188,6 +188,8 @@ public sealed class GlCore : IGpuBackend
     private int _kRepClutCount;
     private int _uTexWindow, _uBlend, _uBlendOpaque, _uSetMask, _uCheckMask, _uPosBias, _uFbInv;
     private int _uRepRect, _uRepClutCount, _uRepCoverage;
+    private int _uCutoutBlend;
+    private bool _kCutout, _pendingCutout;
     private Assets.Native.WorldCamera? _worldCamera;
     private readonly Dictionary<int, Assets.Native.RiderMotionHistory> _riderMotion = [];
     private Assets.Native.WorldCamera? _motionCamera;
@@ -256,6 +258,7 @@ public sealed class GlCore : IGpuBackend
         _uFbInv = _gl.GetUniformLocation(_progPrim, "uFbInv");
         _uRepRect = _gl.GetUniformLocation(_progPrim, "uRepRect");
         _uRepCoverage = _gl.GetUniformLocation(_progPrim, "uRepCoverage");
+        _uCutoutBlend = _gl.GetUniformLocation(_progPrim, "uCutoutBlend");
         _uRepClutCount = _gl.GetUniformLocation(_progPrim, "uRepClutCount");
 
         _uWorldBounds=_gl.GetUniformLocation(_progPrim,"uWorldBounds");
@@ -536,7 +539,7 @@ public sealed class GlCore : IGpuBackend
     {
         int twAndX = ~(_env.TwMaskX * 8) & 0xFF, twAndY = ~(_env.TwMaskY * 8) & 0xFF;
         int twOrX = (_env.TwOffX & _env.TwMaskX) * 8, twOrY = (_env.TwOffY & _env.TwMaskY) * 8;
-        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kAirborne == _pendingAirborne && _kWaterWake == _pendingWaterWake && _kWorldSpray == _pendingWorldSpray
+        return _kRepTex == _pendingRepTex && _kRepClut == _pendingRepClut && _kRepCoverage == _pendingRepCoverage && _kCutout == _pendingCutout && _kAirborne == _pendingAirborne && _kWaterWake == _pendingWaterWake && _kWorldSpray == _pendingWorldSpray
                                           && (_pendingRepTex == 0 || (_kRepX == _pendingRepX && _kRepY == _pendingRepY
                                               && _kRepW == _pendingRepW && _kRepH == _pendingRepH))
                                           && _kTransparent == transparent && _kBlend == blend && _kImage == image
@@ -577,6 +580,7 @@ public sealed class GlCore : IGpuBackend
         // Legacy GL composites against a destination snapshot. Each coverage
         // primitive must see earlier overlapping particles, not a stale batch.
         if (_legacy && _count > 0 && (_kRepCoverage || _pendingRepCoverage)) Flush();
+        if (_count > 0 && (_kCutout || _pendingCutout)) Flush();
         if (_count + vertsNeeded > MaxVerts) Flush();
         CheckTextureFeedback(f);
 
@@ -599,6 +603,7 @@ public sealed class GlCore : IGpuBackend
         _kClipY1 = _env.ClipY1;
         _kRepTex = _pendingRepTex;
         _kRepCoverage = _pendingRepCoverage;
+        _kCutout = _pendingCutout;
         _kAirborne = _pendingAirborne;
         _kWorldSpray = _pendingWorldSpray;
         _kWaterWake = _pendingWaterWake;
@@ -660,6 +665,7 @@ public sealed class GlCore : IGpuBackend
         _pendingRepTex = 0;
         _pendingRepClut = 0;
         _pendingRepCoverage = false;
+        _pendingCutout = false;
         _pendingAirborne = false;
         _pendingWorldSpray = false;
         _pendingWaterWake = false;
@@ -675,6 +681,7 @@ public sealed class GlCore : IGpuBackend
         {
             _pendingRepTex = EnsureRepTexture(replacement);
             _pendingRepCoverage = replacement.Coverage;
+            _pendingCutout = native.Asset.SmoothCutout && !replacement.Coverage;
             _pendingAirborne = replacement.Coverage && _emittingAirborne;
             _pendingWorldSpray = replacement.Coverage && _emittingWorldSpray;
             _pendingWaterWake = replacement.Coverage && native.Asset.WaterSpray && !_emittingAirborne && !_emittingWorldSpray;
@@ -1060,6 +1067,21 @@ public sealed class GlCore : IGpuBackend
         TraceTriangle(a,b,c,f);
         int start = _count;
         var wakeA=a;var wakeB=b;var wakeC=c;
+        if (_pendingCutout && f.NativeTexture?.Asset.UiTileSize is > 1 and var tile)
+        {
+            // Native UI tiles use inclusive PS1 UV endpoints (0..31 across 32 pixels).
+            // High-resolution replacements need contiguous tile boundaries, including rotation.
+            float loU=Math.Min(a.U,Math.Min(b.U,c.U)),hiU=Math.Max(a.U,Math.Max(b.U,c.U));
+            float loV=Math.Min(a.V,Math.Min(b.V,c.V)),hiV=Math.Max(a.V,Math.Max(b.V,c.V));
+            bool fixU=loU%tile==0 && hiU-loU==tile-1;
+            bool fixV=loV%tile==0 && hiV-loV==tile-1;
+            HleVertex TileUv(HleVertex v) {
+                if(fixU && v.U==hiU)v.U+=1;
+                if(fixV && v.V==hiV)v.V+=1;
+                return v;
+            }
+            wakeA=TileUv(a);wakeB=TileUv(b);wakeC=TileUv(c);
+        }
         if (_pendingWaterWake)
         {
             if (_diagnoseSurfaces)
@@ -1411,7 +1433,7 @@ public sealed class GlCore : IGpuBackend
         var readY = Math.Max(0, ry0 * s);
         var readW = Math.Max(0, (rx1 - rx0 + 1) * s);
         var readH = Math.Max(0, (ry1 - ry0 + 1) * s);
-        var needDest = _legacy || _kCheckMask != 0;
+        var needDest = _legacy || _kCheckMask != 0 || _kCutout;
         if (needDest)
         {
             destTex = _vram.BeginDestRead(destTex, destW, destH, readX, readY, readW, readH);
@@ -1427,7 +1449,9 @@ public sealed class GlCore : IGpuBackend
         _gl.UseProgram(_progPrim);
         SetWorldUniforms();
         if(_uEffectTime>=0)_gl.Uniform1(_uEffectTime,_frame/60f);
-        _gl.Uniform1(_uRepCoverage, _kRepCoverage ? (_kWorldSpray ? 4f : _kAirborne ? 2f : _kWaterWake ? 3f : 1f) : 0f);
+        _gl.Uniform1(_uRepCoverage, _kCutout ? -1f : _kRepCoverage ? (_kWorldSpray ? 4f : _kAirborne ? 2f : _kWaterWake ? 3f : 1f) : 0f);
+        _gl.Uniform2(_uCutoutBlend, !_kTransparent ? 1f : _kBlend switch {0=>.5f,2=>-1f,3=>.25f,_=>1f},
+            !_kTransparent ? 0f : _kBlend==0 ? .5f : 1f);
         _gl.BindVertexArray(_vao);
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, _vram.Texture);
@@ -1485,7 +1509,7 @@ public sealed class GlCore : IGpuBackend
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         _gl.BufferSubData<GlVertex>(BufferTargetARB.ArrayBuffer, 0, _verts.AsSpan(0, _count));
 
-        if (_legacy)
+        if (_legacy || _kCutout)
         {
             _gl.Disable(EnableCap.Blend);
             _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_count);

@@ -144,6 +144,7 @@ Test(kind + " renderer", () =>
             PerspectivePixels.Run(core, $"{kind} {scale}x perspective", Check);
             NativeTexturePixels.Run(core, $"{kind} {scale}x native assets", Check);
             EffectPixels.Run(core, $"{kind} {scale}x effect coverage", Check);
+            CutoutPixels.Run(core, $"{kind} {scale}x buoy cutout", Check);
             // Source texture lives outside the 64x64 output test region.
             ushort[] texture = Enumerable.Repeat((ushort)0x4210, 64 * 64).ToArray();
             core.WriteVram(640, 256, 64, 64, texture);
