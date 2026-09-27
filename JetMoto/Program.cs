@@ -123,7 +123,7 @@ internal static class Program
         Console.WriteLine($"[{DateTimeOffset.Now:O}] {Build}\n[JetMoto] {RuntimeInformation.OSDescription}; .NET {Environment.Version}; {RuntimeInformation.ProcessArchitecture}");
         Console.WriteLine("[JetMoto] Bring-up build: successful compilation does not establish playable game support.");
         Console.WriteLine("[JetMoto] Renderer dithering: permanently disabled; no toggle.");
-        Console.WriteLine("[JetMoto] Widescreen: gameplay Hor+ 16:9; front-end and pause menus 4:3; expanded side-plane visibility and full-width sky clears.");
+        Console.WriteLine("[JetMoto] Widescreen: gameplay Hor+ and paused race backgrounds 16:9; front-end menus 4:3; expanded side-plane visibility and full-width sky clears.");
         try
         {
             ConfigManager.Load();

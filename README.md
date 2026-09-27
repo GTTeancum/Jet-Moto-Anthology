@@ -20,7 +20,8 @@ Screenshots captured directly from the game. Current work covers the first Jet M
 ## Features
 
 - 4× textures, restored menu artwork, and refreshed HUD numerals, speedometer, boost lights, minimaps, and buoys.
-- 16:9 gameplay with the original 4:3 menu presentation.
+- 16:9 gameplay and paused race backgrounds, with the original 4:3 front-end menus.
+- Local two-player racing with side-by-side and stacked split-screen layouts.
 - Perspective-correct textures, subpixel projection, and dithering removal.
 - Highest original rider and bike detail, directional world lighting, and projected rider shadows.
 - Layered water shading and animated wake and spray effects.

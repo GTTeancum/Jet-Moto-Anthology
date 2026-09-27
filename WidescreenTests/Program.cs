@@ -26,11 +26,11 @@ using(var race=Widescreen.EnterRace())
     {
         Check(Widescreen.Active,"ordinary per-frame pause check does not change aspect");
         p.Activate();p.Activate();
-        Check(!Widescreen.Active && GpuHle.WideAspect==0,"actual pause is pillarboxed, activation idempotent");
-        using(var nested=new Widescreen.DeferredMenuScope()) {nested.Activate();Check(!Widescreen.Active,"nested menus remain pillarboxed");}
+        Check(!Widescreen.Active && GpuHle.RetainDisplayMargins && GpuHle.WideAspect==Widescreen.GameplayAspect && GpuHle.TargetAspect==Widescreen.GameplayAspect,"pause freezes gameplay and preserves widescreen, activation idempotent");
+        using(var nested=new Widescreen.DeferredMenuScope()) {nested.Activate();Check(!Widescreen.Active && GpuHle.WideAspect==Widescreen.GameplayAspect,"nested menus preserve widescreen");}
         Check(!Widescreen.Active,"closing nested menu does not resume the race early");
     }
-    Check(Widescreen.Active,"closing pause resumes widescreen");
+    Check(Widescreen.Active && !GpuHle.RetainDisplayMargins,"closing pause resumes widescreen and ordinary margin clears");
     foreach(var p in profiles)
     foreach(uint camera in new uint[]{0,1})
     {
@@ -67,7 +67,7 @@ using(var race=Widescreen.EnterRace())
         }
     }
 }
-Check(!Widescreen.Active && GpuHle.WideAspect==0,"leaving race restores 4:3");
+Check(!Widescreen.Active && !GpuHle.RetainDisplayMargins && GpuHle.WideAspect==0,"leaving race restores 4:3 and ordinary margin clears");
 for(int i=0;i<100;i++) {using var r=Widescreen.EnterRace();using var m=new Widescreen.DeferredMenuScope();m.Activate();}
 Check(!Widescreen.Active && GpuHle.WideAspect==0,"100 repeated race/menu transitions balance scopes");
 try {using var r=Widescreen.EnterRace();throw new Exception("scope test");} catch{}

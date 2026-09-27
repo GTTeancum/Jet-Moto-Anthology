@@ -6,7 +6,7 @@ namespace JetMoto;
 
 internal static class ValidationReplay
 {
-    private sealed record Step(long Start, long End, ushort Buttons,string? Clock);
+    private sealed record Step(long Start, long End, ushort Buttons,string? Clock, int Player = 1);
     private static long _raceStart=-1;
 
     // Called from the source-anchored race scope. It changes only this
@@ -23,18 +23,19 @@ internal static class ValidationReplay
     {
         Widescreen.RaceEntered=null;
         Controller.ReplayButtons=null;
+        Controller.ReplayButtons2=null;
         Interlocked.Exchange(ref _raceStart,-1);
         Environment.SetEnvironmentVariable("JETMOTO_REPLAY_RACE_START_VBLANK",null);
         string? path = Environment.GetEnvironmentVariable("JETMOTO_REPLAY");
         if (string.IsNullOrWhiteSpace(path)) return;
         var steps = JsonSerializer.Deserialize<Step[]>(File.ReadAllText(path))
             ?? throw new InvalidDataException("Missing replay steps");
-        if (steps.Length > 10000 || steps.Any(s => s.Start < 0 || s.End <= s.Start ||
+        if (steps.Length > 10000 || steps.Any(s => s.Start < 0 || s.End <= s.Start || s.Player is < 1 or > 2 ||
             (s.Clock is not null && !string.Equals(s.Clock,"race",StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(s.Clock,"global",StringComparison.OrdinalIgnoreCase))))
             throw new InvalidDataException("Invalid replay interval");
         Widescreen.RaceEntered=MarkRaceStart;
-        Controller.ReplayButtons = () =>
+        ushort ReadPlayer(int player)
         {
             long frame = Interrupts.VBlankCount;
             long raceStart=Volatile.Read(ref _raceStart);
@@ -42,12 +43,15 @@ internal static class ValidationReplay
             ushort pressed = 0;
             foreach (var step in steps)
             {
+                if (step.Player != player) continue;
                 bool race=string.Equals(step.Clock,"race",StringComparison.OrdinalIgnoreCase);
                 long clock=race ? raceFrame : frame;
                 if((!race||raceStart>=0)&&clock>=step.Start&&clock<step.End)pressed|=step.Buttons;
             }
             return (ushort)~pressed;
-        };
+        }
+        Controller.ReplayButtons = () => ReadPlayer(1);
+        if (steps.Any(s => s.Player == 2)) Controller.ReplayButtons2 = () => ReadPlayer(2);
         Console.WriteLine($"[JetMoto:replay] Loaded {steps.Length} global/race-relative intervals from {path}; process-local input only.");
     }
 }

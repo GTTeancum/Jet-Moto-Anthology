@@ -4,6 +4,7 @@ public static class Controller
 {
     // Optional in-process replay provider. Never generates operating-system input.
     public static Func<ushort>? ReplayButtons;
+    public static Func<ushort>? ReplayButtons2;
     public const ushort Select = 1 << 0;
     public const ushort L3 = 1 << 1;
     public const ushort R3 = 1 << 2;

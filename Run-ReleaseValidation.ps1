@@ -51,7 +51,7 @@ Copy-Item -LiteralPath (Join-Path $appRoot 'logs/last-run.log') -Destination (Jo
 [ordered]@{ exitCode=$code; defaultVisualFeatures=$true; selfContainedApphost=$true;
     adjacentDisc=[bool]$AdjacentDisc; captureClock=$CaptureClock; audioOutput=[bool]$AudioOutput;
     appHashes=$before; replaySha256=(Get-FileHash -LiteralPath $env:JETMOTO_REPLAY).Hash;
-    captureFrames=@(Get-ChildItem -LiteralPath $report -Filter *.png | Select-Object -ExpandProperty Name)
+    captureFrames=@(Get-ChildItem -LiteralPath $report -File | Where-Object Extension -in '.png','.rgba' | Select-Object -ExpandProperty Name)
 } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $report 'validation-run.json')
 if($code -ne 3){throw "Unexpected release validation exit: $code"}
 Write-Host "Release validation captured in $report; inspect content before accepting."

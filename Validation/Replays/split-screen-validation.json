@@ -1,0 +1,169 @@
+[
+  {
+    "Start": 600,
+    "End": 620,
+    "Buttons": 8
+  },
+  {
+    "Start": 900,
+    "End": 920,
+    "Buttons": 8
+  },
+  {
+    "Start": 1050,
+    "End": 1070,
+    "Buttons": 32
+  },
+  {
+    "Start": 1200,
+    "End": 1220,
+    "Buttons": 16384
+  },
+  {
+    "Start": 1500,
+    "End": 1520,
+    "Buttons": 16384
+  },
+  {
+    "Start": 1500,
+    "End": 1520,
+    "Buttons": 16384,
+    "Player": 2
+  },
+  {
+    "Start": 1800,
+    "End": 1820,
+    "Buttons": 16384
+  },
+  {
+    "Start": 1800,
+    "End": 1820,
+    "Buttons": 16384,
+    "Player": 2
+  },
+  {
+    "Start": 2100,
+    "End": 2120,
+    "Buttons": 16384
+  },
+  {
+    "Start": 2100,
+    "End": 2120,
+    "Buttons": 16384,
+    "Player": 2
+  },
+  {
+    "Start": 2400,
+    "End": 2420,
+    "Buttons": 16384
+  },
+  {
+    "Start": 2400,
+    "End": 2420,
+    "Buttons": 16384,
+    "Player": 2
+  },
+  {
+    "Start": 800,
+    "End": 930,
+    "Buttons": 128,
+    "Clock": "race"
+  },
+  {
+    "Start": 850,
+    "End": 980,
+    "Buttons": 32,
+    "Clock": "race",
+    "Player": 2
+  },
+  {
+    "Start": 1100,
+    "End": 1120,
+    "Buttons": 8,
+    "Clock": "race"
+  },
+  {
+    "Start": 2700,
+    "End": 2720,
+    "Buttons": 16384
+  },
+  {
+    "Start": 3000,
+    "End": 3020,
+    "Buttons": 16384
+  },
+  {
+    "Start": 1240,
+    "End": 1260,
+    "Buttons": 16384,
+    "Clock": "race"
+  },
+  {
+    "Start": 1400,
+    "End": 1420,
+    "Buttons": 8,
+    "Clock": "race"
+  },
+  {
+    "Start": 1460,
+    "End": 1480,
+    "Buttons": 64,
+    "Clock": "race"
+  },
+  {
+    "Start": 1520,
+    "End": 1540,
+    "Buttons": 64,
+    "Clock": "race"
+  },
+  {
+    "Start": 1580,
+    "End": 1600,
+    "Buttons": 16384,
+    "Clock": "race"
+  },
+  {
+    "Start": 1640,
+    "End": 1660,
+    "Buttons": 16,
+    "Clock": "race"
+  },
+  {
+    "Start": 1700,
+    "End": 1720,
+    "Buttons": 16,
+    "Clock": "race"
+  },
+  {
+    "Start": 1760,
+    "End": 1780,
+    "Buttons": 16384,
+    "Clock": "race"
+  },
+  {
+    "Start": 1820,
+    "End": 2700,
+    "Buttons": 16384,
+    "Clock": "race"
+  },
+  {
+    "Start": 1920,
+    "End": 2700,
+    "Buttons": 16384,
+    "Clock": "race",
+    "Player": 2
+  },
+  {
+    "Start": 400,
+    "End": 1080,
+    "Buttons": 16384,
+    "Clock": "race"
+  },
+  {
+    "Start": 650,
+    "End": 1080,
+    "Buttons": 16384,
+    "Clock": "race",
+    "Player": 2
+  }
+]

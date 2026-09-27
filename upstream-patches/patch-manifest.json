@@ -89,12 +89,17 @@
     {
       "path": "RecompOne.Runtime/Gpu/Backends/Common/GlCore.cs",
       "beforeSha256": "d0c60fcf492aeca8b0d41ab012cf59ad70477e9715a38f50c4ae3094a8a64f44",
-      "afterSha256": "1b449d9d1ddd4e87ff8a6f8a32a677ca3205ee3a9ac998b2f9666214a1c3c393"
+      "afterSha256": "3ccaad822115a52767f93b96e7255cf5c48ea6dae9341a4c10be37c306737180"
     },
     {
       "path": "RecompOne.Runtime/Gpu/Backends/Common/GlShaders.cs",
       "beforeSha256": "4c6b2c15a4506e40b2127e1a2404f5e7dba9e5012f9fcd9edbcbffb90601bf49",
       "afterSha256": "ec42b3ab58278344ce9e41f4a0f34adc1f3feb3e801df370e677f9af6b1915d9"
+    },
+    {
+      "path": "RecompOne.Runtime/Gpu/Hle/GpuHle.cs",
+      "beforeSha256": "2e430757ecac698f9ef5ea51dafad1dfc23f4f20b98c2f185c228e5fcd4c0854",
+      "afterSha256": "df1a3dd2d27e9a24edb9f43d6a1bdb398ccbb6a1e6d1817e7bcfaac226e032b1"
     },
     {
       "path": "RecompOne.Runtime/Gpu/Hle/HleTypes.cs",
@@ -134,7 +139,7 @@
     {
       "path": "RecompOne.Runtime/Hardware/Controller.cs",
       "beforeSha256": "5cb8e34d91928805e4f2aecbd03b1f0e3e00914bf00a4fd7a9a51452ea513951",
-      "afterSha256": "2e38c020addf7284ac13d264c8c27f69d6535189ee41a8ff27fcb904a9aa35d6"
+      "afterSha256": "26c5750208e3db0e3ca01cee86bc8d509edd1dfc684aca2881258c7936084291"
     },
     {
       "path": "RecompOne.Runtime/Hardware/Gte.cs",
@@ -164,7 +169,7 @@
     {
       "path": "RecompOne.Runtime/Host/InputManager.cs",
       "beforeSha256": "1e6a0a36074ef39b1d6cb57d1d9a38e34992ca672d7454244a70bf57308aec62",
-      "afterSha256": "e04be6c6a9a33e35ea6a2e7aecedf5e48849f144d18c31235e5901fbc4c23c70"
+      "afterSha256": "eea742588a0769fcdddf138599c4cb99c451bc2571ce5771b5bf46bcfb773c9c"
     },
     {
       "path": "RecompOne.Runtime/Host/Window/HostWindow.cs",

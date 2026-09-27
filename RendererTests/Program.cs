@@ -237,16 +237,27 @@ Test(kind + " renderer", () =>
                 Check(held.w==428*scale && Math.Abs(held.aspect-16f/9f)<1e-6 && heldPixels.AsSpan().SequenceEqual(full),
                     $"{kind} {scale}x: {idleFrames} idle presents retain exact 16:9 frame and both wings");
             }
+            GpuHle.RetainDisplayMargins=true;
+            for(int pausedFrame=0;pausedFrame<3;pausedFrame++)
+            {
+                core.AdvanceFrame();
+                Rect(140,130,40,10,248,248,248); // Updating menu text over the retained scene.
+                var overlay=core.PresentDisplay(0,0,320,240);
+                var pixels=Capture(overlay.tex,overlay.w,overlay.h);
+                Check(Has(pixels,1,5,45,80,120) && Has(pixels,2,385,425,80,120),
+                    $"{kind} {scale}x: pause menu redraw {pausedFrame} retains both scene wings");
+            }
+            GpuHle.RetainDisplayMargins=false;
             GpuHle.WideAspect=0;
-            var paused=core.PresentDisplay(0,0,320,240); // no redraw, as in a paused game.
+            var paused=core.PresentDisplay(0,0,320,240); // Returning to the front-end crops the retained race.
             byte[] centre=Capture(paused.tex,paused.w,paused.h);
             Check(paused.w==320*scale && Math.Abs(paused.aspect-4f/3f)<1e-6 && Has(centre,0,145,175,80,120),
-                $"{kind} {scale}x: pause crops centre of the previous wide frame without squeezing it");
+                $"{kind} {scale}x: front-end crops centre of the previous wide frame without squeezing it");
             for(int idle=0;idle<1000;idle++)core.AdvanceFrame();
             var heldPause=core.PresentDisplay(0,0,320,240);
             Check(heldPause.w==320*scale && Math.Abs(heldPause.aspect-4f/3f)<1e-6 &&
                 Capture(heldPause.tex,heldPause.w,heldPause.h).AsSpan().SequenceEqual(centre),
-                $"{kind} {scale}x: long static pause keeps the original centred 4:3 frame");
+                $"{kind} {scale}x: long static front-end keeps the original centred 4:3 frame");
             Check(!Has(centre,1,0,320,0,240) && !Has(centre,2,0,320,0,240),
                 $"{kind} {scale}x: old widescreen wings never leak into the pillarboxed menu");
             // Exercise actual hi-res menu -> low-res race target changes too.
@@ -274,10 +285,10 @@ Test(kind + " renderer", () =>
             Rect(0,0,320,240,197,191,139);
             var sky=core.PresentDisplay(0,0,320,240);
             var skyPixels=Capture(sky.tex,sky.w,sky.h);
-            bool SamePixel(byte[] p, int ax, int ay, int bx, int by, int width)
+            bool SamePixel(byte[] p, int ax, int ay, int bx, int by, int width, int minimum=100)
             {
                 int a=(ay*scale*width+ax*scale)*4,b=(by*scale*width+bx*scale)*4;
-                return p.AsSpan(a,3).SequenceEqual(p.AsSpan(b,3)) && p[a]>100;
+                return p.AsSpan(a,3).SequenceEqual(p.AsSpan(b,3)) && p[a]>minimum;
             }
             Check(SamePixel(skyPixels,5,10,214,10,sky.w) && SamePixel(skyPixels,423,10,214,10,sky.w),
                 $"{kind} {scale}x: full-screen sky clear covers both wings with the original colour");
@@ -335,6 +346,23 @@ Test(kind + " renderer", () =>
                     $"{kind} {scale}x buffer {baseX}: neither player can draw across the centre divider");
                 Check(SamePixel(sp,5,10,214,10,split.w) && SamePixel(sp,423,10,214,10,split.w),
                     $"{kind} {scale}x buffer {baseX}: independent half-width sky clears fill both outer edges");
+                // Original one-pixel borders on either side of the shared edge
+                // must not inherit the translated camera centres.
+                foreach (bool lines in new[]{false,true})
+                {
+                    foreach (int side in new[]{0,1})
+                    {
+                        core.SetDrawEnv(new HleDrawEnv {ClipX0=baseX+side*160,ClipX1=baseX+side*160+159,ClipY1=239});
+                        Rect(baseX+side*160,0,160,240,197,191,139);
+                        int edge=baseX+159+side;
+                        if(lines) core.DrawLine(new HleVertex{X=edge,Y=0},new HleVertex{X=edge,Y=239},new PrimFlags());
+                        else Rect(edge,0,1,240,0,0,0);
+                    }
+                    var borders=core.PresentDisplay(baseX,0,320,240);var bp=Capture(borders.tex,borders.w,borders.h);
+                    var black=Enumerable.Range(0,borders.w).Where(x=>{int q=(20*scale*borders.w+x)*4;return bp[q]<10&&bp[q+1]<10&&bp[q+2]<10;}).ToArray();
+                    Check(black.Length>=scale && black.All(x=>Math.Abs(x-borders.w/2.0)<=2*scale),
+                        $"{kind} {scale}x buffer {baseX}: {(lines?"line":"rectangle")} divider stays centred without stray vertical borders");
+                }
             }
             GpuHle.NotifyDisplay(0,0,320,240);
             core.SetDrawEnv(new HleDrawEnv {ClipX1=319,ClipY1=119});
@@ -346,6 +374,24 @@ Test(kind + " renderer", () =>
                 $"{kind} {scale}x: top split-screen sky fills its full width");
             Check(SamePixel(stackedPixels,5,180,214,180,stacked.w) && SamePixel(stackedPixels,423,180,214,180,stacked.w),
                 $"{kind} {scale}x: bottom split-screen sky fills its full width independently");
+            GpuHle.RetainDisplayMargins=true;
+            core.AdvanceFrame();
+            core.SetDrawEnv(new HleDrawEnv {ClipX1=319,ClipY1=239});
+            HleVertex Corner(float x,float y) => new() {X=x,Y=y};
+            var fadeFlags=new PrimFlags {SemiTrans=true};
+            core.DrawTri(Corner(0,0),Corner(320,0),Corner(0,240),fadeFlags);
+            core.DrawTri(Corner(320,0),Corner(320,240),Corner(0,240),fadeFlags);
+            var dimmed=core.PresentDisplay(0,0,320,240);var dimPixels=Capture(dimmed.tex,dimmed.w,dimmed.h);
+            Check(SamePixel(dimPixels,5,60,214,60,dimmed.w,40) && SamePixel(dimPixels,423,60,214,60,dimmed.w,40) &&
+                SamePixel(dimPixels,5,180,214,180,dimmed.w,40) && SamePixel(dimPixels,423,180,214,180,dimmed.w,40),
+                $"{kind} {scale}x: pause polygon dims both wings exactly like the retained centre");
+            Check(dimPixels[(60*scale*dimmed.w+214*scale)*4] < stackedPixels[(60*scale*stacked.w+214*scale)*4],
+                $"{kind} {scale}x: pause fade actually darkens the retained scene");
+            core.CopyVram(0,0,320,0,320,240);
+            var copied=core.PresentDisplay(320,0,320,240);
+            Check(Capture(copied.tex,copied.w,copied.h).AsSpan().SequenceEqual(dimPixels),
+                $"{kind} {scale}x: pause framebuffer copy preserves the entire dimmed widescreen image");
+            GpuHle.RetainDisplayMargins=false;
             GpuHle.WideAspect=0;core.PresentDisplay(0,0,320,240);
             Check(!gl.IsEnabled(EnableCap.Dither),$"{kind} {scale}x: dithering stays disabled through all widescreen transitions");
             Check(gl.GetError()==GLEnum.NoError,$"{kind} {scale}x: widescreen transitions produce no GL errors");

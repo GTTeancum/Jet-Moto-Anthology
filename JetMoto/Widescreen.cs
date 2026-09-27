@@ -23,7 +23,9 @@ public static class Widescreen
     private static int _raceDepth, _menuDepth, _maxVisible, _saturatedLists;
     private static long _cameraUpdates;
     public static bool Active => _raceDepth > 0 && _menuDepth == 0;
-    public static string Diagnostics => $"view={(Active ? "16:9" : "4:3")} cameraUpdates={Interlocked.Read(ref _cameraUpdates)} visibleMax={Volatile.Read(ref _maxVisible)} visibleLimitHits={Volatile.Read(ref _saturatedLists)}";
+    // Pausing freezes gameplay while preserving the retained framebuffer aspect.
+    private static bool RacePresentation => _raceDepth > 0;
+    public static string Diagnostics => $"view={(RacePresentation ? "16:9" : "4:3")} cameraUpdates={Interlocked.Read(ref _cameraUpdates)} visibleMax={Volatile.Read(ref _maxVisible)} visibleLimitHits={Volatile.Read(ref _saturatedLists)}";
 
     public static IDisposable EnterRace()
     {
@@ -68,10 +70,11 @@ public static class Widescreen
 
     private static void SetView()
     {
+        GpuHle.RetainDisplayMargins = RacePresentation && !Active;
         GpuHle.SourceAspect = MenuAspect;
         GpuHle.OutputAspect = MenuAspect;
-        GpuHle.TargetAspect = Active ? GameplayAspect : MenuAspect;
-        float aspect = Active ? GameplayAspect : 0;
+        GpuHle.TargetAspect = RacePresentation ? GameplayAspect : MenuAspect;
+        float aspect = RacePresentation ? GameplayAspect : 0;
         if (GpuHle.WideAspect == aspect) return;
         GpuHle.WideAspect = aspect;
         Console.WriteLine("[JetMoto:widescreen] " + Diagnostics);

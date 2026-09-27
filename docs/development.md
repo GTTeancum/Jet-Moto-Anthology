@@ -80,3 +80,11 @@ Known native banks and menu images are prepared at loading boundaries. Menu PNG 
 Set `JETMOTO_PERF=1` before launch to include bounded performance summaries in the normal log. These report host presentation interval percentiles, allocation rate, GC counts, shadow/wake CPU time, native texture residency, uploads and draw-time misses. Host presentation calls are not a measurement of physical display delivery. Captures and diagnostics add overhead; use ordinary uncaptured play for representative timing. RendererTests also uses GPU elapsed-time queries on GL 3.3/4.5 for repeatable sunlit, terrain-shadow and rider-shadow fixtures at 1x/2x/4x.
 
 The original lighting shader remains in production. Pixel-equivalent shortcut experiments had workload-dependent regressions, including roughly 10–12% slower sunlit fixtures in some local 4x measurements, and variable warm-up stalls. A universal performance improvement was not established. The GPU fixture remains for measurements on other drivers before revisiting this change.
+
+## Two-player replay validation
+
+Replay steps optionally set `Player` to 1 or 2 (default 1). A replay containing player 2 steps connects a second process-local virtual controller; each player's pressed buttons are evaluated independently. Ordinary launches do not install replay providers. `Validation/Replays/split-screen-validation.json` enters head-to-head, accelerates the riders independently, pauses/resumes and changes the split orientation. This validates the game path without operating the desktop; it does not validate physical controller selection or bindings.
+
+Pausing keeps the race's 16:9 presentation and retained side areas, while the menu remains centered at its original scale. Gameplay camera/lighting updates remain paused. Leaving the race restores the 4:3 front-end policy.
+
+For short native video captures, `JETMOTO_CAPTURE_RAW=1` writes uncompressed RGBA frames instead of PNGs, with the same JSON dimensions and VBlank timestamps. This removes PNG compression from the render thread, uses more disk space, and remains opt-in alongside `JETMOTO_CAPTURE_DIR`. Convert offline using the recorded dimensions and preserve timestamp gaps when assembling video. This captures the game's own framebuffer, not the desktop. Recording overhead still makes it unsuitable for performance measurements.

@@ -32,6 +32,7 @@ public sealed class GlCore : IGpuBackend
     private long _rtStamp;
     private long _frame;
     private readonly string? _captureDirectory = Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_DIR");
+    private readonly bool _captureRaw=Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_RAW")=="1";
     private long _lastCapture = -1;
     private readonly bool _captureRaceRelative=Environment.GetEnvironmentVariable("JETMOTO_CAPTURE_RACE_RELATIVE")=="1";
     private long _captureRaceStart=long.MinValue;
@@ -577,6 +578,18 @@ public sealed class GlCore : IGpuBackend
         float source = GpuHle.SourceAspect > 0 ? GpuHle.SourceAspect : GpuHle.BaseAspect;
         float shift = rt.W * (GpuHle.WideAspect / source - 1f) / 4f;
         return _env.ClipX0 == rt.X ? -shift : shift;
+    }
+
+    private bool IsSplitDivider(float x0, float y0, float x1, float y1, in PrimFlags f)
+    {
+        if (_kTarget is not { Margin: > 0 } rt || !IsHalfView(rt, _env.ClipX0, _env.ClipX1) ||
+            f.Textured || f.UseImage || f.SemiTrans || f.WorldSurface != null ||
+            y0 > Math.Max(rt.Y, _env.ClipY0) || y1 < Math.Min(rt.Y + rt.H, _env.ClipY1 + 1)) return false;
+        int centre = rt.X + rt.W / 2;
+        // The original viewport-edge border is screen furniture, not camera
+        // geometry. Its two one-pixel halves must meet at the shared divider.
+        return _env.ClipX0 == rt.X ? x0 >= centre - 1 && x1 <= centre && x1 > x0
+            : x0 >= centre && x1 <= centre + 1 && x1 > x0;
     }
 
     private void Begin(in PrimFlags f, int vertsNeeded)
@@ -1129,6 +1142,22 @@ public sealed class GlCore : IGpuBackend
         TraceTriangle(a,b,c,f);
         int start = _count;
         var wakeA=a;var wakeB=b;var wakeC=c;
+        // The retained pause scene is dimmed by a full-screen polygon, not a tile.
+        // Extend only its screen-corner vertices; menu text and world geometry keep
+        // their original coordinates. Each half of the quad is handled identically.
+        if (GpuHle.RetainDisplayMargins && _kTarget is { Margin: > 0 } pauseRt &&
+            f.SemiTrans && !f.Textured && !f.UseImage && f.WorldSurface == null &&
+            !a.HasGteZ && !b.HasGteZ && !c.HasGteZ &&
+            _env.ClipX0 <= pauseRt.X && _env.ClipX1 >= pauseRt.X + pauseRt.W - 1)
+        {
+            bool Corner(HleVertex v) => (v.X == pauseRt.X || v.X == pauseRt.X + pauseRt.W) &&
+                (v.Y == pauseRt.Y || v.Y == pauseRt.Y + pauseRt.H);
+            if (Corner(a) && Corner(b) && Corner(c))
+            {
+                HleVertex Expand(HleVertex v) { v.X += v.X == pauseRt.X ? -pauseRt.Margin : pauseRt.Margin; return v; }
+                wakeA=Expand(a);wakeB=Expand(b);wakeC=Expand(c);
+            }
+        }
         if (_pendingCutout && f.NativeTexture?.Asset.UiTileSize is > 1 and var tile)
         {
             // Native UI tiles use inclusive PS1 UV endpoints (0..31 across 32 pixels).
@@ -1241,6 +1270,8 @@ public sealed class GlCore : IGpuBackend
         ResolveReplacement(f, r.U, r.V, r.U + Math.Max(0, r.W - 1), r.V + Math.Max(0, r.H - 1));
         Begin(f, 6);
         float x0 = r.X, x1 = r.X + r.W;
+        if (IsSplitDivider(x0, r.Y, x1, r.Y + r.H, f))
+        { x0 -= _kViewShiftX; x1 -= _kViewShiftX; }
         // Solid clears/fades which cover the active gameplay viewport also cover
         // its new wings. Blackwater Falls uses this rectangle as its sky. Support
         // full-width, top/bottom and side-by-side viewports, while excluding partial
@@ -1284,6 +1315,8 @@ public sealed class GlCore : IGpuBackend
         Begin(f, 6);
         float x1 = a.X, y1 = a.Y;
         float x2 = b.X, y2 = b.Y;
+        if (x1 == x2 && IsSplitDivider(x1, Math.Min(y1, y2), x2 + 1, Math.Max(y1, y2) + 1, f))
+        { x1 -= _kViewShiftX; x2 -= _kViewShiftX; }
         float dx = x2 - x1, dy = y2 - y1;
 
         if (dx == 0 && dy == 0)
@@ -1352,7 +1385,7 @@ public sealed class GlCore : IGpuBackend
 
     private void ClearMargin(GlDisplayRt rt)
     {
-        if (rt.Margin <= 0 || rt.LastMarginFrame == _frame) return;
+        if (GpuHle.RetainDisplayMargins || rt.Margin <= 0 || rt.LastMarginFrame == _frame) return;
         rt.LastMarginFrame = _frame;
 
         var s = GlVram.Scale;
@@ -1384,9 +1417,31 @@ public sealed class GlCore : IGpuBackend
     public void CopyVram(int sx, int sy, int dx, int dy, int w, int h)
     {
         Flush();
+        GlDisplayRt? retainedSource=null,retainedDestination=null;
+        if (GpuHle.RetainDisplayMargins)
+            foreach(var rt in _rts)
+            {
+                if(rt is not {Margin:>0} || rt.W!=w || rt.H!=h)continue;
+                if(rt.X==sx && rt.Y==sy)retainedSource=rt;
+                if(rt.X==dx && rt.Y==dy)retainedDestination=rt;
+            }
         WritebackDirtyIntersecting(sx, sy, w, h);
         _vram.CopyRect(sx, sy, dx, dy, w, h);
         SyncRtsFromVram(dx, dy, w, h);
+        // Guest VRAM contains only the original canvas. Pause restores its saved
+        // full framebuffer between buffers; carry the native side areas with it.
+        if(retainedSource is {} source && retainedDestination is {} destination &&
+            source!=destination && source.Margin==destination.Margin)
+        {
+            _gl.Disable(EnableCap.ScissorTest);
+            _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer,source.Fbo);
+            _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer,destination.Fbo);
+            _gl.BlitFramebuffer(0,0,source.TexW,source.TexH,0,0,destination.TexW,destination.TexH,
+                ClearBufferMask.ColorBufferBit,BlitFramebufferFilter.Nearest);
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer,0);
+            destination.Dirty=true;
+            destination.LastDrawFrame=_frame;
+        }
     }
 
     public void WriteVram(int x, int y, int w, int h, ReadOnlySpan<ushort> px)
@@ -1829,8 +1884,10 @@ public sealed class GlCore : IGpuBackend
         fixed (byte* p = pixels)
             _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, p);
         string name=_captureRaceRelative ? $"race-{raceFrame:000000}" : $"frame-{frame:000000}";
-        string path = Path.Combine(_captureDirectory, name+".png");
-        Assets.PngWriter.WriteRgba(path, pixels, width, height);
+        string path = Path.Combine(_captureDirectory, name+(_captureRaw ? ".rgba" : ".png"));
+        // Raw RGBA recording avoids compression work on the rendering thread.
+        if(_captureRaw) File.WriteAllBytes(path,pixels);
+        else Assets.PngWriter.WriteRgba(path, pixels, width, height);
         if(_traceGeometry)
         {
             long sourceFrame=source?.LastDrawFrame??_frame;

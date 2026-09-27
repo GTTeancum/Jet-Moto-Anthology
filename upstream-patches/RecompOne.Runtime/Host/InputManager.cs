@@ -100,7 +100,9 @@ internal static unsafe class InputManager
         {
             Controller.State = replay();
             Controller.Analog = false;
-            Controller.Connected2 = false;
+            Controller.State2 = Controller.ReplayButtons2?.Invoke() ?? ushort.MaxValue;
+            Controller.Analog2 = false;
+            Controller.Connected2 = Controller.ReplayButtons2 != null;
             return;
         }
         if (Environment.GetEnvironmentVariable("JETMOTO_HEADLESS") == "1") return;
