@@ -45,9 +45,8 @@ public static class MenuBackgrounds
                 var original = meta.GetProperty("source");
                 byte[] source = disc.ReadFile(entry.Path);
                 if (NativeTextures.Normalize(original.GetProperty("source").GetString()!) != name ||
-                    !Convert.ToHexString(SHA256.HashData(source)).Equals(original.GetProperty("sourceSha256").GetString(), StringComparison.OrdinalIgnoreCase) ||
-                    !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).Equals(meta.GetProperty("outputSha256").GetString(), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("Original source or authored PNG checksum mismatch.");
+                    !Convert.ToHexString(SHA256.HashData(source)).Equals(original.GetProperty("sourceSha256").GetString(), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Original source checksum mismatch.");
                 int w = original.GetProperty("width").GetInt32(), h = original.GetProperty("height").GetInt32();
                 if (name.EndsWith(".BS"))
                 {
@@ -56,7 +55,10 @@ public static class MenuBackgrounds
                 else if (!(IsTrackOverview(name, source) && w == 320 && h == 240) &&
                     !(IsRiderPanel(name, source) && w == 576 && h == 192))
                     throw new InvalidDataException("Unverified standalone menu image.");
-                Assets.Add(new(name, source, new NativeTextureAsset(name, path, w, h)));
+                // Verify authored bytes when preparing this menu, rather than
+                // reading every full-size PNG before the title can appear.
+                Assets.Add(new(name, source, new NativeTextureAsset(name, path, w, h)
+                    { ExpectedSha256 = meta.GetProperty("outputSha256").GetString()! }));
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             { Console.WriteLine($"[JetMoto:menu-background] original fallback {name}: {ex.Message}"); }
@@ -96,6 +98,7 @@ public static class MenuBackgrounds
         RequestedRider = cpu.A1 < 20 ? $"NAVIGATE/RIDER{cpu.A1:D2}.TIM" : null;
         // This original asynchronous loader reuses the BS decode workspace.
         Invalidate(0x800447D8, 20 + 576 * 192 * 2);
+        if (Assets.FirstOrDefault(a => a.Name == RequestedRider) is {} asset) Prepare(asset);
         Console.WriteLine($"[JetMoto:menu-background] rider request source={RequestedRider ?? "unsupported"} frame={RecompOne.Runtime.Interrupts.VBlankCount}");
     }
 
@@ -116,6 +119,7 @@ public static class MenuBackgrounds
             asset.Loaded = (long)start + asset.Source.Length <= memory.Ram.Length &&
                 memory.Ram.Slice((int)start, asset.Source.Length).SequenceEqual(asset.Source);
             asset.Address = start;
+            if (asset.Loaded) Prepare(asset);
         }
     }
 
@@ -169,12 +173,9 @@ public static class MenuBackgrounds
     private static DrawScope Draw(Asset asset, IGpuBackend backend, int width, int height,
         int x = 0, int y = 0, int clipWidth = 0, int clipHeight = 0)
     {
-        var image = asset.Image.GetTexture();
-        if (image == null) return default;
+        if (asset.Registered < 0 && !Prepare(asset)) return default;
         return new DrawScope(() =>
         {
-            if (asset.Registered < 0)
-                GpuJobs.Run(() => asset.Registered = backend.RegisterImage(image.Rgba, image.Width, image.Height));
             backend.SetDrawEnv(new HleDrawEnv { ClipX0 = 0, ClipY0 = 0,
                 ClipX1 = (clipWidth == 0 ? width : clipWidth) - 1,
                 ClipY1 = (clipHeight == 0 ? height : clipHeight) - 1 });
@@ -187,5 +188,17 @@ public static class MenuBackgrounds
             backend.DrawTri(b, d, c, flags);
             Console.WriteLine($"[JetMoto:menu-background] submitted original-owned candidate {asset.Name}");
         });
+    }
+
+    private static bool Prepare(Asset asset)
+    {
+        if (GpuHle.Backend is not { Ready: true } backend) return false;
+        bool ready = false;
+        GpuJobs.Run(() =>
+        {
+            if (asset.Registered < 0) asset.Registered = backend.RegisterNativeImage(asset.Image);
+            ready = asset.Registered >= 0 && backend.PrepareNativeTexture(asset.Image);
+        });
+        return ready;
     }
 }

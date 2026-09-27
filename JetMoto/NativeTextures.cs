@@ -3,6 +3,8 @@ using RecompOne.Runtime.Assets.Native;
 using RecompOne.Runtime.Cdrom;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Memory;
+using RecompOne.Runtime.Hle;
+using RecompOne.Runtime.Host;
 
 namespace JetMoto;
 
@@ -273,6 +275,10 @@ public static class NativeTextures
                 { Console.WriteLine($"[JetMoto:native-textures] Native model {_name} differed at the loader boundary; left original."); return; }
                 Active.RemoveAll(m=>p<(m.Destination&0x1fffffff)+m.Original.Length && p+model.Original.Length>(m.Destination&0x1fffffff));
                 model.Destination=_destination; Active.Add(model);
+                // Decode and upload the known bank during loading. Deferred GPU
+                // frames refer to asset identities and survive cache eviction.
+                if (GpuHle.Backend is { Ready: true } backend)
+                    GpuJobs.Run(() => { foreach (var image in model.Images) backend.PrepareNativeTexture(image.Asset); });
                 Console.WriteLine($"[JetMoto:native-textures] Native model loaded: {_name}, {_destination:X8}, {model.Original.Length} bytes, read={_cpu.V0}.");
             }
             catch(Exception e) when(e is not OutOfMemoryException)

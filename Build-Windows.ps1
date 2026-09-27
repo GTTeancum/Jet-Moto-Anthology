@@ -169,9 +169,11 @@ try {
     if (!(Test-Path -LiteralPath $gameExe)) { throw "Publish did not produce $gameExe" }
     if ($Disc) {
         Write-Step 'Validating the disc with the newly built launcher, without opening a graphics window.'
-        # Run through the console dotnet host so validation waits and captures output,
-        # even though the published JetMoto.exe is a Windows GUI application.
-        Invoke-Dotnet -Arguments @((Join-Path $script:Output 'JetMoto.dll'), $Disc, '--validate-disc', '--no-dialogs')
+        # Wait for the bundled GUI apphost directly; no loose JetMoto.dll exists.
+        $discCheckLog = Join-Path $Root '.build/disc-validation.log'
+        $discCheck = Start-Process -FilePath (Join-Path $script:Output 'JetMoto.exe') -ArgumentList @('"' + $Disc + '"', '--validate-disc', '--no-dialogs') -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $discCheckLog
+        Get-Content -LiteralPath $discCheckLog | Tee-Object -FilePath $script:Log -Append | Out-Host
+        if ($discCheck.ExitCode -ne 0) { throw "Disc validation exited with $($discCheck.ExitCode)." }
     }
     if ($Recompile) {
         Write-Step 'Regenerating from the verified disc and the corrected function map.'
@@ -226,6 +228,14 @@ try {
         $effectTests = Join-Path $Root 'EffectTextureTests\EffectTextureTests.csproj'
         Invoke-Dotnet -Arguments @('restore', $effectTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')
         Invoke-Dotnet -Arguments @('run', '--project', $effectTests, '-c', 'Release', '--no-restore', '-p:UseSharedCompilation=false')
+        Write-Step 'Checking bounded texture residency, exact reloads, camera inverses and shadow allocations.'
+        $performanceTests = Join-Path $Root 'PerformanceTests\PerformanceTests.csproj'
+        Invoke-Dotnet -Arguments @('restore', $performanceTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')
+        Invoke-Dotnet -Arguments @('run', '--project', $performanceTests, '-c', 'Release', '--no-restore', '-p:UseSharedCompilation=false')
+        Write-Step 'Checking audio arithmetic and queue recovery on the process-local null device.'
+        $audioTests = Join-Path $Root 'AudioTests\AudioTests.csproj'
+        Invoke-Dotnet -Arguments @('restore', $audioTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')
+        Invoke-Dotnet -Arguments @('run', '--project', $audioTests, '-c', 'Release', '--no-restore', '-p:UseSharedCompilation=false', '--', '--device')
         Write-Step 'Running byte-for-byte CD read and command/data interrupt regression tests.'
         $launcherTests = Join-Path $Root 'LauncherTests\LauncherTests.csproj'
         Invoke-Dotnet -Arguments @('restore', $launcherTests, '--configfile', $script:NuGetConfig, '-p:NuGetAudit=false')

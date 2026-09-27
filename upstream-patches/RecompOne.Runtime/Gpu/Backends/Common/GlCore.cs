@@ -22,6 +22,12 @@ public sealed class GlCore : IGpuBackend
     private readonly GL _gl;
     private readonly IGlVram _vram;
     private readonly List<uint> _images = [];
+    private readonly Dictionary<int, Assets.Native.NativeTextureAsset> _nativeImages = [];
+    private sealed record NativeGpuTexture(uint Handle, bool Coverage);
+    private readonly Assets.Native.ResidentCache<Assets.Native.NativeTextureAsset, NativeGpuTexture> _nativeTextures;
+    private bool _preparingTexture;
+    public (long Bytes, long PeakBytes, long Evictions) NativeCacheStats =>
+        (_nativeTextures.Bytes, _nativeTextures.PeakBytes, _nativeTextures.Evictions);
     private readonly GlDisplayRt?[] _rts = new GlDisplayRt?[2];
     private long _rtStamp;
     private long _frame;
@@ -208,8 +214,11 @@ public sealed class GlCore : IGpuBackend
     private byte[]? _wakePixels;
     private int _uWakeBounds, _uWakeEnabled, _wakeRasterSegments;
     private uint _riderShadow;
+    private ushort[]? _shadowDepths;
+    private byte[]? _shadowPixels;
     private Assets.Native.WorldCamera? _shadowCamera;
     private int _uWorldBounds,_uWorldHeightRange,_uWorldLight,_uWorldEye,_uWorldTime,_uEffectTime,_uWaterTint;
+    // Reference path exists only for pixel equivalence and timing comparisons.
     private bool _kRepCoverage, _pendingRepCoverage;
     private bool _kAirborne, _pendingAirborne, _emittingAirborne;
     private bool _kWaterWake, _pendingWaterWake;
@@ -225,6 +234,9 @@ public sealed class GlCore : IGpuBackend
         _gl = gl;
         _vram = vram;
         _legacy = legacy;
+        _nativeTextures = new(
+            Assets.Native.ResidentCache<Assets.Native.NativeTextureAsset, NativeGpuTexture>.BudgetFromEnvironment("JETMOTO_GPU_TEXTURE_MB", 128),
+            texture => _gl.DeleteTexture(texture.Handle));
     }
 
     public unsafe void InitGl()
@@ -677,9 +689,9 @@ public sealed class GlCore : IGpuBackend
 
         // Build06: the original model material selects the image, not a live VRAM hash.
         if (f.NativeTexture is {} native && native.Accepts(f.TPage, f.Clut, uMin, vMin, uMax, vMax,
-                twAndX, twAndY, twOrX, twOrY) && native.Asset.GetTexture() is {} replacement)
+                twAndX, twAndY, twOrX, twOrY) && EnsureNativeTexture(native.Asset) is {} replacement)
         {
-            _pendingRepTex = EnsureRepTexture(replacement);
+            _pendingRepTex = replacement.Handle;
             _pendingRepCoverage = replacement.Coverage;
             _pendingCutout = native.Asset.SmoothCutout && !replacement.Coverage;
             _pendingAirborne = replacement.Coverage && _emittingAirborne;
@@ -740,6 +752,45 @@ public sealed class GlCore : IGpuBackend
 
         _repTextures[tex] = handle;
         return handle;
+    }
+
+    private NativeGpuTexture? EnsureNativeTexture(Assets.Native.NativeTextureAsset asset)
+    {
+        if (_nativeTextures.TryGet(asset, out var cached)) return cached;
+        // Finish any batch holding a handle before eviction. Recorded frames keep
+        // asset identities, so an evicted image can be reloaded safely on replay.
+        Flush();
+        var image = asset.GetTexture();
+        if (image == null) return null;
+        _gl.ActiveTexture(TextureUnit.Texture7);
+        uint handle = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, handle);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(image.Nearest ? GLEnum.Nearest : GLEnum.Linear));
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)(image.Nearest ? GLEnum.Nearest : GLEnum.Linear));
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+            (uint)image.Width, (uint)image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, image.Rgba);
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        var entry = new NativeGpuTexture(handle, image.Coverage);
+        _nativeTextures.Add(asset, entry, (long)image.Width * image.Height * 4);
+        Diagnostics.PerformanceDiagnostics.Texture(_preparingTexture, _nativeTextures.Bytes, _nativeTextures.PeakBytes, _nativeTextures.Evictions);
+        return entry;
+    }
+
+    public bool PrepareNativeTexture(Assets.Native.NativeTextureAsset asset)
+    {
+        bool previous = _preparingTexture; _preparingTexture = true;
+        try { return EnsureNativeTexture(asset) != null; }
+        finally { _preparingTexture = previous; }
+    }
+    public int RegisterNativeImage(Assets.Native.NativeTextureAsset asset)
+    {
+        if (!PrepareNativeTexture(asset)) return -1;
+        int id = _images.Count;
+        _images.Add(0); // Stable identity; the residency cache owns its GL handle.
+        _nativeImages.Add(id, asset);
+        return id;
     }
 
     private unsafe uint EnsureRepClut(Assets.ReplacementClut clut)
@@ -856,6 +907,9 @@ public sealed class GlCore : IGpuBackend
         {
             _waterWake = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, _waterWake);
+            _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+                Assets.Native.WaterWakeField.Size, Assets.Native.WaterWakeField.Size, 0,
+                PixelFormat.Rgba, PixelType.UnsignedByte, ReadOnlySpan<byte>.Empty);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Linear);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Linear);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
@@ -865,9 +919,11 @@ public sealed class GlCore : IGpuBackend
         if (!ReferenceEquals(camera, _wakeCamera))
         {
             _wakePixels ??= new byte[Assets.Native.WaterWakeField.Size * Assets.Native.WaterWakeField.Size * 4];
+            long wakeStart = Diagnostics.PerformanceDiagnostics.Start();
             _wakeRasterSegments = Assets.Native.WaterWakeField.Rasterize(camera, _motionSegments, _wakePixels);
-            _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
-                Assets.Native.WaterWakeField.Size, Assets.Native.WaterWakeField.Size, 0,
+            Diagnostics.PerformanceDiagnostics.Wake(wakeStart);
+            _gl.TexSubImage2D<byte>(TextureTarget.Texture2D, 0, 0, 0,
+                Assets.Native.WaterWakeField.Size, Assets.Native.WaterWakeField.Size,
                 PixelFormat.Rgba, PixelType.UnsignedByte, _wakePixels);
             _wakeCamera = camera;
         }
@@ -910,6 +966,9 @@ public sealed class GlCore : IGpuBackend
         {
             _riderShadow = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, _riderShadow);
+            _gl.TexImage2D<byte>(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+                Assets.Native.RiderShadowMap.Size, Assets.Native.RiderShadowMap.Size, 0,
+                PixelFormat.Rgba, PixelType.UnsignedByte, ReadOnlySpan<byte>.Empty);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
@@ -917,11 +976,14 @@ public sealed class GlCore : IGpuBackend
         }
         else _gl.BindTexture(TextureTarget.Texture2D, _riderShadow);
         if (ReferenceEquals(_shadowCamera, camera)) return;
-        var pixels = Assets.Native.RiderShadowMap.Rasterize(camera);
-        fixed (byte* p = pixels)
-            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
-                Assets.Native.RiderShadowMap.Size, Assets.Native.RiderShadowMap.Size, 0,
-                PixelFormat.Rgba, PixelType.UnsignedByte, p);
+        _shadowDepths ??= new ushort[Assets.Native.RiderShadowMap.Size * Assets.Native.RiderShadowMap.Size];
+        _shadowPixels ??= new byte[Assets.Native.RiderShadowMap.Size * Assets.Native.RiderShadowMap.Size * 4];
+        long shadowStart = Diagnostics.PerformanceDiagnostics.Start();
+        Assets.Native.RiderShadowMap.Rasterize(camera, _shadowDepths, _shadowPixels);
+        Diagnostics.PerformanceDiagnostics.Shadow(shadowStart);
+        _gl.TexSubImage2D<byte>(TextureTarget.Texture2D, 0, 0, 0,
+            Assets.Native.RiderShadowMap.Size, Assets.Native.RiderShadowMap.Size,
+            PixelFormat.Rgba, PixelType.UnsignedByte, _shadowPixels);
         _shadowCamera = camera;
     }
 
@@ -1459,8 +1521,17 @@ public sealed class GlCore : IGpuBackend
         _gl.BindTexture(TextureTarget.Texture2D, destTex);
         if (_kImage >= 0 && _kImage < _images.Count)
         {
+            // Normal preparation happens at the loader boundary. A cache miss
+            // during replay is safe: this batch has no replacement handle yet.
+            uint imageHandle = _images[_kImage];
+            if (_nativeImages.TryGetValue(_kImage, out var asset))
+            {
+                int pending = _count; _count = 0;
+                try { imageHandle = EnsureNativeTexture(asset)?.Handle ?? 0; }
+                finally { _count = pending; }
+            }
             _gl.ActiveTexture(TextureUnit.Texture2);
-            _gl.BindTexture(TextureTarget.Texture2D, _images[_kImage]);
+            _gl.BindTexture(TextureTarget.Texture2D, imageHandle);
         }
 
         if (_kRepTex != 0)
@@ -1908,6 +1979,13 @@ public sealed class GlCore : IGpuBackend
 
     public void Dispose()
     {
+        _nativeTextures.Clear(); _nativeImages.Clear();
+        foreach (uint texture in _images) if (texture != 0) _gl.DeleteTexture(texture);
+        _images.Clear();
+        foreach (uint texture in _repTextures.Values) _gl.DeleteTexture(texture);
+        _repTextures.Clear();
+        foreach (uint texture in _repCluts.Values) _gl.DeleteTexture(texture);
+        _repCluts.Clear();
         if (_waterWake != 0) { _gl.DeleteTexture(_waterWake); _waterWake = 0; }
         foreach(uint texture in _worldMaps.Values)_gl.DeleteTexture(texture);_worldMaps.Clear();
         if (_waterDetail != 0) { _gl.DeleteTexture(_waterDetail); _waterDetail = 0; }

@@ -16,19 +16,38 @@ public sealed class NativeTextureAsset(string key, string file, int sourceWidth,
     public bool WaterSpray { get; } = allowEffectCoverage && waterSpray;
     public bool SmoothCutout { get; } = smoothCutout && !allowEffectCoverage;
     public int UiTileSize { get; } = !allowEffectCoverage && uiTileSize is > 1 and <= 256 ? uiTileSize : 0;
-    public bool CoverageLoaded => _texture?.Coverage == true;
+    public bool CoverageLoaded { get; private set; }
+    public string? ExpectedSha256 { get; init; }
     public long BoundCommands, ResolvedCommands;
-    private bool _attempted;
-    private ReplacementTexture? _texture;
+    private bool _failed;
+    private static readonly object CacheGate = new();
+    private static readonly ResidentCache<NativeTextureAsset, ReplacementTexture> Cache = new(
+        ResidentCache<NativeTextureAsset, ReplacementTexture>.BudgetFromEnvironment("JETMOTO_CPU_TEXTURE_MB", 64));
+    public static (long Bytes, long PeakBytes, long Evictions) CacheStats
+    { get { lock (CacheGate) return (Cache.Bytes, Cache.PeakBytes, Cache.Evictions); } }
+    public static void ClearDecodedCache() { lock (CacheGate) Cache.Clear(); }
     public ReplacementTexture? GetTexture()
     {
-        if (_attempted) return _texture;
-        _attempted = true;
+        lock (CacheGate)
+        {
+            if (Cache.TryGet(this, out var resident)) return resident;
+            if (_failed) return null;
+            var decoded = Decode();
+            if (decoded == null) _failed = true;
+            else Cache.Add(this, decoded, decoded.Rgba.LongLength);
+            return decoded;
+        }
+    }
+    private ReplacementTexture? Decode()
+    {
         if (!File.Exists(FilePath)) return null;
         try
         {
             if (new FileInfo(FilePath).Length > 64 * 1024 * 1024) throw new InvalidDataException("PNG exceeds the 64 MiB file limit.");
             var data = File.ReadAllBytes(FilePath);
+            if (ExpectedSha256 is {} expected && !Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(data))
+                .Equals(expected, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Authored PNG checksum mismatch.");
             // Bound allocation before handing a file to the image decoder. Only PNG is accepted.
             if (data.Length < 33 || data.Length > 64 * 1024 * 1024 ||
                 !data.AsSpan(0, 8).SequenceEqual(new byte[] {137,80,78,71,13,10,26,10}) ||
@@ -62,17 +81,19 @@ public sealed class NativeTextureAsset(string key, string file, int sourceWidth,
                 for (int i = 3; i < image.Data.Length; i += 4)
                     if (image.Data[i] is not (0 or 128 or 255))
                         throw new InvalidDataException("Alpha must be 0 (transparent), 128 (STP), or 255 (opaque).");
-            _texture = new ReplacementTexture { Width=image.Width, Height=image.Height,
+            var texture = new ReplacementTexture { Width=image.Width, Height=image.Height,
                 ScaleX=4, ScaleY=4, Rgba=image.Data, Nearest=!coverage, Coverage=coverage };
             System.Threading.Interlocked.Increment(ref NativeTextureBindings.ImagesLoaded);
             if (coverage) {
                 System.Threading.Interlocked.Increment(ref NativeTextureBindings.EffectImagesLoaded);
                 Console.WriteLine($"[JetMoto:effects] Original asset {Key}: 4x replacement art, smooth coverage, original animation.");
             }
+            CoverageLoaded = coverage;
+            return texture;
         }
         catch (Exception e) when (e is not OutOfMemoryException)
         { Console.WriteLine($"[JetMoto:native-textures] Original fallback for {Key}: {e.Message}"); }
-        return _texture;
+        return null;
     }
 }
 

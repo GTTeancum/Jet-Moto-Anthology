@@ -59,3 +59,24 @@ Run-JetMoto.cmd launches the recorded deployment. Play-VisualQA.cmd and the inst
 Build-Windows.ps1 publishes one self-contained JetMoto.exe with managed assemblies, the .NET runtime, native libraries, and debug symbols bundled inside. No dependency DLLs belong beside the executable. Textures, Lighting, and the user's original disc remain external.
 
 The bundle extracts its dependencies into the runtime's per-user cache on first launch. Full extraction preserves assembly locations needed by runtime integration and mod compilation. The game explicitly anchors disc discovery, artwork, saves, and logs to the actual process executable directory, rather than the extraction cache. A first-launch check must use a fresh cache and no loose DLLs, and inspect native menu and gameplay captures.
+
+## Audio diagnosis
+
+Normal launches write an audio summary every ten seconds to logs/last-run.log: mixed frame count, output restarts, maximum mixer service gap, maximum SPU mix duration, buffered CD samples, and prevented reverb arithmetic overflows. One early restart can occur while the SPU attaches; increasing restarts during gameplay indicate starvation.
+
+AudioTests covers stopped-queue recovery, a stall during refill, repeated recovery without queue growth, and loud reverb arithmetic. Its --device option injects five 200 ms stalls into a test-only SPU using OpenAL's null device. This produces no audible output or desktop input.
+
+Run-ReleaseValidation.ps1 normally mutes audio. Pass -AudioOutput to exercise the real sound device while rendering and replay input remain confined to the hidden game process. This can produce audible game sound. For silent mixing diagnostics, use JETMOTO_AUDIO_PROBE=1 together with ALSOFT_DRIVERS=null. Neither numerical checks nor a successful audio-device launch proves audible quality; distinguish these from listening tests.
+Set `JETMOTO_AUDIO_CAPTURE` to an absolute WAV filename to capture the mix before OpenAL. The mixer stores up to 180 seconds of stereo 44.1 kHz PCM in preallocated memory and writes the file on normal shutdown. Use an existing writable parent directory. This is opt-in diagnosis, not enabled in normal play; no host recording device is used.
+
+## Performance and memory
+
+Normal launches leave execution tracing disabled; `--trace` enables it for diagnosis and `--no-trace` remains compatible. Stop checks remain enabled.
+
+Decoded native/menu images use a shared 64 MiB CPU cache. Native GPU images use a 128 MiB cache, with stable menu registrations and reload after eviction. These budgets cover image residency, not total process/driver memory; decoder scratch space, queued references, render targets and original game data are additional. One image larger than the budget is permitted. Diagnostic overrides `JETMOTO_CPU_TEXTURE_MB` and `JETMOTO_GPU_TEXTURE_MB` accept 16–1024 MiB. Smaller budgets trade memory for reload work and should not be advertised as a free speed boost.
+
+Known native banks and menu images are prepared at loading boundaries. Menu PNG checksum validation occurs when the image is decoded, while original-disc identity checks remain at startup. Dynamically identified regions and evicted images can still load on first use. Shadow CPU buffers and shadow/wake GPU storage are reused without reducing resolution; camera inverses are cached once per camera.
+
+Set `JETMOTO_PERF=1` before launch to include bounded performance summaries in the normal log. These report host presentation interval percentiles, allocation rate, GC counts, shadow/wake CPU time, native texture residency, uploads and draw-time misses. Host presentation calls are not a measurement of physical display delivery. Captures and diagnostics add overhead; use ordinary uncaptured play for representative timing. RendererTests also uses GPU elapsed-time queries on GL 3.3/4.5 for repeatable sunlit, terrain-shadow and rider-shadow fixtures at 1x/2x/4x.
+
+The original lighting shader remains in production. Pixel-equivalent shortcut experiments had workload-dependent regressions, including roughly 10–12% slower sunlit fixtures in some local 4x measurements, and variable warm-up stalls. A universal performance improvement was not established. The GPU fixture remains for measurements on other drivers before revisiting this change.

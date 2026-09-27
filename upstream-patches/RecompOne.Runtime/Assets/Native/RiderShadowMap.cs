@@ -13,6 +13,16 @@ public static class RiderShadowMap
     {
         ushort[] depths = new ushort[Size * Size];
         byte[] pixels = new byte[Size * Size * 4];
+        Rasterize(camera, depths, pixels);
+        return pixels;
+    }
+
+    public static void Rasterize(WorldCamera camera, Span<ushort> depths, Span<byte> pixels)
+    {
+        if (depths.Length != Size * Size || pixels.Length != Size * Size * 4)
+            throw new ArgumentException("Shadow buffer dimensions");
+        depths.Clear();
+        pixels.Clear();
         Vector3 light = camera.Scene.Sunlight;
         Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitZ, light));
         Vector3 up = Vector3.Cross(light, right);
@@ -51,6 +61,5 @@ public static class RiderShadowMap
                 pixels[index * 4 + 3] = 255;
             }
         }
-        return pixels;
     }
 }

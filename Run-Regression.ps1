@@ -5,6 +5,8 @@ $dotnet = 'C:\Programming\JetMoto-RecompOne-Input\cache\dotnet-win-10.0.401\dotn
 $report = Join-Path $PSScriptRoot "reports\build12\$Name"
 New-Item -ItemType Directory -Force -Path $report | Out-Null
 $tests = @(
+    @{ Project = 'PerformanceTests'; Args = @() },
+    @{ Project = 'AudioTests'; Args = @('--device') },
     @{ Project = 'TrackAccessTests'; Args = @() },
     @{ Project = 'ReplayTests'; Args = @() },
     @{ Project = 'WorldLightingTests'; Args = @() },

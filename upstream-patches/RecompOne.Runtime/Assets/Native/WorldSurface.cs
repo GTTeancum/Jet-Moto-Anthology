@@ -65,6 +65,7 @@ public sealed class WorldCamera(WorldScene scene,WorldBasis rotation,Vector3 tra
     public readonly Dictionary<int, RiderBounds> Riders = [];
     public WorldScene Scene {get;}=scene;
     public WorldBasis Rotation {get;}=rotation;
+    public WorldBasis InverseRotation {get;}=rotation.Inverse;
     public Vector3 Translation {get;}=translation;
     public Vector3 Eye {get;}=rotation.Inverse.Apply(-translation);
     public float Time {get;}=time;
@@ -110,7 +111,7 @@ public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal
     {
         worldQ=default;
         if (!(Projection>0)||!float.IsFinite(x+y)) return false;
-        var ray=Camera.Rotation.Inverse.Apply(new((x-CenterX)/Projection,(y-CenterY)/Projection,1));
+        var ray=Camera.InverseRotation.Apply(new((x-CenterX)/Projection,(y-CenterY)/Projection,1));
         float planeDistance=Vector3.Dot(Point-Camera.Eye,Normal);
         if (MathF.Abs(planeDistance)<1e-6f) return false;
         float q=Vector3.Dot(ray,Normal)/planeDistance;
@@ -122,7 +123,7 @@ public sealed class WorldSurface(WorldCamera camera,Vector3 point,Vector3 normal
     {
         world=default;inverseDepth=0;
         if(!(Projection>0) || !float.IsFinite(x)||!float.IsFinite(y))return false;
-        Vector3 ray=Camera.Rotation.Inverse.Apply(new((x-CenterX)/Projection,(y-CenterY)/Projection,1));
+        Vector3 ray=Camera.InverseRotation.Apply(new((x-CenterX)/Projection,(y-CenterY)/Projection,1));
         float denominator=Vector3.Dot(ray,Normal);
         if(MathF.Abs(denominator)<1e-6f)return ScreenFill && FillFallback(ray,out world,out inverseDepth);
         float depth=Vector3.Dot(Point-Camera.Eye,Normal)/denominator;

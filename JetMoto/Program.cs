@@ -63,7 +63,7 @@ internal static class Program
     {
         string? disc = null;
         int smokeSeconds = 0;
-        bool validateOnly = false, trace = true, unlockAll = false;
+        bool validateOnly = false, trace = false, unlockAll = false;
         bool verbose = Environment.GetEnvironmentVariable("JETMOTO_VERBOSE") == "1";
         try
         {
@@ -77,6 +77,7 @@ internal static class Program
                             "  --disc PATH       Override with an extracted CUE and all its BIN tracks.\n" +
                             "  --validate-disc   Validate the selected disc without opening a window.\n" +
                             "  --smoke-seconds N Stop after N seconds (exit 3; NOT a playability check).\n" +
+                            "  --trace           Enable diagnostic PC breadcrumbs (off by default).\n" +
                             "  --no-trace        Disable PC breadcrumbs; keeps cooperative stop checks.\n" +
                             "  --no-dialogs      Suppress Windows error dialogs for automated tools.\n" +
                             "  --headless        Render offscreen with no desktop input; implies --mute.\n" +
@@ -97,6 +98,7 @@ internal static class Program
                         break;
                     case "--mute": Environment.SetEnvironmentVariable("JETMOTO_MUTE", "1"); break;
                     case "--no-trace": trace = false; break;
+                    case "--trace": trace = true; break;
                     case "--validate-disc": validateOnly = true; break;
                     case "--smoke-seconds":
                         if (++i >= args.Length || !int.TryParse(args[i], out smokeSeconds) || smokeSeconds < 1 || smokeSeconds > 3600)
@@ -249,6 +251,7 @@ internal static class Program
             string line = $"[JetMoto:heartbeat] {WorldLighting.Summary} {Widescreen.Diagnostics} {RiderDetail.Diagnostics} {RenderArena.Diagnostics} {NativeTextures.Summary} {RecompOne.Runtime.Pgxp.PerspectiveDiagnostics.Summary} seconds={watch.Elapsed.TotalSeconds:F0} vblanks={Interrupts.VBlankCount} " +
                 $"breadcrumb=0x{ExecutionTrace.LastAddress:X8} lastFunction=0x{ExecutionTrace.LastFunction:X8} ra=0x{c?.RA:X8} sp=0x{c?.SP:X8}";
             Console.WriteLine(line);
+            if (PerformanceDiagnostics.Enabled) Console.WriteLine("[JetMoto:performance] " + PerformanceDiagnostics.Summary());
             File.WriteAllText("logs/last-state.txt", line + "\nApproximate asynchronous breadcrumbs, not a stack trace.\nRecent functions: " +
                 string.Join(" ", ExecutionTrace.RecentFunctions().Select(a => $"0x{a:X8}")) + Environment.NewLine);
         }

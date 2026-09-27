@@ -11,6 +11,8 @@ using Silk.NET.Windowing;
 // Each backend runs in its own process: Silk keeps global native windowing state.
 // Optional --backend Gl21|Gl33|Gl45 selects one backend; unavailable contexts fail, not skip.
 int passed = 0, failed = 0;
+// Exercise eviction with a deliberately small budget; affects this test process only.
+Environment.SetEnvironmentVariable("JETMOTO_GPU_TEXTURE_MB", "16");
 void Check(bool ok, string message)
 {
     if (ok) { passed++; Console.WriteLine("PASS: " + message); }
@@ -145,6 +147,8 @@ Test(kind + " renderer", () =>
             NativeTexturePixels.Run(core, $"{kind} {scale}x native assets", Check);
             EffectPixels.Run(core, $"{kind} {scale}x effect coverage", Check);
             CutoutPixels.Run(core, $"{kind} {scale}x buoy cutout", Check);
+            TextureCachePixels.Run(core, $"{kind} {scale}x bounded cache", Check);
+            if(kind!=GlBackendKind.Gl21) LightingTiming.Run(core,gl,$"{kind} {scale}x",Check);
             // Source texture lives outside the 64x64 output test region.
             ushort[] texture = Enumerable.Repeat((ushort)0x4210, 64 * 64).ToArray();
             core.WriteVram(640, 256, 64, 64, texture);
