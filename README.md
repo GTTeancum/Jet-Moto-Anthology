@@ -29,7 +29,7 @@ Screenshots captured directly from the game. Current work covers the first Jet M
 
 ## Playing
 
-Download the [Windows release candidate](https://github.com/GTTeancum/Jet-Moto-Anthology/releases/tag/v0.12.0-rc.1).
+Download the [Jet Moto Anthology 1.0 for Windows](https://github.com/GTTeancum/Jet-Moto-Anthology/releases/tag/v1.0).
 
 Use a self-contained Windows x64 package and your own original **Jet Moto (USA)** disc image. Keep its CUE and all 14 referenced BIN tracks together beside `JetMoto.exe`, then launch the executable. Runtime and native dependencies are bundled inside the EXE. Keep the `Textures` and `Lighting` folders intact. A packaged build needs no separate .NET installation.
 
@@ -51,7 +51,7 @@ Launch without this switch for normal progression; ordinary saving still works. 
 
 This repository contains the project, runtime patches, asset tools, and tests. A fresh clone also needs the local RecompOne input kit, generated game source, and texture assets before it can build. See the [development guide](docs/development.md) for the Windows workflow and repository layout.
 
-The current 0.12.0 candidate passed regression, renderer, deployment, and package checks, with native gameplay samples inspected on all ten tracks. Full races, exhaustive multiplayer coverage, and audio listening remain outside that validation. See [validation status](docs/validation.md) for evidence and rendering limits.
+Release 1.0 includes all ten tracks, refreshed artwork, widescreen racing and local two-player play.
 
 For a problem report, include the track, mode, steps to reproduce, and a screenshot when useful. `Collect-Logs.cmd` collects diagnostic logs and metadata without disc images, saves, or texture artwork; logs can contain local paths.
 

@@ -1,7 +1,7 @@
 {
   "project": "Jet Moto / RecompOne",
   "build": "12",
-  "version": "0.12.0",
+  "version": "1.0",
   "status": "Split-screen/pause regressions and installed first-launch smoke passed; broader release gates remain open",
   "upstreamCommit": "d81dec8c9622fdcd0865d73588a3baa8d3c3a605",
   "sdk": "10.0.401",
