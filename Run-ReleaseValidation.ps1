@@ -11,7 +11,9 @@ $ErrorActionPreference = 'Stop'
 $appRoot = (Resolve-Path -LiteralPath $AppDirectory).Path
 $report = Join-Path $PSScriptRoot "reports/build12/$Name"
 if(Test-Path -LiteralPath $report){throw 'Use a fresh report name.'}
-if(!(Test-Path -LiteralPath (Join-Path $appRoot 'release-artwork.json'))){throw 'Expected an isolated release candidate.'}
+foreach($required in @('JetMoto.exe','Textures/Native4x-Test/pack-manifest.json','Lighting/catalog.json')){
+    if(!(Test-Path -LiteralPath (Join-Path $appRoot $required))){throw "Missing player artifact: $required"}
+}
 New-Item -ItemType Directory -Path $report | Out-Null
 $env:JETMOTO_WORLD_WAKE=$null
 $env:JETMOTO_MENU_BACKGROUNDS=$null
@@ -23,7 +25,7 @@ $env:JETMOTO_CAPTURE_END=[string]$CaptureEnd
 $env:JETMOTO_CAPTURE_EVERY=[string]$CaptureEvery
 $env:JETMOTO_CAPTURE_EFFECT_FRAMES='0'
 $exe=Join-Path $appRoot 'JetMoto.exe'
-$before=@('JetMoto.exe','release-artwork.json') | ForEach-Object {
+$before=@('JetMoto.exe','Textures/Native4x-Test/pack-manifest.json','Lighting/catalog.json') | ForEach-Object {
     Get-FileHash -LiteralPath (Join-Path $appRoot $_)
 }
 $options=@('--headless','--mute','--no-dialogs','--smoke-seconds',"$Seconds")

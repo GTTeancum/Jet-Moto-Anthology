@@ -57,5 +57,6 @@ $manifest | Add-Member -NotePropertyName packagedRegions -NotePropertyValue @($r
 [IO.File]::WriteAllText($manifestPath,($manifest | ConvertTo-Json -Depth 100),[Text.UTF8Encoding]::new($false))
 $record = [ordered]@{ overridesPromoted=$plan.Count; menuImages=$menuPlan.Count;
     assets=@($plan | ForEach-Object { [ordered]@{ path=$_.Destination.Substring($publish.TrimEnd('\','/').Length + 1); sha256=$_.Hash } }) }
-[IO.File]::WriteAllText((Join-Path $publish 'release-artwork.json'),($record | ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
+New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot '.build/release-records') | Out-Null
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot '.build/release-records/release-artwork.json'),($record | ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
 Write-Host "Promoted $($plan.Count) native replacements and $($menuPlan.Count) menu images into fresh publish."

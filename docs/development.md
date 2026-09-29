@@ -35,7 +35,7 @@ Run-Validation.ps1 supports development captures; Play-VisualQA.cmd launches the
 ./Verify-Release.ps1 -Archive .build/distributions/JetMoto-Windows.zip
 ```
 
-The gate report must have passed set to true and set singleFile to true and identify the exact bundled executable through exeSha256. Packaging uses .build/deployment.json, refuses existing output paths, and includes the self-contained runtime, artwork, instructions, licenses, and verification manifests. It excludes disc images and user data.
+Stable packages require passed=true, singleFile=true and the exact tested exeSha256. An explicitly selected -Prerelease permits incomplete full validation only with inspected native smoke evidence and restored user data; the original failed/full-validation status is preserved. Packaging uses .build/deployment.json and refuses existing output paths. Player archives contain only the executable, runtime artwork, instructions and licenses. Internal checksums, provenance and gate reports stay outside the archive in <archive>.records; Verify-Release.ps1 reads those records. The separate archive checksum is also retained for publication. Disc images, saves, settings, logs and test launchers are excluded. Artwork staging records live under .build/release-records.
 
 ## Repository layout
 
@@ -52,7 +52,7 @@ Old numbered build reports and cloud handoffs were retired from the source tree.
 
 The current playable installation is D:\Programming\GitHub\Jet-Moto-Recomp\Jet Moto, beside the original CUE and BIN tracks. Publishing into .build is only staging. Delivery requires deploying the self-contained runtime, dependencies, and accepted HD artwork into that user-facing folder, then validating the executable there with adjacent-disc discovery and fresh settings/save state. Back up and restore existing user data for this test.
 
-Run-JetMoto.cmd launches the recorded deployment. Play-VisualQA.cmd and the installed run.bat launch the same user-facing game with all tracks available. Normal JetMoto.exe launch enables the HD visuals without extra environment flags.
+Run-JetMoto.cmd launches the recorded deployment. Play-VisualQA.cmd launches the same user-facing game with all tracks available for development testing. Normal JetMoto.exe launch enables the HD visuals without extra environment flags.
 
 ## Single-executable publishing
 

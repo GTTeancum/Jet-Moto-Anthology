@@ -29,6 +29,8 @@ Screenshots captured directly from the game. Current work covers the first Jet M
 
 ## Playing
 
+Download the [Windows release candidate](https://github.com/GTTeancum/Jet-Moto-Anthology/releases/tag/v0.12.0-rc.1).
+
 Use a self-contained Windows x64 package and your own original **Jet Moto (USA)** disc image. Keep its CUE and all 14 referenced BIN tracks together beside `JetMoto.exe`, then launch the executable. Runtime and native dependencies are bundled inside the EXE. Keep the `Textures` and `Lighting` folders intact. A packaged build needs no separate .NET installation.
 
 If your disc is elsewhere:
@@ -43,7 +45,7 @@ To make all ten tracks selectable for a testing session:
 .\JetMoto.exe --unlockall
 ```
 
-The packaged `run.bat` enables this switch. Omit it for normal progression; ordinary saving still works. Disc images and saves are not included in this repository or release packages.
+Launch without this switch for normal progression; ordinary saving still works. Disc images and saves are not included in this repository or release packages.
 
 ## Building and testing
 
